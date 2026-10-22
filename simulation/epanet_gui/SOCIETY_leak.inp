@@ -1,0 +1,465 @@
+[TITLE]
+
+[JUNCTIONS]
+;ID                      Elevation       Demand Pattern                 
+ A-PUMPOUT                          0               0                            ;
+ A-BASE                             0               0                            ;
+ A-D4                              13               0                            ;
+ A-401                             13         0.00625 household                  ;
+ A-402                             13         0.00625 household                  ;
+ A-403                             13         0.00625 household                  ;
+ A-404                             13         0.00625 household                  ;
+ A-D3                              10               0                            ;
+ A-301                             10         0.00625 household                  ;
+ A-302                             10         0.00625 household                  ;
+ A-303                             10         0.00625 household                  ;
+ A-304                             10         0.00625 household                  ;
+ A-D2                               7               0                            ;
+ A-201                              7         0.00625 household                  ;
+ A-202                              7         0.00625 household                  ;
+ A-203                              7         0.00625 household                  ;
+ A-204                              7         0.00625 household                  ;
+ A-D1                               4               0                            ;
+ A-101                              4         0.00625 household                  ;
+ A-102                              4         0.00625 household                  ;
+ A-103                              4         0.00625 household                  ;
+ A-104                              4         0.00625 household                  ;
+ A-D0                               1               0                            ;
+ A-G01                              1         0.00625 household                  ;
+ A-G02                              1         0.00625 household                  ;
+ A-G03                              1         0.00625 household                  ;
+ A-G04                              1         0.00625 household                  ;
+ B-PUMPOUT                          0               0                            ;
+ B-BASE                             0               0                            ;
+ B-D4                              13               0                            ;
+ B-401                             13         0.00625 household                  ;
+ B-402                             13         0.00625 household                  ;
+ B-403                             13         0.00625 household                  ;
+ B-404                             13         0.00625 household                  ;
+ B-D3                              10               0                            ;
+ B-301                             10         0.00625 household                  ;
+ B-302                             10         0.00625 household                  ;
+ B-303                             10         0.00625 household                  ;
+ B-304                             10         0.00625 household                  ;
+ B-D2                               7               0                            ;
+ B-201                              7         0.00625 household                  ;
+ B-202                              7         0.00625 household                  ;
+ B-203                              7         0.00625 household                  ;
+ B-204                              7         0.00625 household                  ;
+ B-D1                               4               0                            ;
+ B-101                              4         0.00625 household                  ;
+ B-102                              4         0.00625 household                  ;
+ B-103                              4         0.00625 household                  ;
+ B-104                              4         0.00625 household                  ;
+ B-D0                               1               0                            ;
+ B-G01                              1         0.00625 household                  ;
+ B-G02                              1         0.00625 household                  ;
+ B-G03                              1         0.00625 household                  ;
+ B-G04                              1         0.00625 household                  ;
+ C-PUMPOUT                          0               0                            ;
+ C-BASE                             0               0                            ;
+ C-D4                              13               0                            ;
+ C-401                             13         0.00625 household                  ;
+ C-402                             13         0.00625 household                  ;
+ C-403                             13         0.00625 household                  ;
+ C-404                             13         0.00625 household                  ;
+ C-D3                              10               0                            ;
+ C-301                             10         0.00625 household                  ;
+ C-302                             10         0.00625 household                  ;
+ C-303                             10         0.00625 household                  ;
+ C-304                             10         0.00625 household                  ;
+ C-D2                               7               0                            ;
+ C-201                              7         0.00625 household                  ;
+ C-202                              7         0.00625 household                  ;
+ C-203                              7         0.00625 household                  ;
+ C-204                              7         0.00625 household                  ;
+ C-D1                               4               0                            ;
+ C-101                              4         0.00625 household                  ;
+ C-102                              4         0.00625 household                  ;
+ C-103                              4         0.00625 household                  ;
+ C-104                              4         0.00625 household                  ;
+ C-D0                               1               0                            ;
+ C-G01                              1         0.00625 household                  ;
+ C-G02                              1         0.00625 household                  ;
+ C-G03                              1         0.00625 household                  ;
+ C-G04                              1         0.00625 household                  ;
+ D-PUMPOUT                          0               0                            ;
+ D-BASE                             0               0                            ;
+ D-D4                              13               0                            ;
+ D-401                             13         0.00625 household                  ;
+ D-402                             13         0.00625 household                  ;
+ D-403                             13         0.00625 household                  ;
+ D-404                             13         0.00625 household                  ;
+ D-D3                              10               0                            ;
+ D-301                             10         0.00625 household                  ;
+ D-302                             10         0.00625 household                  ;
+ D-303                             10         0.00625 household                  ;
+ D-304                             10         0.00625 household                  ;
+ D-D2                               7               0                            ;
+ D-201                              7         0.00625 household                  ;
+ D-202                              7         0.00625 household                  ;
+ D-203                              7         0.00625 household                  ;
+ D-204                              7         0.00625 household                  ;
+ D-D1                               4               0                            ;
+ D-101                              4         0.00625 household                  ;
+ D-102                              4         0.00625 household                  ;
+ D-103                              4         0.00625 household                  ;
+ D-104                              4         0.00625 household                  ;
+ D-D0                               1               0                            ;
+ D-G01                              1         0.00625 household                  ;
+ D-G02                              1         0.00625 household                  ;
+ D-G03                              1         0.00625 household                  ;
+ D-G04                              1         0.00625 household                  ;
+ C-D1-BURST                         4               0                            ;
+
+[RESERVOIRS]
+;ID                                   Head                  Pattern
+ SUMP                              -1                            ;
+
+[TANKS]
+;ID                              Elevation           Init Level            Min Level            Max Level             Diameter           Min Volume Volume Curve         Overflow            
+ A-TANK                            16             1.5             0.2               2               3               0                                             ;
+ B-TANK                            16             1.5             0.2               2               3               0                                             ;
+ C-TANK                            16             1.5             0.2               2               3               0                                             ;
+ D-TANK                            16             1.5             0.2               2               3               0                                             ;
+
+[PIPES]
+;ID                   Node1                Node2                              Length             Diameter            Roughness           Minor Loss               Status
+ A-MAIN               A-PUMPOUT            A-BASE                            45              50             130               0                 Open   ;
+ A-RISE               A-BASE               A-TANK                            17              50             130               0                 Open   ;
+ A-DT4                A-TANK               A-D4                               3              50             130               0                 Open   ;
+ A-401-P              A-D4                 A-401                              8              25             130               0                 Open   ;
+ A-402-P              A-D4                 A-402                              8              25             130               0                 Open   ;
+ A-403-P              A-D4                 A-403                              8              25             130               0                 Open   ;
+ A-404-P              A-D4                 A-404                              8              25             130               0                 Open   ;
+ A-DT3                A-D4                 A-D3                               3              50             130               0                 Open   ;
+ A-301-P              A-D3                 A-301                              8              25             130               0                 Open   ;
+ A-302-P              A-D3                 A-302                              8              25             130               0                 Open   ;
+ A-303-P              A-D3                 A-303                              8              25             130               0                 Open   ;
+ A-304-P              A-D3                 A-304                              8              25             130               0                 Open   ;
+ A-DT2                A-D3                 A-D2                               3              50             130               0                 Open   ;
+ A-201-P              A-D2                 A-201                              8              25             130               0                 Open   ;
+ A-202-P              A-D2                 A-202                              8              25             130               0                 Open   ;
+ A-203-P              A-D2                 A-203                              8              25             130               0                 Open   ;
+ A-204-P              A-D2                 A-204                              8              25             130               0                 Open   ;
+ A-DT1                A-D2                 A-D1                               3              50             130               0                 Open   ;
+ A-101-P              A-D1                 A-101                              8              25             130               0                 Open   ;
+ A-102-P              A-D1                 A-102                              8              25             130               0                 Open   ;
+ A-103-P              A-D1                 A-103                              8              25             130               0                 Open   ;
+ A-104-P              A-D1                 A-104                              8              25             130               0                 Open   ;
+ A-DT0                A-D1                 A-D0                               3              50             130               0                 Open   ;
+ A-G01-P              A-D0                 A-G01                              8              25             130               0                 Open   ;
+ A-G02-P              A-D0                 A-G02                              8              25             130               0                 Open   ;
+ A-G03-P              A-D0                 A-G03                              8              25             130               0                 Open   ;
+ A-G04-P              A-D0                 A-G04                              8              25             130               0                 Open   ;
+ B-MAIN               B-PUMPOUT            B-BASE                            45              50             130               0                 Open   ;
+ B-RISE               B-BASE               B-TANK                            17              50             130               0                 Open   ;
+ B-DT4                B-TANK               B-D4                               3              50             130               0                 Open   ;
+ B-401-P              B-D4                 B-401                              8              25             130               0                 Open   ;
+ B-402-P              B-D4                 B-402                              8              25             130               0                 Open   ;
+ B-403-P              B-D4                 B-403                              8              25             130               0                 Open   ;
+ B-404-P              B-D4                 B-404                              8              25             130               0                 Open   ;
+ B-DT3                B-D4                 B-D3                               3              50             130               0                 Open   ;
+ B-301-P              B-D3                 B-301                              8              25             130               0                 Open   ;
+ B-302-P              B-D3                 B-302                              8              25             130               0                 Open   ;
+ B-303-P              B-D3                 B-303                              8              25             130               0                 Open   ;
+ B-304-P              B-D3                 B-304                              8              25             130               0                 Open   ;
+ B-DT2                B-D3                 B-D2                               3              50             130               0                 Open   ;
+ B-201-P              B-D2                 B-201                              8              25             130               0                 Open   ;
+ B-202-P              B-D2                 B-202                              8              25             130               0                 Open   ;
+ B-203-P              B-D2                 B-203                              8              25             130               0                 Open   ;
+ B-204-P              B-D2                 B-204                              8              25             130               0                 Open   ;
+ B-DT1                B-D2                 B-D1                               3              50             130               0                 Open   ;
+ B-101-P              B-D1                 B-101                              8              25             130               0                 Open   ;
+ B-102-P              B-D1                 B-102                              8              25             130               0                 Open   ;
+ B-103-P              B-D1                 B-103                              8              25             130               0                 Open   ;
+ B-104-P              B-D1                 B-104                              8              25             130               0                 Open   ;
+ B-DT0                B-D1                 B-D0                               3              50             130               0                 Open   ;
+ B-G01-P              B-D0                 B-G01                              8              25             130               0                 Open   ;
+ B-G02-P              B-D0                 B-G02                              8              25             130               0                 Open   ;
+ B-G03-P              B-D0                 B-G03                              8              25             130               0                 Open   ;
+ B-G04-P              B-D0                 B-G04                              8              25             130               0                 Open   ;
+ C-MAIN               C-PUMPOUT            C-BASE                            45              50             130               0                 Open   ;
+ C-RISE               C-BASE               C-TANK                            17              50             130               0                 Open   ;
+ C-DT4                C-TANK               C-D4                               3              50             130               0                 Open   ;
+ C-401-P              C-D4                 C-401                              8              25             130               0                 Open   ;
+ C-402-P              C-D4                 C-402                              8              25             130               0                 Open   ;
+ C-403-P              C-D4                 C-403                              8              25             130               0                 Open   ;
+ C-404-P              C-D4                 C-404                              8              25             130               0                 Open   ;
+ C-DT3                C-D4                 C-D3                               3              50             130               0                 Open   ;
+ C-301-P              C-D3                 C-301                              8              25             130               0                 Open   ;
+ C-302-P              C-D3                 C-302                              8              25             130               0                 Open   ;
+ C-303-P              C-D3                 C-303                              8              25             130               0                 Open   ;
+ C-304-P              C-D3                 C-304                              8              25             130               0                 Open   ;
+ C-DT2                C-D3                 C-D2                               3              50             130               0                 Open   ;
+ C-201-P              C-D2                 C-201                              8              25             130               0                 Open   ;
+ C-202-P              C-D2                 C-202                              8              25             130               0                 Open   ;
+ C-203-P              C-D2                 C-203                              8              25             130               0                 Open   ;
+ C-204-P              C-D2                 C-204                              8              25             130               0                 Open   ;
+ C-DT1                C-D2                 C-D1                               3              50             130               0                 Open   ;
+ C-101-P              C-D1                 C-101                              8              25             130               0                 Open   ;
+ C-102-P              C-D1                 C-102                              8              25             130               0                 Open   ;
+ C-103-P              C-D1                 C-103                              8              25             130               0                 Open   ;
+ C-104-P              C-D1                 C-104                              8              25             130               0                 Open   ;
+ C-DT0                C-D1                 C-D0                               3              50             130               0                 Open   ;
+ C-G01-P              C-D0                 C-G01                              8              25             130               0                 Open   ;
+ C-G02-P              C-D0                 C-G02                              8              25             130               0                 Open   ;
+ C-G03-P              C-D0                 C-G03                              8              25             130               0                 Open   ;
+ C-G04-P              C-D0                 C-G04                              8              25             130               0                 Open   ;
+ D-MAIN               D-PUMPOUT            D-BASE                            45              50             130               0                 Open   ;
+ D-RISE               D-BASE               D-TANK                            17              50             130               0                 Open   ;
+ D-DT4                D-TANK               D-D4                               3              50             130               0                 Open   ;
+ D-401-P              D-D4                 D-401                              8              25             130               0                 Open   ;
+ D-402-P              D-D4                 D-402                              8              25             130               0                 Open   ;
+ D-403-P              D-D4                 D-403                              8              25             130               0                 Open   ;
+ D-404-P              D-D4                 D-404                              8              25             130               0                 Open   ;
+ D-DT3                D-D4                 D-D3                               3              50             130               0                 Open   ;
+ D-301-P              D-D3                 D-301                              8              25             130               0                 Open   ;
+ D-302-P              D-D3                 D-302                              8              25             130               0                 Open   ;
+ D-303-P              D-D3                 D-303                              8              25             130               0                 Open   ;
+ D-304-P              D-D3                 D-304                              8              25             130               0                 Open   ;
+ D-DT2                D-D3                 D-D2                               3              50             130               0                 Open   ;
+ D-201-P              D-D2                 D-201                              8              25             130               0                 Open   ;
+ D-202-P              D-D2                 D-202                              8              25             130               0                 Open   ;
+ D-203-P              D-D2                 D-203                              8              25             130               0                 Open   ;
+ D-204-P              D-D2                 D-204                              8              25             130               0                 Open   ;
+ D-DT1                D-D2                 D-D1                               3              50             130               0                 Open   ;
+ D-101-P              D-D1                 D-101                              8              25             130               0                 Open   ;
+ D-102-P              D-D1                 D-102                              8              25             130               0                 Open   ;
+ D-103-P              D-D1                 D-103                              8              25             130               0                 Open   ;
+ D-104-P              D-D1                 D-104                              8              25             130               0                 Open   ;
+ D-DT0                D-D1                 D-D0                               3              50             130               0                 Open   ;
+ D-G01-P              D-D0                 D-G01                              8              25             130               0                 Open   ;
+ D-G02-P              D-D0                 D-G02                              8              25             130               0                 Open   ;
+ D-G03-P              D-D0                 D-G03                              8              25             130               0                 Open   ;
+ D-G04-P              D-D0                 D-G04                              8              25             130               0                 Open   ;
+ C-D1-BURSTPIPE       C-D1                 C-D1-BURST                         1              50             130               0               Closed   ;
+
+[PUMPS]
+;ID                   Node1                Node2                Properties          
+ A-PUMP               SUMP                 A-PUMPOUT            HEAD     pump                   ;
+ B-PUMP               SUMP                 B-PUMPOUT            HEAD     pump                   ;
+ C-PUMP               SUMP                 C-PUMPOUT            HEAD     pump                   ;
+ D-PUMP               SUMP                 D-PUMPOUT            HEAD     pump                   ;
+
+[VALVES]
+;ID                   Node1                Node2                            Diameter Type              Setting           Minor Loss
+
+[TAGS]
+;type      name       tag       
+
+[DEMANDS]
+;ID        Demand     Pattern   
+
+[STATUS]
+;ID        Setting   
+
+[PATTERNS]
+;ID        Multipliers
+
+household 0.188605 0.141454 0.094303 0.094303 0.282908 0.943026
+household 2.263261 2.640472 2.357564 1.508841 0.943026 0.754420
+household 0.848723 0.754420 0.565815 0.565815 0.754420 1.225933
+household 1.791749 1.980354 1.508841 0.943026 0.565815 0.282908
+
+[CURVES]
+;ID         X-Value      Y-Value     
+;PUMP: pump
+ pump           2.000000    25.000000   ;
+
+
+[CONTROLS]
+Pump A-PUMP Open IF Tank A-TANK below 0.5
+Pump A-PUMP Closed IF Tank A-TANK above 1.9
+Pump B-PUMP Open IF Tank B-TANK below 0.5
+Pump B-PUMP Closed IF Tank B-TANK above 1.9
+Pump C-PUMP Open IF Tank C-TANK below 0.5
+Pump C-PUMP Closed IF Tank C-TANK above 1.9
+Pump D-PUMP Open IF Tank D-TANK below 0.5
+Pump D-PUMP Closed IF Tank D-TANK above 1.9
+Pipe C-D1-BURSTPIPE Open AT TIME 6
+
+[RULES]
+
+[ENERGY]
+GLOBAL PRICE           0.0000
+
+[EMITTERS]
+;ID        Flow coefficient
+B-203      0.01565560727712874
+C-D1-BURST 0.41286141192238524
+
+[QUALITY]
+
+[SOURCES]
+;Node      Type       Quality    Pattern   
+
+[REACTIONS]
+;Type           Pipe/Tank               Coefficient
+
+ ORDER BULK 1
+ ORDER TANK 1
+ ORDER WALL 1
+ GLOBAL BULK 0.0000    
+ GLOBAL WALL 0.0000    
+
+[MIXING]
+;Tank ID             Model Fraction
+
+[TIMES]
+DURATION             24:00:00
+HYDRAULIC TIMESTEP   00:05:00
+QUALITY TIMESTEP     00:06:00
+PATTERN TIMESTEP     01:00:00
+PATTERN START        00:00:00
+REPORT TIMESTEP      00:15:00
+REPORT START         00:00:00
+START CLOCKTIME      00:00:00 AM
+RULE TIMESTEP        00:06:00
+STATISTIC            NONE      
+
+[REPORT]
+
+[OPTIONS]
+UNITS                LPS                 
+HEADLOSS             H-W                 
+SPECIFIC GRAVITY     1
+VISCOSITY            1
+TRIALS               200
+ACCURACY             0.001
+CHECKFREQ            2
+MAXCHECK             10
+UNBALANCED           STOP                
+PATTERN              1                   
+DEMAND MULTIPLIER    1
+EMITTER EXPONENT     0.5
+QUALITY              NONE                
+DIFFUSIVITY          1
+TOLERANCE            0.01
+
+[COORDINATES]
+;Node      X-Coord    Y-Coord   
+SUMP               75.000000000        -25.000000000
+A-PUMPOUT          66.000000000        -18.000000000
+A-BASE            -12.000000000          0.000000000
+A-TANK              0.000000000         60.000000000
+A-D4                0.000000000         45.000000000
+A-401             -12.000000000         47.000000000
+A-402              -4.000000000         43.000000000
+A-403               4.000000000         47.000000000
+A-404              12.000000000         43.000000000
+A-D3                0.000000000         35.000000000
+A-301             -12.000000000         37.000000000
+A-302              -4.000000000         33.000000000
+A-303               4.000000000         37.000000000
+A-304              12.000000000         33.000000000
+A-D2                0.000000000         25.000000000
+A-201             -12.000000000         27.000000000
+A-202              -4.000000000         23.000000000
+A-203               4.000000000         27.000000000
+A-204              12.000000000         23.000000000
+A-D1                0.000000000         15.000000000
+A-101             -12.000000000         17.000000000
+A-102              -4.000000000         13.000000000
+A-103               4.000000000         17.000000000
+A-104              12.000000000         13.000000000
+A-D0                0.000000000          5.000000000
+A-G01             -12.000000000          7.000000000
+A-G02              -4.000000000          3.000000000
+A-G03               4.000000000          7.000000000
+A-G04              12.000000000          3.000000000
+B-PUMPOUT          72.000000000        -18.000000000
+B-BASE             38.000000000          0.000000000
+B-TANK             50.000000000         60.000000000
+B-D4               50.000000000         45.000000000
+B-401              38.000000000         47.000000000
+B-402              46.000000000         43.000000000
+B-403              54.000000000         47.000000000
+B-404              62.000000000         43.000000000
+B-D3               50.000000000         35.000000000
+B-301              38.000000000         37.000000000
+B-302              46.000000000         33.000000000
+B-303              54.000000000         37.000000000
+B-304              62.000000000         33.000000000
+B-D2               50.000000000         25.000000000
+B-201              38.000000000         27.000000000
+B-202              46.000000000         23.000000000
+B-203              54.000000000         27.000000000
+B-204              62.000000000         23.000000000
+B-D1               50.000000000         15.000000000
+B-101              38.000000000         17.000000000
+B-102              46.000000000         13.000000000
+B-103              54.000000000         17.000000000
+B-104              62.000000000         13.000000000
+B-D0               50.000000000          5.000000000
+B-G01              38.000000000          7.000000000
+B-G02              46.000000000          3.000000000
+B-G03              54.000000000          7.000000000
+B-G04              62.000000000          3.000000000
+C-PUMPOUT          78.000000000        -18.000000000
+C-BASE             88.000000000          0.000000000
+C-TANK            100.000000000         60.000000000
+C-D4              100.000000000         45.000000000
+C-401              88.000000000         47.000000000
+C-402              96.000000000         43.000000000
+C-403             104.000000000         47.000000000
+C-404             112.000000000         43.000000000
+C-D3              100.000000000         35.000000000
+C-301              88.000000000         37.000000000
+C-302              96.000000000         33.000000000
+C-303             104.000000000         37.000000000
+C-304             112.000000000         33.000000000
+C-D2              100.000000000         25.000000000
+C-201              88.000000000         27.000000000
+C-202              96.000000000         23.000000000
+C-203             104.000000000         27.000000000
+C-204             112.000000000         23.000000000
+C-D1              100.000000000         15.000000000
+C-101              88.000000000         17.000000000
+C-102              96.000000000         13.000000000
+C-103             104.000000000         17.000000000
+C-104             112.000000000         13.000000000
+C-D0              100.000000000          5.000000000
+C-G01              88.000000000          7.000000000
+C-G02              96.000000000          3.000000000
+C-G03             104.000000000          7.000000000
+C-G04             112.000000000          3.000000000
+D-PUMPOUT          84.000000000        -18.000000000
+D-BASE            138.000000000          0.000000000
+D-TANK            150.000000000         60.000000000
+D-D4              150.000000000         45.000000000
+D-401             138.000000000         47.000000000
+D-402             146.000000000         43.000000000
+D-403             154.000000000         47.000000000
+D-404             162.000000000         43.000000000
+D-D3              150.000000000         35.000000000
+D-301             138.000000000         37.000000000
+D-302             146.000000000         33.000000000
+D-303             154.000000000         37.000000000
+D-304             162.000000000         33.000000000
+D-D2              150.000000000         25.000000000
+D-201             138.000000000         27.000000000
+D-202             146.000000000         23.000000000
+D-203             154.000000000         27.000000000
+D-204             162.000000000         23.000000000
+D-D1              150.000000000         15.000000000
+D-101             138.000000000         17.000000000
+D-102             146.000000000         13.000000000
+D-103             154.000000000         17.000000000
+D-104             162.000000000         13.000000000
+D-D0              150.000000000          5.000000000
+D-G01             138.000000000          7.000000000
+D-G02             146.000000000          3.000000000
+D-G03             154.000000000          7.000000000
+D-G04             162.000000000          3.000000000
+C-D1-BURST        105.000000000         11.000000000
+
+[VERTICES]
+;Link      X-Coord    Y-Coord   
+
+[LABELS]
+
+[BACKDROP]
+UNITS    NONE
+
+[END]

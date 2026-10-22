@@ -1,0 +1,9 @@
+         leak_L_per_s  leak_pct_of_zone_inflow  true_drop_at_leak_m  true_drop_over_threshold  pressure_detection_rate  pressure_false_alarm_rate  massbal_detection_rate  massbal_false_alarm_rate
+area_m2                                                                                                                                                                                            
+0.00001         0.219                    0.242                0.013                     0.000                    0.125                      0.009                   0.000                       0.0
+0.00005         1.093                    1.202                0.120                     0.000                    0.000                      0.008                   0.000                       0.0
+0.00020         4.328                    4.635                1.016                     0.125                    0.500                      0.010                   0.250                       0.0
+0.00050        10.482                   10.561                3.370                     0.250                    0.375                      0.013                   0.625                       0.0
+
+No-leak run: pressure-rule false alarm rate 0.003, mass-balance false alarm rate 0.000 (fraction of zone-hours with an alarm)
+No-leak mass-balance error range across zones: -3.9% to 3.3%

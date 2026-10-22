@@ -1,0 +1,3 @@
+Simulator: epanet
+Pressure: 105816 values compared, mean |diff| = 0.040383 m, max |diff| = 0.370455 m, correlation = 0.999924
+Flow: 121200 values compared, mean |diff| = 0.000066 m3/s, max |diff| = 0.005560 m3/s, correlation = 0.999973

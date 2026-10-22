@@ -1,0 +1,6 @@
+event,kind,start_s,end_s,where,expected_detector
+E1,flat_leak,93600,172800,B-203,night flow at flat node
+E2,power_cut,118800,147600,B-PUMP,"gateway: supply event, no valve closures"
+E3,pipe_burst,151200,172800,B-D1,tank node supply anomaly + gateway mass balance
+E4,quality_runoff,108000,111600,B-TANK,tank node quality check
+E5,quality_chemical,158400,161100,B-TANK,tank node quality check

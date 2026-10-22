@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Aqua Edge: Simulation Progress Report</title>
+<style>
+  @page { size: A4; margin: 14mm 15mm 14mm 15mm; }
+  body { font-family: "Noto Sans", "DejaVu Sans", Arial, sans-serif; font-size: 9.6pt; line-height: 1.38; color: #1d1d1f; margin: 0; }
+  h1 { font-size: 17pt; margin: 0 0 2pt; }
+  .byline { color: #555; font-size: 9pt; margin-bottom: 8pt; border-bottom: 1px solid #ccc; padding-bottom: 5pt; }
+  h2 { font-size: 11.5pt; margin: 9pt 0 3pt; }
+  p { margin: 0 0 5pt; text-align: justify; }
+  table { border-collapse: collapse; margin: 3pt 0 6pt; font-size: 8.8pt; }
+  th, td { border: 1px solid #c8c8c8; padding: 2pt 6pt; text-align: left; }
+  th { background: #f1f1ee; font-weight: 600; }
+  .figs { display: flex; gap: 10pt; margin: 4pt 0 6pt; align-items: flex-start; }
+  figure { margin: 0; flex: 1; }
+  figure img { width: 100%; border: 1px solid #ddd; display: block; }
+  figcaption { font-size: 8.3pt; color: #444; font-style: italic; margin-top: 2pt; line-height: 1.3; }
+  ol { margin: 0 0 5pt 0; padding-left: 15pt; }
+  li { margin-bottom: 2pt; }
+  .break { break-before: page; }
+  h2 { break-after: avoid; }
+  figure.side { float: right; width: 47%; margin: 2pt 0 4pt 10pt; }
+  figure.wide { width: 100%; margin: 4pt 0 6pt; }
+  figure.wide img { width: 86%; margin: 0 auto; }
+</style>
+</head>
+<body>
+
+<h1>Aqua Edge: Simulation Progress Report</h1>
+<div class="byline">CSD457 Internet of Things &nbsp;|&nbsp; Breeti Bandyopadhyay &nbsp;|&nbsp; 22 October 2026</div>
+
+<h2>1. Scope</h2>
+<p>This report covers only the simulation part of Aqua Edge; the other parts of the project are reported separately by teammates. Simulation lets us create leaks, supply problems and contamination on purpose and see how a design reacts, which is not possible on a real building. Water behaviour is simulated in EPANET through WNTR (its Python library), the approach used by Pagano et al. [5] (EPANET and NS-3 co-simulation of a water network).</p>
+
+<h2>2. Reproducing the reference network</h2>
+<p>We reproduced the published SWI-FEED dataset of Pagano et al. [5] (EPANET and NS-3 co-simulation of a water network) exactly. Their NET_6 network (4,419 junctions, 5,066 pipes, 3 reservoirs) was run for 24 hours in WNTR and compared value by value with their published CSV files. This confirms our toolchain matches the reference paper, so later results rest on a trusted baseline.</p>
+<table>
+  <tr><th>Solver</th><th>Values compared</th><th>Largest difference</th></tr>
+  <tr><td>EPANET solver</td><td>105,816 pressures, 121,200 flows</td><td>0.37 m pressure</td></tr>
+  <tr><td>WNTR solver</td><td>105,816 pressures, 121,200 flows</td><td>0.000001 (CSV rounding only)</td></tr>
+</table>
+
+<h2>3. Leak experiments on the town network</h2>
+<p>On NET_6, neither leak rule from our references catches small leaks, and the two rules catch different large ones. We added leaks of 4 sizes at 8 random junctions and tested the pressure-drop rule of Alghamdi et al. [2] (pressure-drop leak rule and smart valve closure over LoRaWAN) and the supply-versus-branch mass balance of Ali et al. [6] (mass balance of supply vs branch flows for leaks, plus quality sensing), with realistic sensor errors.</p>
+<table>
+  <tr><th>Leak flow</th><th>Pressure-drop rule</th><th>Mass balance</th></tr>
+  <tr><td>0.2 L/s</td><td>1 of 8 (sensor noise, not the leak)</td><td>0 of 8</td></tr>
+  <tr><td>1.1 L/s</td><td>0 of 8</td><td>0 of 8</td></tr>
+  <tr><td>4.3 L/s</td><td>4 of 8 (1 a real drop)</td><td>2 of 8</td></tr>
+  <tr><td>10.5 L/s</td><td>3 of 8 (2 real drops)</td><td>5 of 8</td></tr>
+</table>
+<p>The network is very stiff: even 65 to 77 L/s bursts near the pumps moved pressure by less than 5 psi. Only large bursts far from the main source create a visible low-pressure zone (Figure 1). The mass balance raised no false alarms but needs a leak of about 10% of a zone's inflow.</p>
+
+<div class="figs">
+  <figure>
+    <img src="../report_figures/epanet_town_burst.png" alt="EPANET map of NET_6 with two bursts">
+    <figcaption>Figure 1. EPANET view of NET_6 with two main-pipe bursts on the far left. Pressure falls below 50 psi (cyan) and 25 psi (blue) only around the bursts.</figcaption>
+  </figure>
+  <figure>
+    <img src="../report_figures/society_3d.png" alt="Housing society network in 3D">
+    <figcaption>Figure 2. The housing-society network in 3D (4 buildings, rooftop tanks, 80 flats), flats coloured by pressure at the 8 am peak. Upper floors get less pressure.</figcaption>
+  </figure>
+</div>
+
+<h2>4. Building-level network</h2>
+<p>Inside a building, a leak shows up in flow, not in pressure. Because a whole town is too coarse for one Aqua Edge node, we built our own housing-society network in EPANET: 4 buildings, ground plus 4 floors, 4 flats per floor (80 flats). Water goes from an underground sump, through one pump per building, to a rooftop tank, then down by gravity. Use is 540 L per flat per day (4 people at 135 L, the CPHEEO guideline) with morning and evening peaks.</p>
+<p>Height is modelled through each junction's elevation, so pressure falls about 3 m per floor: 16.5 m on the ground floor and 4.5 m on the top floor at the morning peak (Figure 2). A 180 L/hour leak in one flat raised its building's night use (1 to 4 am) from 0.015 to 0.067 L/s, more than 4 times normal, but lowered that flat's pressure by only 0.22 m.</p>
+
+
+
+<h2>5. Trying out Webots</h2>
+<figure class="side">
+    <img src="../report_figures/webots_building.png" alt="Webots model of building B">
+    <figcaption>Figure 3. First Webots model of building B: 20 flat nodes (green boxes) on 5 floors, a tank node on the roof and a gateway on the ground (bottom left).</figcaption>
+  </figure>
+<p>We installed Webots R2025a and built a first 3D model of one building to see whether it suits our node-level work. The model holds 20 flat nodes at their real floor heights, a tank node on the roof and a gateway on the ground (Figure 3). Each node is a Webots robot with a radio emitter and receiver, a status light, and its own Python program. Webots cannot simulate water flow, so it will not replace EPANET. Its value for us is running each node's own program in a 3D scene, with a radio link we can switch off to imitate an outage.</p>
+
+<h2 style="clear: both">6. Plan</h2>
+<p>The next step joins the two tools: EPANET produces the water behaviour and Webots runs the node programs (Figure 4).</p>
+<figure class="wide">
+    <img src="../report_figures/plan_pipeline.png" alt="Planned simulation pipeline">
+    <figcaption>Figure 4. Planned simulation pipeline: events injected in EPANET, sensor readings passed to the Webots nodes, outages applied to the radio link.</figcaption>
+  </figure>
+
+
+
+<ol>
+  <li>Inject events in a 48-hour EPANET run of one building: day 1 normal, so nodes can learn their usual pattern; day 2 with a flat leak, a pipe burst and a power cut. Water quality readings are made up with contamination events added, since EPANET cannot model pH or TDS.</li>
+  <li>Turn the results into one sensor reading per node per minute and feed them to the Webots nodes.</li>
+  <li>Run the detection rules in each node: night flow and abnormal use, the mass balance of Ali et al. [6] (mass balance of supply vs branch flows for leaks, plus quality sensing), and a quality check standing in for Sharma et al. [1] (8-bit neural network on the device that classifies water quality), with the store-and-forward of Mariadhason et al. [4] (timestamped store-and-forward to SD card, duty cycling).</li>
+  <li>Cut the radio for set periods to imitate outages of growing length; later swap the simple Webots radio for NS-3 to model LoRa properly, as in Pagano et al. [5] (EPANET and NS-3 co-simulation of a water network).</li>
+  <li>Measure detection rate and delay, alert delivery against outage length, and false valve closures.</li>
+</ol>
+
+</body>
+</html>

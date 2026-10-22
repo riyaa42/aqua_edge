@@ -1,0 +1,5 @@
+area_m2,leak_L_per_s,leak_pct_of_zone_inflow,true_drop_at_leak_m,true_drop_over_threshold,pressure_detection_rate,pressure_false_alarm_rate,massbal_detection_rate,massbal_false_alarm_rate
+1e-05,0.219,0.242,0.013,0.0,0.125,0.009,0.0,0.0
+5e-05,1.093,1.202,0.12,0.0,0.0,0.008,0.0,0.0
+0.0002,4.328,4.635,1.016,0.125,0.5,0.01,0.25,0.0
+0.0005,10.482,10.561,3.37,0.25,0.375,0.013,0.625,0.0

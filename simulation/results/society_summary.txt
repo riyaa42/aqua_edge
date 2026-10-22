@@ -1,0 +1,13 @@
+Pressure at 8 am (morning peak), average per floor (m):
+  Ground: 16.5 m (23.4 psi)
+  Floor 1: 13.5 m (19.1 psi)
+  Floor 2: 10.5 m (14.9 psi)
+  Floor 3: 7.5 m (10.6 psi)
+  Floor 4: 4.5 m (6.4 psi)
+Tank levels stayed between 0.51 m and 1.90 m
+Pump starts per building per day: A 1, B 1, C 1, D 1
+Leak in B-203: night-time (1-4 am) water use in building B 0.015 L/s normal vs 0.067 L/s with leak
+Pressure at B-203 at 8 am: 10.48 m normal vs 10.26 m with leak
+Pump starts for building B: normal 1, with leak 1
+Burst at C-D1 from 6:00: flow 1.48 L/s at noon; building C pump starts 4 vs 1 normal; lowest tank C level 0.52 m vs 0.51 m normal
+Building C top-floor pressure, lowest of the day: 3.46 m with burst vs 3.51 m normal

@@ -1,0 +1,17 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Paper PDFs are copyrighted and this repo is public: see first_presentation/references.md
+first_presentation/Papers/
+
+# Downloaded or regenerated simulation files (see simulation/README.md)
+simulation/data/swifeed/*
+!simulation/data/swifeed/.gitkeep
+simulation/epanet_gui/NET_6_*.inp
+simulation/webots/results/
+simulation/temp.*
+
+# Webots per-user window layout
+*.wbproj

@@ -1,0 +1,228 @@
+[TITLE]
+
+[JUNCTIONS]
+;ID                      Elevation       Demand Pattern                 
+ B-PUMPOUT                          0               0                            ;
+ B-BASE                             0               0                            ;
+ B-D4                              13               0                            ;
+ B-401                             13         0.00625 household                  ;
+ B-402                             13         0.00625 household                  ;
+ B-403                             13         0.00625 household                  ;
+ B-404                             13         0.00625 household                  ;
+ B-D3                              10               0                            ;
+ B-301                             10         0.00625 household                  ;
+ B-302                             10         0.00625 household                  ;
+ B-303                             10         0.00625 household                  ;
+ B-304                             10         0.00625 household                  ;
+ B-D2                               7               0                            ;
+ B-201                              7         0.00625 household                  ;
+ B-202                              7         0.00625 household                  ;
+ B-203                              7         0.00625 household                  ;
+ B-204                              7         0.00625 household                  ;
+ B-D1                               4               0                            ;
+ B-101                              4         0.00625 household                  ;
+ B-102                              4         0.00625 household                  ;
+ B-103                              4         0.00625 household                  ;
+ B-104                              4         0.00625 household                  ;
+ B-D0                               1               0                            ;
+ B-G01                              1         0.00625 household                  ;
+ B-G02                              1         0.00625 household                  ;
+ B-G03                              1         0.00625 household                  ;
+ B-G04                              1         0.00625 household                  ;
+ B-203-LEAK                         7               0                            ;
+ B-D1-LEAK                          4               0                            ;
+
+[RESERVOIRS]
+;ID                                   Head                  Pattern
+ SUMP                              -1                            ;
+
+[TANKS]
+;ID                              Elevation           Init Level            Min Level            Max Level             Diameter           Min Volume Volume Curve         Overflow            
+ B-TANK                            16             1.5             0.2               2               3               0                                             ;
+
+[PIPES]
+;ID                   Node1                Node2                              Length             Diameter            Roughness           Minor Loss               Status
+ B-MAIN               B-PUMPOUT            B-BASE                            45              50             130               0                 Open   ;
+ B-RISE               B-BASE               B-TANK                            17              50             130               0                 Open   ;
+ B-DT4                B-TANK               B-D4                               3              50             130               0                 Open   ;
+ B-401-P              B-D4                 B-401                              8              25             130               0                 Open   ;
+ B-402-P              B-D4                 B-402                              8              25             130               0                 Open   ;
+ B-403-P              B-D4                 B-403                              8              25             130               0                 Open   ;
+ B-404-P              B-D4                 B-404                              8              25             130               0                 Open   ;
+ B-DT3                B-D4                 B-D3                               3              50             130               0                 Open   ;
+ B-301-P              B-D3                 B-301                              8              25             130               0                 Open   ;
+ B-302-P              B-D3                 B-302                              8              25             130               0                 Open   ;
+ B-303-P              B-D3                 B-303                              8              25             130               0                 Open   ;
+ B-304-P              B-D3                 B-304                              8              25             130               0                 Open   ;
+ B-DT2                B-D3                 B-D2                               3              50             130               0                 Open   ;
+ B-201-P              B-D2                 B-201                              8              25             130               0                 Open   ;
+ B-202-P              B-D2                 B-202                              8              25             130               0                 Open   ;
+ B-203-P              B-D2                 B-203                              8              25             130               0                 Open   ;
+ B-204-P              B-D2                 B-204                              8              25             130               0                 Open   ;
+ B-DT1                B-D2                 B-D1                               3              50             130               0                 Open   ;
+ B-101-P              B-D1                 B-101                              8              25             130               0                 Open   ;
+ B-102-P              B-D1                 B-102                              8              25             130               0                 Open   ;
+ B-103-P              B-D1                 B-103                              8              25             130               0                 Open   ;
+ B-104-P              B-D1                 B-104                              8              25             130               0                 Open   ;
+ B-DT0                B-D1                 B-D0                               3              50             130               0                 Open   ;
+ B-G01-P              B-D0                 B-G01                              8              25             130               0                 Open   ;
+ B-G02-P              B-D0                 B-G02                              8              25             130               0                 Open   ;
+ B-G03-P              B-D0                 B-G03                              8              25             130               0                 Open   ;
+ B-G04-P              B-D0                 B-G04                              8              25             130               0                 Open   ;
+ B-203-LEAKPIPE       B-203                B-203-LEAK                         1              50             130               0               Closed   ;
+ B-D1-LEAKPIPE        B-D1                 B-D1-LEAK                          1              50             130               0               Closed   ;
+
+[PUMPS]
+;ID                   Node1                Node2                Properties          
+ B-PUMP               SUMP                 B-PUMPOUT            HEAD     pump                   ;
+
+[VALVES]
+;ID                   Node1                Node2                            Diameter Type              Setting           Minor Loss
+
+[TAGS]
+;type      name       tag       
+
+[DEMANDS]
+;ID        Demand     Pattern   
+
+[STATUS]
+;ID        Setting   
+
+[PATTERNS]
+;ID        Multipliers
+
+household 0.188605 0.141454 0.094303 0.094303 0.282908 0.943026
+household 2.263261 2.640472 2.357564 1.508841 0.943026 0.754420
+household 0.848723 0.754420 0.565815 0.565815 0.754420 1.225933
+household 1.791749 1.980354 1.508841 0.943026 0.565815 0.282908
+
+[CURVES]
+;ID         X-Value      Y-Value     
+;PUMP: pump
+ pump           2.000000    25.000000   ;
+
+
+[CONTROLS]
+Pipe B-203-LEAKPIPE Open AT TIME 26
+Pipe B-D1-LEAKPIPE Open AT TIME 42
+
+[RULES]
+RULE B-ON
+ IF Tank B-TANK level < 0.5
+ THEN Pump B-PUMP status = OPEN
+ PRIORITY 1
+ ; end of rule
+
+RULE B-OFF
+ IF Tank B-TANK level > 1.9
+ THEN Pump B-PUMP status = CLOSED
+ PRIORITY 1
+ ; end of rule
+
+RULE POWER-CUT
+ IF SYSTEM TIME >= 33:00:00
+  AND SYSTEM TIME Below 41:00:00
+ THEN Pump B-PUMP status = CLOSED
+ PRIORITY 5
+ ; end of rule
+
+
+[ENERGY]
+GLOBAL PRICE           0.0000
+
+[EMITTERS]
+;ID        Flow coefficient
+B-203-LEAK 0.01565560727712874
+B-D1-LEAK  0.41286141192238524
+
+[QUALITY]
+
+[SOURCES]
+;Node      Type       Quality    Pattern   
+
+[REACTIONS]
+;Type           Pipe/Tank               Coefficient
+
+ ORDER BULK 1
+ ORDER TANK 1
+ ORDER WALL 1
+ GLOBAL BULK 0.0000    
+ GLOBAL WALL 0.0000    
+
+[MIXING]
+;Tank ID             Model Fraction
+
+[TIMES]
+DURATION             47:59:00
+HYDRAULIC TIMESTEP   00:01:00
+QUALITY TIMESTEP     00:06:00
+PATTERN TIMESTEP     01:00:00
+PATTERN START        00:00:00
+REPORT TIMESTEP      00:01:00
+REPORT START         00:00:00
+START CLOCKTIME      00:00:00 AM
+RULE TIMESTEP        00:06:00
+STATISTIC            NONE      
+
+[REPORT]
+
+[OPTIONS]
+UNITS                LPS                 
+HEADLOSS             H-W                 
+SPECIFIC GRAVITY     1
+VISCOSITY            1
+TRIALS               200
+ACCURACY             0.001
+CHECKFREQ            2
+MAXCHECK             10
+UNBALANCED           STOP                
+PATTERN              1                   
+DEMAND MULTIPLIER    1
+EMITTER EXPONENT     0.5
+QUALITY              NONE                
+DIFFUSIVITY          1
+TOLERANCE            0.01
+
+[COORDINATES]
+;Node      X-Coord    Y-Coord   
+SUMP               75.000000000        -25.000000000
+B-PUMPOUT          66.000000000        -18.000000000
+B-BASE            -12.000000000          0.000000000
+B-TANK              0.000000000         60.000000000
+B-D4                0.000000000         45.000000000
+B-401             -12.000000000         47.000000000
+B-402              -4.000000000         43.000000000
+B-403               4.000000000         47.000000000
+B-404              12.000000000         43.000000000
+B-D3                0.000000000         35.000000000
+B-301             -12.000000000         37.000000000
+B-302              -4.000000000         33.000000000
+B-303               4.000000000         37.000000000
+B-304              12.000000000         33.000000000
+B-D2                0.000000000         25.000000000
+B-201             -12.000000000         27.000000000
+B-202              -4.000000000         23.000000000
+B-203               4.000000000         27.000000000
+B-204              12.000000000         23.000000000
+B-D1                0.000000000         15.000000000
+B-101             -12.000000000         17.000000000
+B-102              -4.000000000         13.000000000
+B-103               4.000000000         17.000000000
+B-104              12.000000000         13.000000000
+B-D0                0.000000000          5.000000000
+B-G01             -12.000000000          7.000000000
+B-G02              -4.000000000          3.000000000
+B-G03               4.000000000          7.000000000
+B-G04              12.000000000          3.000000000
+B-203-LEAK          7.000000000         24.000000000
+B-D1-LEAK           3.000000000         12.000000000
+
+[VERTICES]
+;Link      X-Coord    Y-Coord   
+
+[LABELS]
+
+[BACKDROP]
+UNITS    NONE
+
+[END]
