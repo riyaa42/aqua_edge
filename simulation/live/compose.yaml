@@ -1,0 +1,47 @@
+# The live simulation, one container per node:
+#   docker compose -f live/compose.yaml up        (run from simulation/)
+# Control panel: http://localhost:8501   Results: live/run/ (score with python3 live/check_comms.py)
+# Scenario and speed: AQUA_SCENARIO=live/scenarios/standard.jsonl AQUA_DELAY=0.5 docker compose ... up
+x-env: &env
+  AQUA_TIMEKEEPER: timekeeper
+  AQUA_CLOCK_PPM: ${AQUA_CLOCK_PPM:-2}
+x-node: &node
+  image: aqua-live
+  user: "${UID:-1000}:${GID:-1000}"      # files in live/run/ stay yours, not root's
+  volumes: [..:/sim]
+  command: python3 live/node.py
+  environment: *env
+
+services:
+  timekeeper:
+    <<: *node
+    build: {context: .., dockerfile: live/Dockerfile}
+    environment: {<<: *env, AQUA_BIND: 0.0.0.0}      # listen for the other containers
+    command: python3 live/timekeeper.py --scenario ${AQUA_SCENARIO:-live/scenarios/standard.jsonl} --delay ${AQUA_DELAY:-0}
+  control-panel:
+    <<: *node
+    command: streamlit run live/control_panel.py --server.address 0.0.0.0 --server.headless true
+    ports: ["8501:8501"]
+  gateway: {<<: *node, environment: {<<: *env, NODE_ID: GATEWAY}}
+  # ponytail: one line per node, written from ns3/positions.csv; regenerate if the building changes
+  b-101: {<<: *node, environment: {<<: *env, NODE_ID: B-101}}
+  b-102: {<<: *node, environment: {<<: *env, NODE_ID: B-102}}
+  b-103: {<<: *node, environment: {<<: *env, NODE_ID: B-103}}
+  b-104: {<<: *node, environment: {<<: *env, NODE_ID: B-104}}
+  b-201: {<<: *node, environment: {<<: *env, NODE_ID: B-201}}
+  b-202: {<<: *node, environment: {<<: *env, NODE_ID: B-202}}
+  b-203: {<<: *node, environment: {<<: *env, NODE_ID: B-203}}
+  b-204: {<<: *node, environment: {<<: *env, NODE_ID: B-204}}
+  b-301: {<<: *node, environment: {<<: *env, NODE_ID: B-301}}
+  b-302: {<<: *node, environment: {<<: *env, NODE_ID: B-302}}
+  b-303: {<<: *node, environment: {<<: *env, NODE_ID: B-303}}
+  b-304: {<<: *node, environment: {<<: *env, NODE_ID: B-304}}
+  b-401: {<<: *node, environment: {<<: *env, NODE_ID: B-401}}
+  b-402: {<<: *node, environment: {<<: *env, NODE_ID: B-402}}
+  b-403: {<<: *node, environment: {<<: *env, NODE_ID: B-403}}
+  b-404: {<<: *node, environment: {<<: *env, NODE_ID: B-404}}
+  b-g01: {<<: *node, environment: {<<: *env, NODE_ID: B-G01}}
+  b-g02: {<<: *node, environment: {<<: *env, NODE_ID: B-G02}}
+  b-g03: {<<: *node, environment: {<<: *env, NODE_ID: B-G03}}
+  b-g04: {<<: *node, environment: {<<: *env, NODE_ID: B-G04}}
+  b-tank: {<<: *node, environment: {<<: *env, NODE_ID: B-TANK}}

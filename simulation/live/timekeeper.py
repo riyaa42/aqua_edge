@@ -77,7 +77,8 @@ def main(args):
     applied = open(os.path.join(RUN, "events_applied.jsonl"), "w")
 
     conns = {}
-    with Listener(ADDRESS, authkey=AUTHKEY, backlog=64) as listener:
+    bind = (os.environ.get("AQUA_BIND", "localhost"), ADDRESS[1])     # 0.0.0.0 in Docker
+    with Listener(bind, authkey=AUTHKEY, backlog=64) as listener:
         print(f"waiting for {len(names)} nodes + gateway ...")
         while len(conns) < len(names) + 1:
             c = listener.accept()

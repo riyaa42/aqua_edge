@@ -103,3 +103,22 @@ uv run python scripts/make_epanet_files.py              # NET_6 files for the EP
 ```
 
 Outputs go to `results/`. Sensor error sizes and thresholds are set at the top of each script.
+
+## Live simulation and the LoRa network (ns-3)
+
+Every node runs the real firmware in its own process (or Docker container), fed one minute at a time by a live WNTR water model. Leaks, water-quality changes and radio cuts are triggered from a control panel. From this `simulation/` folder:
+
+```
+sh live/run_local.sh --scenario live/scenarios/standard.jsonl   # no Docker: one process per node, 48 h in ~1 min
+docker compose -f live/compose.yaml up                          # same, one container per node; panel at localhost:8501
+python3 live/check_comms.py                                     # did communication work? PASS/FAIL per check
+```
+
+ns-3 (with the LoRaWAN module, inside Docker) runs once on building B to give each node's spreading factor, signal strength and delivery rate (`ns3/link_table.csv`, used by `live/radio.py`). It can then replay every packet of a live run, so `check_comms.py` compares the Python radio model with ns-3:
+
+```
+sh ns3/run_ns3.sh            # link table (first run builds ns-3: ~20-30 min)
+sh ns3/run_ns3.sh replay     # replay live/run/tx_log.csv
+```
+
+Standard scenario result: 100% of uplink attempts got through while the radio was up (2 collisions out of 4066), 0 messages lost, and ns-3 and the Python model agree on every node (gap 0.0 points). All nodes reach the gateway on SF7 with at least 26 dB to spare.

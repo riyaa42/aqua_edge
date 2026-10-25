@@ -1,0 +1,4 @@
+# only the dependency list goes into the live/ image; the code is mounted at run time
+*
+!pyproject.toml
+!uv.lock

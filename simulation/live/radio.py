@@ -20,6 +20,7 @@ BW_HZ, CODING_RATE, PREAMBLE = 125_000, 1, 8   # LoRa defaults: 125 kHz, 4/5, 8 
 DEFAULT_SF, DEFAULT_PDR = 7, 1.0               # used until ns-3 gives real numbers
 UPLINK_CHANNELS = 1                            # worst case; IN865 has 3 default uplink channels
 CAD_TRIES, CAD_BACKOFF_S = 5, (0.1, 1.0)       # listen-before-talk: retries, random wait between them
+TURNAROUND_S = 0.01                            # a radio's gap between its own back-to-back packets
 CAD_SYMBOLS = 2                                # a CAD listen lasts ~2 symbols; packets newer than that go unheard
 LOG_FIELDS = ["t_s", "src", "dst", "kind", "seq", "bytes", "sf", "ch", "airtime_ms", "backoffs", "result"]
 
@@ -78,7 +79,8 @@ class Radio:
                     cad_wait.append(x)
                     continue
                 x["start"] = max(t + offset, free_at)        # one radio cannot send two packets at once
-                x["end"] = free_at = x["start"] + air
+                x["end"] = x["start"] + air
+                free_at = x["end"] + TURNAROUND_S
                 tx.append(x)
         ups = [x for x in tx if x["src"] != GATEWAY]
         # Listen before talk (LoRa CAD): busy if another packet on our channel and SF is on air right
