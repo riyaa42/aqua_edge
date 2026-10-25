@@ -35,7 +35,7 @@ class Gateway:
         for m in self.hal.receive():
             if m.get("k") not in ("ALERT", "FLAG", "SUM"):
                 continue
-            self.hal.send({"k": "ACK", "n": m["n"], "s": m["s"]})
+            self.hal.send({"k": "ACK", "n": m["n"], "s": m["s"], "gt": now})   # gt: nodes sync their clock
             if (m["n"], m["s"]) in self.seen:
                 continue                                    # duplicate (our ACK was lost)
             self.seen.add((m["n"], m["s"]))

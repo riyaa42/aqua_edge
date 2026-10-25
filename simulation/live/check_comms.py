@@ -64,6 +64,9 @@ def main():
     by = lambda res: sum(r["result"] == res for r in up)
     lines.append(f"Uplink attempts: {len(up)} (ok {by('ok')}, collision {by('collision')}, "
                  f"weak link {by('weak_link')}, radio cut {by('radio_cut')})")
+    waited = [r for r in up if int(r.get("backoffs") or 0) > 0]
+    lines.append(f"Listen-before-talk: {len(waited)} packets found the channel busy and waited "
+                 f"({sum(int(r['backoffs']) for r in waited)} back-offs, {sum(r['kind'] == 'ALERT' for r in waited)} of them alerts)")
     per_node = {}
     for r in live:
         n, k = per_node.get(r["src"], (0, 0))

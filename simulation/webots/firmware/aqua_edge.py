@@ -5,7 +5,11 @@ directly; everything goes through a small hardware layer `hal` with these method
 
     hal.now()                 -> seconds since start (from the DS3231 RTC on the real node)
     hal.read()                -> dict of sensor readings, e.g. {"flow_lps": 0.01, "pressure_m": 10.4}
-    hal.send(msg: dict)       -> radio send (LoRa on the real node); may be lost silently
+    hal.send(msg: dict, at_s=None, cad=False)
+                              -> radio send (LoRa on the real node); may be lost silently.
+                                 at_s: second of the minute to send at (time slot);
+                                 cad: listen before talk (LoRa channel activity detection)
+    hal.slot                  -> optional (index, count): this node's time slot in each minute
     hal.receive()             -> list of dict messages received since the last call
     hal.set_valve(closed, reason)
     hal.led(colour)           -> "green" normal, "yellow" messages waiting, "red" alert active
@@ -29,6 +33,7 @@ LEARN_S = DAY                 # first day: learn this node's normal pattern
 SUMMARY_S = 900               # send a summary every 15 minutes
 MAX_SENDS_PER_STEP = 4        # radio duty-cycle budget per minute
 RETRY_S = 120                 # resend if no acknowledgement after 2 minutes
+SLOT_GUARD_S = 0.2            # start this far into our time slot, margin for clock error
 
 NIGHT_START_H, NIGHT_END_H = 1, 5
 NIGHT_FLOW_LPS = 0.02         # flow above this at night counts as "someone or something using water"
@@ -144,8 +149,16 @@ class Node:
             self.check(now, hour, r)
             self.alerts = {k: seen for k, seen in self.alerts.items() if now - seen < ALERT_CLEAR_S}
         self.summarise(now, r)
+        # Collisions: alerts go out now, listening first (CSMA/CA); everything else waits for
+        # this node's own time slot (TDMA), kept in step by the gateway time in every ACK
+        slot = getattr(self.hal, "slot", None)
         for m in self.store.due(now, MAX_SENDS_PER_STEP):
-            self.hal.send(m)
+            if m["k"] == "ALERT":
+                self.hal.send(m, cad=True)
+            elif slot:
+                self.hal.send(m, at_s=slot[0] * 60 / slot[1] + SLOT_GUARD_S)
+            else:
+                self.hal.send(m)
         stuck = any(now - m["t"] > RETRY_S for m in self.store.queue)     # unanswered for > 2 min
         self.hal.led("red" if self.alerts else "yellow" if stuck else "green")
 

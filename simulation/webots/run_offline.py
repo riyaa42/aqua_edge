@@ -47,7 +47,7 @@ class OfflineHAL:
     def read(self):
         return self.feed.read(self.name, self.now())
 
-    def send(self, msg):
+    def send(self, msg, at_s=None, cad=False):      # timing ignored: this radio has no airtime
         self.radio.send(self.name, msg, self.now())
 
     def receive(self):

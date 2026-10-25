@@ -38,7 +38,7 @@ class WebotsHAL:
     def read(self):
         return self.feed.read(self.name, self.t)
 
-    def send(self, msg):
+    def send(self, msg, at_s=None, cad=False):      # timing ignored: Webots radio has no airtime
         if self.link_ok():
             self.emitter.send(json.dumps(msg, separators=(",", ":")))
 

@@ -83,7 +83,7 @@ def main(args):
             c = listener.accept()
             conns[c.recv()] = c
     for c in conns.values():
-        c.send({"flats": water.flats, "tank": "B-TANK"})
+        c.send({"flats": water.flats, "tank": "B-TANK", "slots": {n: (i, len(names)) for i, n in enumerate(names)}})
     print("all connected, running")
 
     readings_of = lambda name, r: r.get(name, {}) if name != GATEWAY else {}
