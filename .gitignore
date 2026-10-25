@@ -15,3 +15,7 @@ simulation/temp.*
 
 # Webots per-user window layout
 *.wbproj
+
+# Live simulation output (rebuilt every run)
+simulation/live/run/
+simulation/ns3/replay_result.csv
