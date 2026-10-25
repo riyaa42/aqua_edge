@@ -123,6 +123,9 @@ def main():
             parts.append(f"gateway mass balance after {(pipe['t'] - ev['t']) / 60:.0f} min")
         held_ok = a is None or cut_at(a["n"], a["t"]) or (a["rx"] - a["t"]) / 60 <= MAX_ALERT_DELAY_MIN
         mark(held_ok, f"{label} at {hhmm(ev['t'])}: " + "; ".join(parts))
+    for g in (g for g in gw_events if g["event"] in ("NEW_ALERT", "REPEAT_ALERT")):
+        lines.append(f"Gateway: {g['event']:<12} {g['node']} {g['alert']} {hhmm(g['t'])}"
+                     + (f" (#{g['count']}, {g['since_last_min']} min after the last one)" if g["event"] == "REPEAT_ALERT" else ""))
     expected_nodes = {ev.get("where") for ev in events} | {"B-TANK"}
     stray = [m for m in alerts if m["n"] not in expected_nodes]
     mark(not stray, f"alerts from nodes with no event: {len(stray)}"

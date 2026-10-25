@@ -7,6 +7,8 @@ Same hardware layer as the nodes (hal.now / send / receive). Jobs:
   3. Mass balance (Ali et al. [6], supply vs branch flows): water leaving the tank minus
      water used by all flats, per 15-minute summary; above 10% means a leak in the pipes
      between the tank and the flats (a leak inside a flat is after its meter, so it is not counted).
+  4. Repeat check: nodes send a fresh alert every time a problem comes back; the gateway
+     marks each one NEW_ALERT or REPEAT_ALERT (same node and alert type as before).
 """
 SUPPLY_FRACTION = 0.5          # this share of flat nodes flagging within the window = supply event
 SUPPLY_WINDOW_S = 900
@@ -22,6 +24,7 @@ class Gateway:
         self.seen = set()
         self.log = []               # every unique message received, with receive time
         self.events = []            # gateway's own decisions
+        self.alert_history = {}     # (node, alert) -> (time of latest, how many so far)
         self.flags = {}             # node -> time of its latest PRESSURE_LOW flag
         self.supply_active_until, self.last_supply_tx = -1, -1e9
         self.sums = {}              # interval -> {node: volume}
@@ -37,12 +40,25 @@ class Gateway:
                 continue                                    # duplicate (our ACK was lost)
             self.seen.add((m["n"], m["s"]))
             self.log.append({**m, "rx": now})
-            if m["k"] == "FLAG":
+            if m["k"] == "ALERT" and not m["a"].endswith("_CLEARED"):     # all-clear is not a problem
+                self.check_repeat(m)
+            elif m["k"] == "FLAG":
                 self.flags[m["n"]] = m["t"]
             elif m["k"] == "SUM":
                 self.sums.setdefault(m["i"], {})[m["n"]] = m["vol_l"]
         self.supply_rule(now)
         self.mass_balance(now)
+
+    def check_repeat(self, m):
+        """Nodes re-send an alert each time a problem comes back; decide if this one is new."""
+        key = (m["n"], m["a"])
+        prev = self.alert_history.get(key)
+        self.alert_history[key] = (m["t"], prev[1] + 1 if prev else 1)
+        if prev:
+            self.decide(m["t"], "REPEAT_ALERT", node=m["n"], alert=m["a"], count=prev[1] + 1,
+                        since_last_min=round((m["t"] - prev[0]) / 60))
+        else:
+            self.decide(m["t"], "NEW_ALERT", node=m["n"], alert=m["a"])
 
     def decide(self, now, kind, **info):
         self.events.append({"t": now, "event": kind, **info})

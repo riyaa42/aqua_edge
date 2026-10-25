@@ -36,6 +36,8 @@ NIGHT_FLOW_MIN = 30           # minutes in a row before a leak alert
 HIGH_USE_FACTOR, HIGH_USE_MIN_LPS, HIGH_USE_MIN = 3.0, 0.05, 60
 PRESSURE_SIGMAS, PRESSURE_MARGIN_M, PRESSURE_MIN = 4.0, 0.3, 10
 PRESSURE_GRACE_S = 600        # wait this long for the gateway's supply-event verdict before closing
+ALERT_CLEAR_S = 600           # an alert re-arms after its condition has been normal this long;
+                              # the gateway decides whether a new alert is a repeat
 QUALITY_MIN, QUALITY_CLEAR_MIN = 3, 10
 SUPPLY_SIGMAS, SUPPLY_MARGIN_LPS, SUPPLY_MIN = 4.0, 0.5, 15
 
@@ -101,7 +103,7 @@ class Node:
         self.store = Store(hal.storage_path)
         self.seq = max([m["s"] for m in self.store.queue], default=0)
         self.base = {k: Baseline() for k in self.sensors}
-        self.alerts = set()            # alert types already raised (latched)
+        self.alerts = {}               # active alert type -> last time its condition was seen
         self.interval, self.acc = None, {}
         self.valve_closed = False
 
@@ -111,9 +113,10 @@ class Node:
         self.store.add({"n": self.id, "s": self.seq, "t": self.hal.now(), "k": kind, **payload})
 
     def alert(self, kind, **payload):
+        """Called every minute the condition holds; sends once per episode."""
         if kind not in self.alerts:
-            self.alerts.add(kind)
             self.emit("ALERT", a=kind, **payload)
+        self.alerts[kind] = self.hal.now()
 
     def close_valve(self, reason):
         if not self.valve_closed:
@@ -139,6 +142,7 @@ class Node:
                 self.base[k].add(hour, r[k])
         else:
             self.check(now, hour, r)
+            self.alerts = {k: seen for k, seen in self.alerts.items() if now - seen < ALERT_CLEAR_S}
         self.summarise(now, r)
         for m in self.store.due(now, MAX_SENDS_PER_STEP):
             self.hal.send(m)
@@ -240,7 +244,7 @@ class TankNode(Node):
         else:
             self.bad_run, self.good_run = 0, self.good_run + 1
             if self.valve_closed and self.good_run >= QUALITY_CLEAR_MIN:
-                self.alerts.discard(f"QUALITY_{self.bad_class}")     # allow a new alert next time
+                self.alerts.pop(f"QUALITY_{self.bad_class}", None)  # allow a new alert next time
                 self.open_valve("water quality back to normal")
                 self.emit("ALERT", a="QUALITY_CLEARED")
         # Abnormal supply: far more water leaving the tank than normal for this hour
