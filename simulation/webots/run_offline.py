@@ -120,14 +120,14 @@ def score(gw, valve_log, nodes):
     _, cut_start, cut_end, _ = events["E2"]
     sup = gw_first("SUPPLY_EVENT", cut_start)
     lines.append(f"E2 power cut: gateway supply event {'at ' + hhmm(sup['t']) if sup else 'NOT raised'}")
-    planned = {("B-203", "continuous night flow"), ("B-203", "pressure drop with high flow"), ("B-TANK", "water quality runoff"),
+    planned = {("B-203", "continuous night flow"), ("B-TANK", "water quality runoff"),
                ("B-TANK", "water quality chemical"), ("B-TANK", "water quality back to normal")}
     false_closures = [v for v in valve_log if v["closed"] and (v["node"], v["reason"]) not in planned]
     lines.append(f"Valve actions: {len(valve_log)}; closures not explained by a planted event: {len(false_closures)}")
     for v in false_closures:
         lines.append(f"   false closure: {v['node']} at {hhmm(v['t'])} ({v['reason']})")
     unexplained = [m for m in alerts if (m["n"], m["a"]) not in {
-        ("B-203", "LEAK_NIGHT_FLOW"), ("B-203", "ABNORMAL_CONSUMPTION"), ("B-203", "LEAK_PRESSURE_DROP"), ("B-TANK", "ABNORMAL_SUPPLY"),
+        ("B-203", "LEAK_NIGHT_FLOW"), ("B-203", "ABNORMAL_CONSUMPTION"), ("B-TANK", "ABNORMAL_SUPPLY"),
         ("B-TANK", "QUALITY_RUNOFF"), ("B-TANK", "QUALITY_CHEMICAL"), ("B-TANK", "QUALITY_CLEARED")}]
     lines.append(f"Alerts not explained by a planted event: {len(unexplained)}")
     for m in unexplained:

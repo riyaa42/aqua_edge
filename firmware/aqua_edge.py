@@ -3,7 +3,9 @@
 Runs unchanged in Webots and on the Raspberry Pi Zero 2 W. It never touches hardware
 directly; everything goes through a small hardware layer `hal` with these methods:
 
-    hal.now()                 -> seconds since start (from the DS3231 RTC on the real node)
+    hal.now()                 -> current time in seconds; every message is stamped with it ("t").
+                                 Simulation: seconds since start. Real node: from the DS3231 RTC
+                                 (planned, to discuss next: UTC Unix seconds, ISO 8601 in logs).
     hal.read()                -> dict of sensor readings, e.g. {"flow_lps": 0.01, "pressure_m": 10.4}
     hal.send(msg: dict, at_s=None, cad=False)
                               -> radio send (LoRa on the real node); may be lost silently.
@@ -16,10 +18,11 @@ directly; everything goes through a small hardware layer `hal` with these method
     hal.storage_path          -> file for the store-and-forward queue (SD card), or None
 
 Detection rules (all thresholds are calibration knobs at the top):
-    Flat node: continuous night flow and abnormal consumption against its own learned
-      daily pattern (our step 4, idea of on-node anomaly detection from Babazadeh [3]);
-      pressure drop with valve closure unless the gateway calls a supply event
-      (Alghamdi et al. [2], pressure-drop leak rule and smart valve closure).
+    Flat node: FLOW ONLY, as chosen and explained in leak_detection/README.md (flow beat
+      pressure in leak_detection/compare_leaks.py: every leak caught, no false alarms).
+      Continuous night flow and abnormal consumption against its own learned daily pattern
+      (idea of on-node anomaly detection from Babazadeh [3]). Pressure is still read, learned
+      and sent in summaries, but raises no alarms.
     Tank node: water quality class (Sharma et al. [1], 8-bit neural network on the device;
       a rule-based stand-in for now) and abnormal supply flow (possible pipe burst).
 Store-and-forward: every message is timestamped, kept until the gateway acknowledges it,
@@ -39,14 +42,13 @@ NIGHT_START_H, NIGHT_END_H = 1, 5
 NIGHT_FLOW_LPS = 0.02         # flow above this at night counts as "someone or something using water"
 NIGHT_FLOW_MIN = 30           # minutes in a row before a leak alert
 HIGH_USE_FACTOR, HIGH_USE_MIN_LPS, HIGH_USE_MIN = 3.0, 0.05, 60
-PRESSURE_SIGMAS, PRESSURE_MARGIN_M, PRESSURE_MIN = 4.0, 0.3, 10
-PRESSURE_GRACE_S = 600        # wait this long for the gateway's supply-event verdict before closing
+PRESSURE_SIGMAS, PRESSURE_MARGIN_M, PRESSURE_MIN = 4.0, 0.3, 10   # tank level check
 ALERT_CLEAR_S = 600           # an alert re-arms after its condition has been normal this long;
                               # the gateway decides whether a new alert is a repeat
 QUALITY_MIN, QUALITY_CLEAR_MIN = 3, 10
 SUPPLY_SIGMAS, SUPPLY_MARGIN_LPS, SUPPLY_MIN = 4.0, 0.5, 15
 
-PRIORITY = {"ALERT": 0, "FLAG": 1, "SUM": 2}
+PRIORITY = {"ALERT": 0, "FLAG": 1, "SUM": 2}       # FLAG: only the tank's SUPPLY_LOW now
 
 
 class Store:
@@ -139,8 +141,6 @@ class Node:
         for m in self.hal.receive():
             if m.get("k") == "ACK" and m.get("n") == self.id:
                 self.store.ack(m["s"])
-            elif m.get("k") == "SUPPLY":
-                self.on_supply_event(m)
         hour = int(now % DAY // HOUR)
         if now < LEARN_S:
             for k in self.sensors:
@@ -170,9 +170,6 @@ class Node:
         self.interval = i
         self.accumulate(r)
 
-    def on_supply_event(self, m):
-        pass
-
     def check(self, now, hour, r):
         raise NotImplementedError
 
@@ -185,12 +182,11 @@ class FlatNode(Node):
 
     def __init__(self, node_id, hal):
         super().__init__(node_id, hal)
-        self.night_run = self.high_run = self.low_run = self.ok_run = 0
-        self.pressure_flag_t = None    # when this node flagged a pressure drop
-        self.supply_event_t = -1e9
+        self.night_run = self.high_run = 0
 
     def check(self, now, hour, r):
-        flow, p = r["flow_lps"], r["pressure_m"]
+        """Leak checks, flow only (leak_detection/README.md section 5). Runs once a minute."""
+        flow = r["flow_lps"]
         # Continuous night flow: nobody should be using water at 1-5 am
         at_night = NIGHT_START_H <= hour < NIGHT_END_H
         self.night_run = self.night_run + 1 if at_night and flow > NIGHT_FLOW_LPS else 0
@@ -202,27 +198,6 @@ class FlatNode(Node):
         self.high_run = self.high_run + 1 if flow > limit else 0
         if self.high_run >= HIGH_USE_MIN:
             self.alert("ABNORMAL_CONSUMPTION", flow=round(flow, 4))
-        # Pressure drop (Alghamdi et al. [2]): flag it, close only if the gateway does not call a supply event
-        b = self.base["pressure_m"]
-        low = p < b.mean(hour) - max(PRESSURE_SIGMAS * b.std(hour), PRESSURE_MARGIN_M)
-        self.low_run, self.ok_run = (self.low_run + 1, 0) if low else (0, self.ok_run + 1)
-        if self.pressure_flag_t is None:
-            if self.low_run >= PRESSURE_MIN:                 # 1. low for 10 min: tell the gateway, start waiting
-                self.pressure_flag_t = now
-                self.emit("FLAG", f="PRESSURE_LOW", p=round(p, 3))
-        elif self.ok_run >= PRESSURE_MIN:                    # 4. pressure normal again: episode over
-            self.pressure_flag_t = None
-        elif self.supply_event_t >= self.pressure_flag_t - PRESSURE_GRACE_S:
-            pass                                             # 2. gateway says supply event: no valve action
-        elif now - self.pressure_flag_t >= PRESSURE_GRACE_S and flow > limit:
-            # 3. no supply verdict AND this flat is using far more water than normal: a leak here.
-            #    Pressure alone is not enough: a slowly draining tank lowers every flat's pressure,
-            #    hours apart, while their flow stays normal (found in the offline test).
-            self.alert("LEAK_PRESSURE_DROP", p=round(p, 3), flow=round(flow, 4))
-            self.close_valve("pressure drop with high flow")
-
-    def on_supply_event(self, m):
-        self.supply_event_t = self.hal.now()
 
     def accumulate(self, r):
         self.acc["vol_l"] = self.acc.get("vol_l", 0.0) + r["flow_lps"] * 60

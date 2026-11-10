@@ -12,6 +12,10 @@ Signals compared:
   downtake leak  flow:     gateway mass balance PIPE_LEAK or tank ABNORMAL_SUPPLY
                  pressure: PRESSURE_LOW flag from any flat
 A signal from the wrong flat, before the leak, or in a no-leak run is a false alarm.
+
+Note: the results in README.md section 2 were made with the firmware of commit 4f7867a, which
+still sent PRESSURE_LOW flags. Flat nodes are flow only now, so on today's firmware the pressure
+column always reads "missed"; check out 4f7867a to repeat the comparison.
 """
 import csv
 import os
