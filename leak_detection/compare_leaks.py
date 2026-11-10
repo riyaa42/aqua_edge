@@ -1,8 +1,8 @@
 """Which leak signal works better: flow or pressure? Runs the real firmware on the live water
 model (perfect radio, no valves) for many leaks, and scores each signal on its own.
 
-    uv run python live/compare_leaks.py            # ~35 runs of 54 h, in parallel
-    uv run python live/compare_leaks.py --check    # self-check of the scoring only
+    cd simulation && uv run python ../leak_detection/compare_leaks.py           # ~35 runs of 54 h, in parallel
+    cd simulation && uv run python ../leak_detection/compare_leaks.py --check   # self-check of the scoring only
 
 Each run: day 1 the nodes learn normal, a leak starts at a random time on day 2, the run goes
 on to 06:00 on day 3 so every leak sees one night (needed by the night-flow rule).
@@ -20,7 +20,7 @@ import sys
 from multiprocessing import Pool
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path[:0] = [HERE, os.path.join(HERE, "..", "webots", "firmware")]
+sys.path[:0] = [os.path.join(HERE, "..", "simulation", "live"), os.path.join(HERE, "..", "firmware")]
 from water import Water, LEAK_SIZES_LPS  # noqa: E402
 from aqua_edge import FlatNode, TankNode, DAY  # noqa: E402
 from gateway import Gateway  # noqa: E402
@@ -128,8 +128,8 @@ def main():
         rows.append({"site": job[0] or "none", "size": job[1] or "-", "start_h": round(job[2] / 3600, 2),
                      **{f"{m}_min": "" if sc[m][0] is None else round(sc[m][0] / 60) for m in sc},
                      **{f"{m}_false": sc[m][1] for m in sc}})
-    os.makedirs(os.path.join(HERE, "run"), exist_ok=True)
-    path = os.path.join(HERE, "run", "compare_leaks.csv")
+    os.makedirs(os.path.join(HERE, "results"), exist_ok=True)
+    path = os.path.join(HERE, "results", "compare_leaks.csv")
     with open(path, "w", newline="") as f:
         wr = csv.DictWriter(f, rows[0])
         wr.writeheader()

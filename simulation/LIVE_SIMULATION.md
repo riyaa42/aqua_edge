@@ -19,7 +19,7 @@ The earlier offline test fed every node a pre-made 48-hour file of sensor values
 | Water engine | `live/water.py` | Runs the building B water network (WNTR) one minute at a time and gives each node its readings |
 | Timekeeper | `live/timekeeper.py` | The clock of the whole simulation: steps the water, applies commands, passes messages through the radio model |
 | Nodes and gateway | `live/node.py` | One process (or container) per node, running the real firmware |
-| Firmware | `webots/firmware/aqua_edge.py`, `gateway.py` | Detection rules, alerts, sending, re-sending, SD card storage, gateway analysis |
+| Firmware | `../firmware/aqua_edge.py`, `gateway.py` | Detection rules, alerts, sending, re-sending, SD card storage, gateway analysis |
 | Radio model | `live/radio.py` | Decides which packets arrive: airtime, collisions, radio cuts, weak links |
 | Control panel | `live/control_panel.py` | Streamlit web page to trigger events and watch alerts |
 | Checker | `live/check_comms.py` | Scores a finished run with PASS/FAIL lines |

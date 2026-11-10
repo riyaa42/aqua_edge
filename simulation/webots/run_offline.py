@@ -12,7 +12,7 @@ import shutil
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path[:0] = [HERE, os.path.join(HERE, "firmware")]
+sys.path[:0] = [HERE, os.path.join(HERE, "..", "..", "firmware")]
 from aqua_edge import FlatNode, TankNode, DAY  # noqa: E402
 from gateway import Gateway  # noqa: E402
 from simlink import SensorFeed, load_outages, link_up, STEP_S  # noqa: E402

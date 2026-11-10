@@ -7,9 +7,6 @@ __pycache__/
 first_presentation/Papers/
 
 # Downloaded or regenerated simulation files (see simulation/README.md)
-simulation/data/swifeed/*
-!simulation/data/swifeed/.gitkeep
-simulation/epanet_gui/NET_6_*.inp
 simulation/webots/results/
 simulation/temp.*
 
@@ -19,3 +16,7 @@ simulation/temp.*
 # Live simulation output (rebuilt every run)
 simulation/live/run/
 simulation/ns3/replay_result.csv
+leak_detection/results/
+
+# Downloaded datasets (large, and licensed separately: see tinyml/README.md)
+tinyml/data/

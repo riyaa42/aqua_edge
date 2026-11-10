@@ -7,15 +7,11 @@ smart valve closure over LoRaWAN, but with rooftop tanks):
 4 buildings (A-D), ground + 4 floors, 4 flats per floor = 80 flats.
 
 Height is handled the way EPANET always does it: every junction has an elevation,
-so upper floors automatically get less pressure. The EPANET map is a 2D front view
-(floors drawn stacked); results/society_3d.png shows the real 3D layout.
+so upper floors automatically get less pressure.
 
-Writes epanet_gui/SOCIETY_normal.inp and epanet_gui/SOCIETY_leak.inp (leak in flat B-203).
+Used as a module: webots/make_scenario.py builds building B from it (live/water.py uses that).
 """
 import numpy as np
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 import wntr
 from wntr.network.controls import ValueCondition, ControlAction, Control
 
@@ -36,8 +32,6 @@ PATTERN = np.array([0.2, 0.15, 0.1, 0.1, 0.3, 1.0, 2.4, 2.8, 2.5, 1.6, 1.0, 0.8,
                     0.9, 0.8, 0.6, 0.6, 0.8, 1.3, 1.9, 2.1, 1.6, 1.0, 0.6, 0.3])
 PATTERN = PATTERN / PATTERN.mean()
 
-SITE = {"A": (0, 0), "B": (60, 0), "C": (0, 60), "D": (60, 60)}   # real positions (m), for 3D plot
-SUMP_SITE = (30, 30)
 ROOF = FLOORS * FLOOR_HEIGHT_M
 
 
@@ -100,88 +94,3 @@ def build(leak=False):
         wn.add_control("BURST-START", Control._time_control(
             wn, BURST_START_H * 3600, "SIM_TIME", False, ControlAction(wn.get_link(f"{BURST_AT}-BURSTPIPE"), "status", 1)))
     return wn
-
-
-def site_xyz(wn, name):
-    """Real 3D position of a node (site x, y in metres, elevation z)."""
-    b = name.split("-")[0]
-    if name == "SUMP":
-        return (*SUMP_SITE, -1)
-    bx, by = SITE[b]
-    if name.endswith("PUMPOUT"):
-        return (*SUMP_SITE, 0)
-    if name.endswith("TANK"):
-        return (bx, by, ROOF + 1)
-    if name.endswith("BASE"):
-        return (bx, by, 0)
-    z = wn.get_node(name).elevation
-    if "-D" in name:
-        return (bx, by, z)
-    k = int(name[-1])
-    return (bx + [-6, 6, 6, -6][k - 1], by + [-6, -6, 6, 6][k - 1], z)
-
-
-if __name__ == "__main__":
-    out = {}
-    for tag, leak in [("normal", False), ("leak", True)]:
-        wn = build(leak)
-        wntr.network.write_inpfile(wn, f"epanet_gui/SOCIETY_{tag}.inp", units="LPS")
-        wn = wntr.network.WaterNetworkModel(f"epanet_gui/SOCIETY_{tag}.inp")   # check the written file itself
-        out[tag] = (wn, wntr.sim.EpanetSimulator(wn).run_sim())
-
-    wn, r = out["normal"]
-    flats = [n for n in wn.junction_name_list if n[-1].isdigit() and n[-2] == "0"]
-    p = r.node["pressure"][flats]
-    lvl = r.node["pressure"][[f"{b}-TANK" for b in BUILDINGS]]
-
-    # Self-checks: physics must make sense
-    assert (p > 0).all().all(), "a flat lost all pressure"
-    assert (lvl.values > 0.21).all(), "a tank ran dry"
-    peak = 8 * 3600
-    by_floor = {f: p.loc[peak, [n for n in flats if n.split("-")[1][0] == ("G" if f == 0 else str(f))]].mean()
-                for f in range(FLOORS)}
-    assert all(by_floor[f] > by_floor[f + 1] for f in range(FLOORS - 1)), "upper floors should get less pressure"
-
-    wl, rl = out["leak"]
-    # Tank must never hit its minimum in the leak run either: EPANET flip-flops the outlet when a tank is empty
-    assert (rl.node["pressure"][[f"{b}-TANK" for b in BUILDINGS]].values > 0.25).all(), "leak run emptied a tank"
-    night = slice(1 * 3600, 4 * 3600)
-    use = lambda res, b: 1000 * res.node["demand"].loc[night, [n for n in flats if n.startswith(b)]].sum(1).mean()
-    lines = ["Pressure at 8 am (morning peak), average per floor (m):"]
-    lines += [f"  {'Ground' if f == 0 else f'Floor {f}'}: {by_floor[f]:.1f} m ({by_floor[f] * 1.42:.1f} psi)" for f in range(FLOORS)]
-    lines += [f"Tank levels stayed between {lvl.values.min():.2f} m and {lvl.values.max():.2f} m",
-              f"Pump starts per building per day: "
-              + ", ".join(f"{b} {int((r.link['status'][f'{b}-PUMP'].diff() > 0).sum())}" for b in BUILDINGS),
-              f"Leak in {LEAK_FLAT}: night-time (1-4 am) water use in building B "
-              f"{use(r, 'B'):.3f} L/s normal vs {use(rl, 'B'):.3f} L/s with leak",
-              f"Pressure at {LEAK_FLAT} at 8 am: {r.node['pressure'].loc[peak, LEAK_FLAT]:.2f} m normal vs "
-              f"{rl.node['pressure'].loc[peak, LEAK_FLAT]:.2f} m with leak",
-              f"Pump starts for building B: normal {int((r.link['status']['B-PUMP'].diff() > 0).sum())}, "
-              f"with leak {int((rl.link['status']['B-PUMP'].diff() > 0).sum())}",
-              f"Burst at {BURST_AT} from {BURST_START_H}:00: flow {1000 * rl.node['demand'].loc[12 * 3600, BURST_AT + '-BURST']:.2f} L/s at noon; "
-              f"building C pump starts {int((rl.link['status']['C-PUMP'].diff() > 0).sum())} vs {int((r.link['status']['C-PUMP'].diff() > 0).sum())} normal; "
-              f"lowest tank C level {rl.node['pressure']['C-TANK'].min():.2f} m vs {r.node['pressure']['C-TANK'].min():.2f} m normal",
-              f"Building C top-floor pressure, lowest of the day: {rl.node['pressure'][[n for n in flats if n.startswith('C-4')]].min().min():.2f} m "
-              f"with burst vs {r.node['pressure'][[n for n in flats if n.startswith('C-4')]].min().min():.2f} m normal"]
-    print("\n".join(lines))
-    open("results/society_summary.txt", "w").write("\n".join(lines) + "\n")
-
-    # 3D picture, nodes coloured by pressure at the morning peak
-    fig = plt.figure(figsize=(10, 8))
-    ax = fig.add_subplot(projection="3d")
-    for l in wn.link_name_list:
-        link = wn.get_link(l)
-        a, c = site_xyz(wn, link.start_node_name), site_xyz(wn, link.end_node_name)
-        ax.plot(*zip(a, c), color="0.6", lw=1.5 if "-P" not in l else 0.8)
-    xyz = np.array([site_xyz(wn, n) for n in flats])
-    sc = ax.scatter(*xyz.T, c=p.loc[peak].values, cmap="viridis", s=45, depthshade=False)
-    for b in BUILDINGS:
-        ax.scatter(*site_xyz(wn, f"{b}-TANK"), marker="s", s=150, color="tab:blue")
-        ax.text(*np.add(site_xyz(wn, f"{b}-TANK"), (0, 0, 2)), f"Building {b}", ha="center", weight="bold")
-    ax.scatter(*site_xyz(wn, "SUMP"), marker="s", s=150, color="tab:cyan")
-    ax.text(*np.add(site_xyz(wn, "SUMP"), (0, 0, -4)), "Sump + pumps", ha="center")
-    fig.colorbar(sc, ax=ax, shrink=0.6, label="Pressure at 8 am (m)")
-    ax.set_xlabel("x (m)"); ax.set_ylabel("y (m)"); ax.set_zlabel("Height (m)")
-    ax.set_title("Housing society: 4 buildings, rooftop tanks, 80 flats")
-    ax.view_init(elev=22, azim=-60)
-    fig.tight_layout(); fig.savefig("results/society_3d.png", dpi=140)

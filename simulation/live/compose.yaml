@@ -8,7 +8,7 @@ x-env: &env
 x-node: &node
   image: aqua-live
   user: "${UID:-1000}:${GID:-1000}"      # files in live/run/ stay yours, not root's
-  volumes: [..:/sim]
+  volumes: [..:/sim, ../../firmware:/firmware]   # code from simulation/ and IOT_2026/firmware/
   command: python3 live/node.py
   environment: *env
 

@@ -3,7 +3,7 @@
     NODE_ID=B-203 python3 live/node.py
     NODE_ID=GATEWAY python3 live/node.py
 
-Runs the real firmware (webots/firmware) through NetHAL, a hardware layer that gets this node's
+Runs the real firmware (IOT_2026/firmware) through NetHAL, a hardware layer that gets this node's
 sensor readings and radio messages from the timekeeper, one minute at a time. Standard library only.
 """
 import json
@@ -15,7 +15,7 @@ import zlib
 from multiprocessing.connection import Client
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(HERE, "..", "webots", "firmware"))  # ponytail: move firmware/ to a shared folder once Webots is retired
+sys.path.insert(0, os.path.join(HERE, "..", "..", "firmware"))   # IOT_2026/firmware: the real node code
 from aqua_edge import FlatNode, TankNode  # noqa: E402
 from gateway import Gateway  # noqa: E402
 

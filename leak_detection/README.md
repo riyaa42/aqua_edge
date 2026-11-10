@@ -2,7 +2,24 @@
 
 This document explains, step by step, how Aqua Edge finds water leaks in building B: which sensors are used, where each decision is made, the simple math behind every check, how the results reach the gateway, how well it worked in testing, and what still needs fixing.
 
-All numbers below come from the code in `webots/firmware/aqua_edge.py` (the node firmware) and `webots/firmware/gateway.py` (the gateway).
+All numbers below come from the code in `../firmware/aqua_edge.py` (the node firmware) and `../firmware/gateway.py` (the gateway).
+
+### Where the code is
+
+| What | File | Where in it |
+|---|---|---|
+| Learning "normal" (hourly average and spread) | `../firmware/aqua_edge.py` | `class Baseline` |
+| All settings (limits, waits) | `../firmware/aqua_edge.py`, `../firmware/gateway.py` | Constants at the top of each file |
+| Night check, too-much check, pressure early warning (every flat node) | `../firmware/aqua_edge.py` | `FlatNode.check` |
+| Litres per 15 minutes sent to the gateway (flat node) | `../firmware/aqua_edge.py` | `FlatNode.accumulate` |
+| Tank outflow check, tank level flag (tank node) | `../firmware/aqua_edge.py` | `TankNode.check` |
+| Building check (water in = water out) | `../firmware/gateway.py` | `Gateway.mass_balance` |
+| Supply-event rule | `../firmware/gateway.py` | `Gateway.supply_rule` |
+| New vs repeat alert | `../firmware/gateway.py` | `Gateway.check_repeat` |
+| Flow vs pressure comparison | `compare_leaks.py` (this folder) | |
+| Live test scenario | `../simulation/live/scenarios/flow_leaks.jsonl` | |
+
+The same firmware files run in the simulation now and are meant to run on the Raspberry Pi nodes later.
 
 ---
 
@@ -38,7 +55,7 @@ There are two kinds of leak:
 
 ## 2. Why we use flow, not pressure
 
-We tested both methods on 35 simulated runs (`live/compare_leaks.py`). Leaks were placed in 5 flats and on all 5 downtake sections, in three sizes, plus 5 runs with no leak at all.
+We tested both methods on 35 simulated runs (`compare_leaks.py`). Leaks were placed in 5 flats and on all 5 downtake sections, in three sizes, plus 5 runs with no leak at all.
 
 | | Flow | Pressure |
 |---|---|---|
@@ -189,7 +206,7 @@ This rule is our own addition, not from a paper.
 
 ### 8.1 Full live system test
 
-The whole system ran for 48 simulated hours: real firmware on 22 nodes, the real gateway, the LoRa radio model. Scenario: `live/scenarios/flow_leaks.jsonl`.
+The whole system ran for 48 simulated hours: real firmware on 22 nodes, the real gateway, the LoRa radio model. Scenario: `../simulation/live/scenarios/flow_leaks.jsonl`.
 
 | Leak added | Caught by | Reached gateway |
 |---|---|---|
@@ -244,11 +261,13 @@ See section 2. Flow caught every leak with no false alarms. Its detection times 
 
 ## 11. How to run the tests
 
-From the `simulation/` folder:
+From the `simulation/` folder (it holds the Python environment and the water model):
 
 ```
 sh live/run_local.sh --scenario live/scenarios/flow_leaks.jsonl   # full live system, three leaks
 python3 live/check_comms.py                                       # PASS/FAIL report for that run
-uv run python live/compare_leaks.py                               # flow vs pressure, 35 runs (~5 min)
-uv run python live/compare_leaks.py --check                       # self-check of the scoring
+uv run python ../leak_detection/compare_leaks.py                  # flow vs pressure, 35 runs (~5 min)
+uv run python ../leak_detection/compare_leaks.py --check          # self-check of the scoring
 ```
+
+Results of the comparison are written to `leak_detection/results/compare_leaks.csv`.

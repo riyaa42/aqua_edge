@@ -1,14 +1,14 @@
 # Aqua Edge in Webots: firmware test bench
 
-EPANET (through WNTR) simulates the water. Webots runs the **real node firmware** on 20 flat nodes, 1 tank node and 1 gateway in a 3D model of building B. The firmware never talks to Webots directly, only to a small hardware layer, so the same `firmware/` files are meant to run on the Raspberry Pi Zero 2 W.
+EPANET (through WNTR) simulates the water. Webots runs the **real node firmware** on 20 flat nodes, 1 tank node and 1 gateway in a 3D model of building B. The firmware never talks to Webots directly, only to a small hardware layer, so the same `../../firmware/` files are meant to run on the Raspberry Pi Zero 2 W.
 
 ## How the pieces fit
 
 | File | Job |
 |---|---|
 | `make_scenario.py` | Simulates building B for 48 h in EPANET and writes what every sensor would read (`data/sensors.csv`), the planted events (`data/events.csv`) and network outages (`data/outages.csv`) |
-| `firmware/aqua_edge.py` | **Node firmware**: detection rules, valve decisions, store-and-forward queue |
-| `firmware/gateway.py` | **Gateway firmware**: acknowledgements, supply-event rule, mass balance |
+| `../../firmware/aqua_edge.py` | **Node firmware**: detection rules, valve decisions, store-and-forward queue |
+| `../../firmware/gateway.py` | **Gateway firmware**: acknowledgements, supply-event rule, mass balance |
 | `simlink.py` | Serves sensor readings and outage times to a simulated node |
 | `run_offline.py` | Runs all firmware without Webots in about 1 second and scores it. Use it after every firmware change |
 | `webots_hal.py` | Hardware layer for Webots (radio = Emitter/Receiver, light = LED, SD card = file) |
