@@ -5,7 +5,7 @@
 ### A. Monitoring Node
 
 1. Raspberry Pi Zero 2 W
-2. Battery HAT for battery power management and power multiplexing
+2. 5 V mains power supply (micro-USB, 2.5 A) for the Raspberry Pi
 3. LoRa transceiver module 1 with compatible antenna
 4. pH sensor
 5. TDS sensor
@@ -17,7 +17,7 @@
 11. RTC (Real-Time Clock) module
 12. microSD card
 13. Buzzer module for local alerts
-14. 18650 Li-ion battery cell(s) compatible with the Battery HAT
+14. Mains socket near each node (one per flat, one at the tank)
 15. USB cables, jumper wires, and compatible connectors
 
 ### B. Gateway Node
@@ -33,7 +33,7 @@
 
 ## 2. Component Connections and Data Flow
 
-The pH, TDS, turbidity, temperature, flow, and pressure sensors are connected to the monitoring node built around the Raspberry Pi Zero 2 W. The analog-output sensors connect to the 8-channel ADC, which converts their analog signals into digital readings for processing by the Pi. The ADC communicates with the Raspberry Pi through the I²C interface. Flow sensors that produce pulse outputs may require a GPIO input rather than an ADC channel, depending on the selected sensor model. The RTC is used to timestamp sensor readings and detected events; its connection interface will be determined after the RTC model is finalized (I²C or direct). The microSD card holds the operating system, the TinyML model used for local inference, and a timestamped log of sensor readings and detected events, which are kept locally and re-sent when the LoRa link becomes available. The buzzer connects directly to the Raspberry Pi to provide audible alerts when a configured anomaly is detected. The Battery HAT manages the monitoring node's battery-based power arrangement and power multiplexing using compatible 18650 cells.
+The pH, TDS, turbidity, temperature, flow, and pressure sensors are connected to the monitoring node built around the Raspberry Pi Zero 2 W. The analog-output sensors connect to the 8-channel ADC, which converts their analog signals into digital readings for processing by the Pi. The ADC communicates with the Raspberry Pi through the I²C interface. Flow sensors that produce pulse outputs may require a GPIO input rather than an ADC channel, depending on the selected sensor model. The RTC is used to timestamp sensor readings and detected events; its connection interface will be determined after the RTC model is finalized (I²C or direct). The microSD card holds the operating system, the TinyML model used for local inference, and a timestamped log of sensor readings and detected events, which are kept locally and re-sent when the LoRa link becomes available. The buzzer connects directly to the Raspberry Pi to provide audible alerts when a configured anomaly is detected. Each monitoring node runs on mains power through a 5 V USB power supply; no battery is used.
 
 The Raspberry Pi processes sensor readings locally and runs the configured detection logic for water-quality anomalies, pipeline leakage, and abnormal consumption. It can continue detecting anomalies and generating local buzzer alerts without Internet connectivity, while locally storing readings and relevant event information for later use. The Pi transmits sensor readings, detected events, and node status through LoRa transceiver module 1. At the gateway, LoRa transceiver module 2 receives these messages and passes them to the ESP32, which relays the data to the laptop over USB serial. The laptop runs the gateway application and performs cross-node analysis by combining information received from monitoring nodes, assessing risk, and prioritizing maintenance. It also displays the collected data and analysis results. When Internet connectivity is available, the laptop can optionally synchronize data with a cloud service for remote monitoring and historical analysis. When Internet access is unavailable, local detection and alerts at the monitoring node continue, and gateway-level analysis can continue on the laptop as long as the LoRa link and local gateway hardware remain operational.
 
@@ -51,4 +51,4 @@ Paper [5] uses EPANET to model water-distribution behaviour and NS-3 to simulate
 
 Paper [6] develops a physical water-distribution prototype with flow and water-quality sensors arranged across network nodes, synchronizes measurements, and compares main-pipe and branch-flow measurements to identify leakage conditions. Its flow-balance methodology informs our selection of flow sensors and our leakage-detection approach, while its cloud-oriented data pipeline provides the baseline against which our project's offline-first design can be evaluated.
 
-Taken together, these methodologies support the selection of water-quality and pipeline sensors, local processing, LoRa communication, timestamping, and local storage. The 8-channel ADC, Battery HAT, 18650 cells, buzzer, and USB connections are implementation choices needed to interface and power our chosen hardware and support local alerts; they should not be presented as components specifically validated by all six papers. The reviewed papers provide methodological precedents for individual functions, while our project's proposed integration of water-quality anomaly detection, leakage detection, and abnormal-consumption detection in an offline-first architecture is what we intend to evaluate.
+Taken together, these methodologies support the selection of water-quality and pipeline sensors, local processing, LoRa communication, timestamping, and local storage. The 8-channel ADC, mains power supply, buzzer, and USB connections are implementation choices needed to interface and power our chosen hardware and support local alerts; they should not be presented as components specifically validated by all six papers. The reviewed papers provide methodological precedents for individual functions, while our project's proposed integration of water-quality anomaly detection, leakage detection, and abnormal-consumption detection in an offline-first architecture is what we intend to evaluate.

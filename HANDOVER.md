@@ -8,7 +8,7 @@ Status as of 11 November 2026, branch `live-simulation`. This file is the single
 
 ## 1. The project in one paragraph
 
-Aqua Edge (CSD457 Internet of Things; earlier names: JalRakshak, HydroDrive) is an **offline-first** water monitoring system for one residential building, "building B": 20 flats on 5 floors (G, 1 to 4; 4 flats per floor) fed by a rooftop tank through a shared downtake pipe. Every flat and the tank get a small node (Raspberry Pi Zero 2 W) with sensors. Nodes detect **leaks, abnormal consumption and unsafe water on the device itself**, warn locally (buzzer, LED, valve), and send alerts and 15-minute summaries over **LoRa** (long-range, low-power radio; no internet needed) to a gateway in the building. The gateway does building-wide checks. Nothing depends on the internet or a cloud.
+Aqua Edge (CSD457 Internet of Things; earlier names: JalRakshak, HydroDrive) is an **offline-first** water monitoring system for one residential building, "building B": 20 flats on 5 floors (G, 1 to 4; 4 flats per floor) fed by a rooftop tank through a shared downtake pipe. Every flat and the tank get a small node (Raspberry Pi Zero 2 W on mains power) with sensors. Nodes detect **leaks, abnormal consumption and unsafe water on the device itself**, warn locally (buzzer, LED, valve), and send alerts and 15-minute summaries over **LoRa** (long-range, low-power radio; no internet needed) to a gateway in the building: a LoRa module on an ESP32 board, connected by USB to a laptop that runs the gateway program and does building-wide checks. Nothing depends on the internet or a cloud.
 
 ---
 
@@ -52,6 +52,8 @@ Every node runs one step **once a minute**: read sensors, learn or check, queue 
 - **Messages:** `ALERT` (urgent), `FLAG`, `SUM` (15-minute summary: litres used, lowest pressure). Every message carries node id `n`, sequence `s`, node time `t`.
 
 ### 3.2 Gateway (`firmware/gateway.py`)
+
+Hardware: LoRa module + ESP32 (radio bridge: passes packets between LoRa and USB serial) + laptop. `gateway.py` runs **on the laptop**; it needs a small laptop-side hardware layer that reads and writes packets over the USB serial link.
 
 1. **ACK** every message; the ACK carries the gateway time `gt`, and nodes reset their clocks from it. Duplicates are dropped; each logged message gets the receive time `rx`.
 2. **Building check (mass balance)** [Ali et al. [6], for comparing tank supply with the flats' use to find pipe leaks]: per 15-minute block, (water out of tank - sum of all flats) / water out of tank. Above 10% for 2 blocks gives `PIPE_LEAK`. Blocks under 5 L are skipped. Re-arms after 2 normal blocks. Cannot see leaks inside a flat (those pass the flat's meter; the flat's own checks catch them).
@@ -120,18 +122,19 @@ From `sh simulation/check_all.sh` on 11 November 2026: **all checks pass.**
 | D9 | **Live simulation is the main test; Webots parked.** | Webots water is fixed in advance and its radio has no LoRa timing. Webots may come back as a 3D demo if the course expects one. |
 | D10 | **Pi fit will be tested on a real Pi Zero 2 W**, not by limiting Docker containers. | A laptop container can only estimate Pi processor time. |
 | D11 | **Valve closes only on the night check.** | The too-much check cannot tell a leak from a busy day. |
+| D12 | **Hardware: each node is a Raspberry Pi Zero 2 W on mains power (no battery); the gateway is LoRa module + ESP32 + laptop.** | Mains removes the battery-life problem of a Pi running Linux (about 0.5 to 0.7 W even when idle). The laptop has the power and screen for gateway analysis and a dashboard; the ESP32 only bridges the radio. |
 
 ---
 
 ## 6. Open decisions (need the team)
 
 1. **Water-quality model classes:** normal / anomaly (matches the GECCO 2019 dataset directly) or normal / runoff / chemical (needs extra labels we make ourselves)? Blocks the TinyML work. Datasets surveyed in `tinyml/README.md`.
-2. **Node power: mains or battery?** `docs/components.md` lists a Battery HAT with 18650 cells. A Pi Zero 2 W runs full Linux and draws about 0.5 to 0.7 W even when idle, so a battery would last only days. On mains (with a backup cell) it is fine. If battery is required, consider a microcontroller (for example ESP32 with deep sleep, firmware ported to MicroPython).
-3. **Gateway hardware:** `docs/components.md` says LoRa module + ESP32 + laptop over USB; the `gateway.py` docstring says Pi Zero 2 W with a LoRa HAT. The gateway code is plain Python, so it can run on the laptop with the ESP32 as a radio bridge. Pick one and update both.
-4. **Timestamps** (section 3.4): agree UTC Unix seconds and ISO 8601 logs, then build.
-5. **Webots:** keep as 3D demo or drop (was it promised in the proposal?).
-6. **Pass marks** in `simulation/live/check_comms.py` are placeholders; agree final values.
-7. **What happens on a daytime too-much alert:** alert the resident only, or more?
+2. **Timestamps** (section 3.4): agree UTC Unix seconds and ISO 8601 logs, then build.
+3. **Webots:** keep as 3D demo or drop (was it promised in the proposal?).
+4. **Pass marks** in `simulation/live/check_comms.py` are placeholders; agree final values.
+5. **What happens on a daytime too-much alert:** alert the resident only, or more?
+
+Settled on 11 November 2026: nodes on mains power, gateway = LoRa + ESP32 + laptop (decision D12).
 
 ---
 
@@ -142,7 +145,8 @@ From `sh simulation/check_all.sh` on 11 November 2026: **all checks pass.**
 | Simulated water use is too smooth (about 0.015 L/s at the 7 am peak, one identical daily pattern, no bursts like showers) | "0 false alarms" is weak evidence. Test the too-much check on real household data (Cache County HydroShare, 31 homes, 4-second readings, CC BY). |
 | Volume = flow x 60 from one reading per minute | Real hardware should count flow-sensor pulses. |
 | Dripping taps are below the 0.02 L/s night limit | Check the chosen flow sensor's minimum flow. |
-| Learned baseline is not saved to the SD card | A node forgets "normal" after a power cut. Easy fix: save the 24-hour table. |
+| Learned baseline is not saved to the SD card | A node forgets "normal" after a power cut. With mains-only nodes every building power cut restarts every node, so this matters: save the 24-hour table to the SD card. |
+| Mains only: a building power cut switches nodes off | No detection until power returns, and the tank still feeds the flats by gravity, so a leak keeps running. The simulated "power cut" event only stops the pump; nodes stay on. On return, nodes need about 30 s or more to boot. Sudden power loss can also damage an SD card being written; keep writes small. |
 | Baseline learned once, from one day | A leak on day 1 is learned as normal; habits change; weekdays differ from Sundays. |
 | A full radio cut gives 21 separate `NODE_SILENT` | Better: one "all nodes silent: radio or gateway problem". |
 | A leak that drains the tank can trigger `SUPPLY_EVENT` | Seen in the flow-leak run at 10:31 and 17:56. |
@@ -157,9 +161,11 @@ From `sh simulation/check_all.sh` on 11 November 2026: **all checks pass.**
 
 ## 8. Next steps (suggested order)
 
-1. Decide open decisions 1 to 3.
+1. Decide open decision 1 (quality model classes).
 2. **Real Pi Zero 2 W test:** run one node's firmware with simulated readings; measure memory (`/usr/bin/time -v`), processor (`htop`), temperature (`vcgencmd measure_temp`).
-3. **Pi hardware layer** `firmware/pi_hal.py`: real LoRa module with CAD, DS3231 clock, SD card, flow pulses, buzzer, LED, valve (same interface as `NetHAL` in `simulation/live/node.py`).
+3. **Hardware layers** (same interface as `NetHAL` in `simulation/live/node.py`):
+   - `firmware/pi_hal.py` for the nodes: real LoRa module with CAD, DS3231 clock, SD card, flow pulses, buzzer, LED, valve.
+   - A laptop hardware layer for the gateway that exchanges packets with the ESP32 over USB serial, plus a small ESP32 program that bridges LoRa and serial (and sends the ACKs the laptop asks for).
 4. **TinyML model:** train on the chosen dataset, quantize to 8 bits, replace `classify_quality`.
 5. Timestamps (UTC Unix seconds, ISO 8601 logs).
 6. Save the baseline to SD; one combined "all silent" alert; re-send backoff.

@@ -1,4 +1,5 @@
-"""Aqua Edge gateway firmware (one per building, e.g. a Raspberry Pi Zero 2 W with a LoRa HAT).
+"""Aqua Edge gateway program (one per building). Runs on the laptop; a LoRa module on an ESP32
+board bridges the radio to the laptop over USB serial.
 
 Same hardware layer as the nodes (hal.now / send / receive). Jobs:
   1. Acknowledge every node message (so nodes can delete it from their SD queue) and log it.
