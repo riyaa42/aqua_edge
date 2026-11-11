@@ -3,8 +3,8 @@
 __pycache__/
 *.pyc
 
-# Paper PDFs are copyrighted and this repo is public: see first_presentation/references.md
-first_presentation/Papers/
+# Paper PDFs are copyrighted and this repo is public: see docs/presentations/first/references.md
+docs/presentations/first/Papers/
 
 # Downloaded or regenerated simulation files (see simulation/README.md)
 simulation/webots/results/

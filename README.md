@@ -8,5 +8,6 @@ Aqua Edge (CSD457 Internet of Things): an offline-first IoT node that detects un
 | `leak_detection/` | How flow-based leak detection works, its math, and the flow vs pressure test |
 | `tinyml/` | Water-quality model: datasets, early model script |
 | `simulation/` | Simulation and network design: water network, live simulation, LoRa radio model, ns-3, Webots |
-| `prep_work/` | Components and connections list |
-| `first_presentation/` | Slides, speaking script and Q&A prep for the first review, reference list |
+| `docs/` | Components and connections list (`components.md`); presentations (`presentations/first/`: slides, speaking script, Q&A prep, reference list) |
+
+Run every check in one go: `sh simulation/check_all.sh` (about 4 minutes).

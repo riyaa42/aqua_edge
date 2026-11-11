@@ -26,6 +26,7 @@ sh ns3/run_ns3.sh replay                                          # ns-3 replay 
 ```
 
 Self-checks: `python3 live/radio.py`, `uv run python live/water.py`, `python3 webots/run_offline.py`.
+All of them plus both live scenarios in one go: `sh check_all.sh` (about 4 minutes, stops at the first failure).
 
 ## Results so far (standard scenario)
 
