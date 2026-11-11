@@ -46,7 +46,7 @@ The timekeeper waits for every node before moving on (this is called *lockstep*)
 
 ## 4. Detection and alerts (firmware)
 
-- Flat nodes detect leaks with three rules: continuous night flow, abnormal consumption, and pressure drop with high flow.
+- Flat nodes detect leaks with flow only: continuous night flow and abnormal consumption (the pressure rule was removed; see `../leak_detection/README.md` section 6).
 - The tank node detects abnormal supply and water-quality events.
 - The gateway runs a mass balance (supply flow against the sum of flat flows) to spot pipe leaks [Ali et al. [6], for comparing the tank supply against the flats to find pipe leaks].
 - **Alerts re-arm.** Once a problem has been quiet for 10 minutes (`ALERT_CLEAR_S`), the alert can fire again if the problem comes back.

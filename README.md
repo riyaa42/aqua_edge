@@ -10,4 +10,6 @@ Aqua Edge (CSD457 Internet of Things): an offline-first IoT node that detects un
 | `simulation/` | Simulation and network design: water network, live simulation, LoRa radio model, ns-3, Webots |
 | `docs/` | Components and connections list (`components.md`); presentations (`presentations/first/`: slides, speaking script, Q&A prep, reference list) |
 
+**New to the project? Start with [`HANDOVER.md`](HANDOVER.md)**: what exists, why, current results, open decisions and next steps.
+
 Run every check in one go: `sh simulation/check_all.sh` (about 4 minutes).
