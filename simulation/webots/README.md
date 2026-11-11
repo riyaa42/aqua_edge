@@ -1,6 +1,8 @@
 # Aqua Edge in Webots: firmware test bench
 
-EPANET (through WNTR) simulates the water. Webots runs the **real node firmware** on 20 flat nodes, 1 tank node and 1 gateway in a 3D model of building B. The firmware never talks to Webots directly, only to a small hardware layer, so the same `../../firmware/` files are meant to run on the Raspberry Pi Zero 2 W.
+EPANET (through WNTR) simulates the water. Webots runs the **real node firmware** on 20 flat nodes, 1 tank node and 1 gateway in a 3D model of building B. The firmware never talks to Webots directly, only to a small hardware layer, so the same `../../firmware/` files are meant to run on the real hardware (Raspberry Pi Zero 2 W nodes; gateway on a laptop with an ESP32 radio bridge).
+
+**Status: parked.** The main test is now the live simulation (`../live/`, see `../LIVE_SIMULATION.md`), which has realistic LoRa timing and lets events be added while it runs. Webots may be kept as a 3D demo. `run_offline.py` here is still used as a fast firmware test.
 
 ## How the pieces fit
 
@@ -29,9 +31,11 @@ EPANET (through WNTR) simulates the water. Webots runs the **real node firmware*
 Current result (`results/offline/summary.txt`, same in Webots): all 5 events detected, 0 false valve closures, 0 unexplained alerts, nothing left unsent.
 
 ## What the first test taught us
-The first firmware version closed a flat's valve whenever its pressure dropped and the gateway had not declared a supply event, following the pressure-drop rule of Alghamdi et al. [2] (pressure-drop leak rule and smart valve closure over LoRaWAN). During the power cut the tank drained slowly, so flats saw their pressure drop hours apart instead of all at once, the "many nodes at once" rule never fired, and **19 valves closed falsely**. Two changes fixed it:
-1. A flat closes its valve on a pressure drop only if its own flow is also abnormally high (a real leak raises flow; a supply drop does not).
+The first firmware version closed a flat's valve whenever its pressure dropped and the gateway had not declared a supply event, following the pressure-drop rule of Alghamdi et al. [2] (pressure-drop leak rule and smart valve closure over LoRaWAN). During the power cut the tank drained slowly, so flats saw their pressure drop hours apart instead of all at once, the "many nodes at once" rule never fired, and **19 valves closed falsely**. Two changes fixed it at the time:
+1. A flat closed its valve on a pressure drop only if its own flow was also abnormally high (a real leak raises flow; a supply drop does not).
 2. The tank node reports an abnormally low tank, which tells the gateway directly that it is a supply problem.
+
+Later the pressure rule was **removed completely**: a flow vs pressure comparison showed pressure blames the wrong flat and misses small leaks, while flow caught every leak (see `../../leak_detection/README.md`). Flat nodes now use flow only, and the supply event comes from the tank alone (change 2 above).
 
 ## Run it
 
@@ -48,7 +52,7 @@ In Webots, press play. One step is one minute of water time, so 48 h takes about
 After changing the scenario: `uv run python make_scenario.py` (needs the uv project in `simulation/`), then `python3 make_world.py` if the node list changed.
 
 ## Limits
-- Webots radio is range based; it does not model LoRa airtime, spreading factors or collisions (that is the NS-3 part of the plan).
+- Webots radio is range based; it does not model LoRa airtime, spreading factors or collisions (the live simulation and ns-3 do that, see `../live/` and `../ns3/`).
 - Valve decisions are logged but do not change the water simulation yet.
 - Water quality readings are made up, with events planted on purpose; EPANET cannot model pH or TDS.
 - The quality check is threshold rules, to be replaced by a trained quantized model.

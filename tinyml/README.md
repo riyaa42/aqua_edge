@@ -7,7 +7,8 @@ Only water quality uses a model. Leaks and abnormal usage use simple statistics 
 ## Current state
 
 - The tank node in `../firmware/aqua_edge.py` uses **threshold rules** as a stand-in (`classify_quality`): TDS > 600 or pH > 8.5 is chemical; TDS < 120 and pH < 6.8 is runoff.
-- `pre-quality-check/quality.py` is an early re-implementation of the paper's pipeline (4 inputs, two small hidden layers, 3 classes, 8-bit quantization), trained on **made-up** data, because the paper's dataset is not public.
+- The model will run on the **tank node, a Raspberry Pi Zero 2 W** (512 MB memory, full Linux), so it is not limited to microcontroller tools.
+- `pre-quality-check/quality.py` is an early re-implementation of the paper's pipeline (4 inputs, two small hidden layers, 3 classes, 8-bit quantization), trained on **made-up** data, because the paper's dataset is not public. Its notes mention deploying on an ESP32 (the paper's setup); in Aqua Edge the ESP32 is only the gateway's radio bridge, so the target is the Pi.
 
 ## Datasets found
 

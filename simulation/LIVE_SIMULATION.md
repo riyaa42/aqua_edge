@@ -158,10 +158,11 @@ Self-checks: `python3 live/radio.py` and `python3 webots/run_offline.py`.
 - **Water-quality classifier.** It is still threshold rules. The TinyML model is not trained yet.
 - **Gateway repeat check.** The gateway cannot yet tell "the same leak flickering" from "a new leak". It only marks repeats.
 - **Retry storm.** During a 3.5-hour radio cut, nodes made about 13,000 re-send attempts.
+- **Power cuts.** Real nodes run on mains, so a building power cut switches them off. The simulated power cut only stops the pump; nodes stay on.
 
 ## 11. Next steps
 
-1. **Raspberry Pi hardware layer.** A small file like `NetHAL` for the real LoRa module (including CAD), the DS3231 clock and the SD card.
+1. **Hardware layers.** A small file like `NetHAL` for the Raspberry Pi Zero 2 W nodes: real LoRa module (including CAD), DS3231 clock, SD card. And one for the gateway laptop, which exchanges packets with the ESP32 radio bridge over USB serial, plus the small ESP32 bridge program.
 2. **Slot fit check.** Make the firmware send only as many packets as fit in its slot. Alternatively, give slower nodes wider slots. This is needed if any node ever needs SF10 or above.
 3. **Slot assignment on real nodes.** Set each node's slot at installation.
 4. **Real gateway position.** Re-run the ns-3 link table once the gateway's location is decided, for example in another building.

@@ -154,7 +154,6 @@ Settled on 11 November 2026: nodes on mains power, gateway = LoRa + ESP32 + lapt
 | Retry storm during long radio cuts | About 13,000 re-send attempts in 3.5 h; add backoff. |
 | No location for downtake leaks | Building check says "pipe leak", not which floor. |
 | Simulation-only parts | CAD, radio, clock setting and valves are imitated; ns-3 uses EU868 (no Indian band in the module); one uplink channel modelled (IN865 has 3); packets are JSON text. |
-| `simulation/webots/README.md` is out of date | Still describes the removed pressure rule. |
 | `matplotlib` is in `simulation/pyproject.toml` but nothing imports it directly | Can probably be removed. |
 
 ---

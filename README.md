@@ -4,7 +4,7 @@ Aqua Edge (CSD457 Internet of Things): an offline-first IoT node that detects un
 
 | Folder | What is in it |
 |---|---|
-| `firmware/` | The real node and gateway code (runs in the simulation now, on the Raspberry Pi later) |
+| `firmware/` | The real node and gateway code (runs in the simulation now; later on the Raspberry Pi Zero 2 W nodes and the gateway laptop) |
 | `leak_detection/` | How flow-based leak detection works, its math, and the flow vs pressure test |
 | `tinyml/` | Water-quality model: datasets, early model script |
 | `simulation/` | Simulation and network design: water network, live simulation, LoRa radio model, ns-3, Webots |

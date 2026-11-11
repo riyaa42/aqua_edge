@@ -20,7 +20,7 @@ All numbers below come from the code in `../firmware/aqua_edge.py` (the node fir
 | Flow vs pressure comparison | `compare_leaks.py` (this folder) | |
 | Live test scenario | `../simulation/live/scenarios/flow_leaks.jsonl` | |
 
-The same firmware files run in the simulation now and are meant to run on the Raspberry Pi nodes later.
+The same firmware files run in the simulation now and are meant to run on the Raspberry Pi Zero 2 W nodes and the gateway laptop later.
 
 ---
 
@@ -176,7 +176,7 @@ When the pump stops or the tank runs low, it is a supply problem, not a leak. Th
 
 ### Silent nodes (gateway)
 
-A node that sends nothing at all (no alarms, no summaries) may have a flat battery, a broken sensor or a radio problem. The building check needs every node's litres, so it cannot be done honestly without that node: its water would look "missing" and cause a false pipe-leak alarm. So the gateway:
+A node that sends nothing at all (no alarms, no summaries) may have lost power, have a broken sensor or a radio problem. The building check needs every node's litres, so it cannot be done honestly without that node: its water would look "missing" and cause a false pipe-leak alarm. So the gateway:
 
 1. raises `NODE_SILENT` when a node has not been heard for **45 minutes** (3 missed summaries),
 2. raises `BALANCE_PAUSED`, naming the silent nodes, so it is clear the building check is not running,
