@@ -160,6 +160,8 @@ Settled on 11 November 2026: nodes on mains power, gateway = LoRa + ESP32 + lapt
 
 ## 8. Next steps (suggested order)
 
+**Newer agreed plan (2026-11-21): [`docs/IMPROVEMENT_PLAN.md`](docs/IMPROVEMENT_PLAN.md).** It covers safe SD saves, valve removal, signed binary radio messages and smarter leak checks. On real hardware the sensors are replaced by recorded readings fed row by row from a file. Where this list and that plan disagree, the plan wins.
+
 1. Decide open decision 1 (quality model classes).
 2. **Real Pi Zero 2 W test:** run one node's firmware with simulated readings; measure memory (`/usr/bin/time -v`), processor (`htop`), temperature (`vcgencmd measure_temp`).
 3. **Hardware layers** (same interface as `NetHAL` in `simulation/live/node.py`):
