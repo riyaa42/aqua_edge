@@ -42,6 +42,7 @@ Every node runs one step **once a minute**: read sensors, learn or check, queue 
 - **Day 1 (first 24 h): learning only.** Each node records, for each hour of the day, the average and spread of every sensor (`Baseline` class). No alarms on day 1. Each flat learns its own pattern.
 - **Flat node, from day 2: flow only.**
   - *Night check:* flow above 0.02 L/s for 30 minutes in a row between 1 and 5 am gives `LEAK_NIGHT_FLOW` (nobody runs water steadily at night).
+  - *Continuous-flow check:* flow above 0.005 L/s for 8 hours in a row, any time of day, gives `LEAK_CONTINUOUS_FLOW` (a home's water is off now and then; a leak never stops). Catches small daytime leaks early and leaks below the night limit.
   - *Too-much check:* flow above max(3 x this hour's learned average, 0.05 L/s) for 60 minutes gives `ABNORMAL_CONSUMPTION` (it could be guests, not a leak).
   - Pressure is still read, learned and sent in summaries, but raises no alarm (section 5, decision D1).
 - **Tank node:**
@@ -101,7 +102,7 @@ From `sh simulation/check_all.sh` on 11 November 2026: **all checks pass.**
 | Scenario | Result |
 |---|---|
 | Standard (48 h): 3.5 h radio cut, small flat leak, runoff, downtake burst, chemical | All events caught; stored alarms delivered 4 min after the radio returned; 100% of attempts through while radio up; 0 lost; 0 false alarms; radio model vs ns-3 gap 0.0 points |
-| Flow leaks: small leak in B-203 at 02:00, medium leak in B-402 at 10:00, large burst on downtake B-D1 at 18:00 | Night check 30 min; too-much check 60 min; tank outflow 15 min and building check 31 min (67% of water missing); 0 false alarms |
+| Flow leaks: small leak in B-203 at 02:00, medium leak in B-402 at 10:00, large burst on downtake B-D1 at 18:00 | Night check 30 min (continuous-flow check also fires at 8 h); too-much check 60 min; tank outflow 15 min and building check 31 min (67% of water missing); 0 false alarms |
 | Flow vs pressure comparison (35 runs, firmware of commit 4f7867a) | Flow: 30/30 leaks caught, 0 false alarms. Pressure: 748 false alarms (mostly the wrong flat), small leaks missed, faster only on medium/large flat leaks (10 min) |
 | Laptop measurement of one flat node | About 0.2 ms of work per simulated minute, about 13 MB for the whole Python process. To be confirmed on a real Pi Zero 2 W |
 
@@ -144,8 +145,7 @@ Settled on 11 November 2026: nodes on mains power, gateway = LoRa + ESP32 + lapt
 |---|---|
 | Simulated water use is too smooth (about 0.015 L/s at the 7 am peak, one identical daily pattern, no bursts like showers) | "0 false alarms" is weak evidence. Test the too-much check on real household data (Cache County HydroShare, 31 homes, 4-second readings, CC BY). |
 | Volume = flow x 60 from one reading per minute | Real hardware should count flow-sensor pulses. |
-| Dripping taps are below the 0.02 L/s night limit | Check the chosen flow sensor's minimum flow. |
-| Learned baseline is not saved to the SD card | A node forgets "normal" after a power cut. With mains-only nodes every building power cut restarts every node, so this matters: save the 24-hour table to the SD card. |
+| Leaks below the 0.02 L/s night limit | Now caught by the continuous-flow check above 0.005 L/s. Sensors are simulated and ideal. |
 | Mains only: a building power cut switches nodes off | No detection until power returns, and the tank still feeds the flats by gravity, so a leak keeps running. The simulated "power cut" event only stops the pump; nodes stay on. On return, nodes need about 30 s or more to boot. Sudden power loss can also damage an SD card being written; keep writes small. |
 | Baseline learned once, from one day | A leak on day 1 is learned as normal; habits change; weekdays differ from Sundays. |
 | A full radio cut gives 21 separate `NODE_SILENT` | Better: one "all nodes silent: radio or gateway problem". |
@@ -169,7 +169,7 @@ Settled on 11 November 2026: nodes on mains power, gateway = LoRa + ESP32 + lapt
    - A laptop hardware layer for the gateway that exchanges packets with the ESP32 over USB serial, plus a small ESP32 program that bridges LoRa and serial (and sends the ACKs the laptop asks for).
 4. **TinyML model:** train on the chosen dataset, quantize to 8 bits, replace `classify_quality`.
 5. Timestamps (UTC Unix seconds, ISO 8601 logs).
-6. Save the baseline to SD; one combined "all silent" alert; re-send backoff.
+6. One combined "all silent" alert; re-send backoff.
 7. Test the too-much check on Cache County data.
 8. Slot fit check if any node ever needs SF10 or above; set slots at installation; re-run the ns-3 link table once the gateway position is known.
 9. Monitoring dashboard on the laptop.
@@ -244,6 +244,8 @@ Full citations: `docs/presentations/first/references.md`.
 | f2be60b | Flow-only firmware; silent-node alert, building check re-arm, clock check; timing docs |
 | 07fd3bd | ns3/ moved back after an accidental move |
 | 67e849f | docs/ folder; `check_all.sh` |
+| d5f05c3 | Power-cut-safe SD saves (`os.replace`); all valve code removed |
+| (next) | Baseline saved to SD hourly; continuous-flow check |
 
 Earlier work (on `main`): first presentation, components list, Webots test bench, early quality-check script.
 

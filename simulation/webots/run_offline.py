@@ -118,7 +118,7 @@ def score(gw, nodes):
     sup = gw_first("SUPPLY_EVENT", cut_start)
     lines.append(f"E2 power cut: gateway supply event {'at ' + hhmm(sup['t']) if sup else 'NOT raised'}")
     unexplained = [m for m in alerts if (m["n"], m["a"]) not in {
-        ("B-203", "LEAK_NIGHT_FLOW"), ("B-203", "ABNORMAL_CONSUMPTION"), ("B-TANK", "ABNORMAL_SUPPLY"),
+        ("B-203", "LEAK_NIGHT_FLOW"), ("B-203", "LEAK_CONTINUOUS_FLOW"), ("B-203", "ABNORMAL_CONSUMPTION"), ("B-TANK", "ABNORMAL_SUPPLY"),
         ("B-TANK", "QUALITY_RUNOFF"), ("B-TANK", "QUALITY_CHEMICAL"), ("B-TANK", "QUALITY_CLEARED")}]
     lines.append(f"Alerts not explained by a planted event: {len(unexplained)}")
     for m in unexplained:

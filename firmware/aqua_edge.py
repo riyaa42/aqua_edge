@@ -14,7 +14,8 @@ directly; everything goes through a small hardware layer `hal` with these method
     hal.slot                  -> optional (index, count): this node's time slot in each minute
     hal.receive()             -> list of dict messages received since the last call
     hal.led(colour)           -> "green" normal, "yellow" messages waiting, "red" alert active
-    hal.storage_path          -> file for the store-and-forward queue (SD card), or None
+    hal.storage_path          -> file for the store-and-forward queue (SD card), or None;
+                                 the learned baseline is kept next to it (<name>_baseline.json)
 
 Detection rules (all thresholds are calibration knobs at the top):
     Flat node: FLOW ONLY, as chosen and explained in leak_detection/README.md (flow beat
@@ -41,6 +42,10 @@ NIGHT_START_H, NIGHT_END_H = 1, 5
 NIGHT_FLOW_LPS = 0.02         # flow above this at night counts as "someone or something using water"
 NIGHT_FLOW_MIN = 30           # minutes in a row before a leak alert
 HIGH_USE_FACTOR, HIGH_USE_MIN_LPS, HIGH_USE_MIN = 3.0, 0.05, 60
+CONT_FLOW_LPS = 0.005         # below this the flat's water counts as "off"
+CONT_FLOW_MIN = 480           # water never off for 8 h in a row: leak alert, day or night
+# ponytail: 8 h because simulated demand is smooth (normal flats run up to 6 h 1 min nonstop);
+# real use comes in bursts with zero flow between, so retune (likely shorter) on Cache County data
 PRESSURE_SIGMAS, PRESSURE_MARGIN_M, PRESSURE_MIN = 4.0, 0.3, 10   # tank level check
 ALERT_CLEAR_S = 600           # an alert re-arms after its condition has been normal this long;
                               # the gateway decides whether a new alert is a repeat
@@ -124,6 +129,12 @@ class Node:
         self.store = Store(hal.storage_path)
         self.seq = max([m["s"] for m in self.store.queue], default=0)
         self.base = {k: Baseline() for k in self.sensors}
+        self.base_path = hal.storage_path and os.path.splitext(hal.storage_path)[0] + "_baseline.json"
+        if self.base_path and os.path.exists(self.base_path):    # restart after a power cut: keep what was learned
+            with open(self.base_path) as f:
+                for k, d in json.load(f).items():
+                    self.base[k].__dict__.update(d)
+        self.hour = None
         self.alerts = {}               # active alert type -> last time its condition was seen
         self.interval, self.acc = None, {}
 
@@ -145,6 +156,9 @@ class Node:
             if m.get("k") == "ACK" and m.get("n") == self.id:
                 self.store.ack(m["s"])
         hour = int(now % DAY // HOUR)
+        if hour != self.hour:              # once an hour: keep the learned baseline on the SD card
+            self.hour = hour
+            self.save_baseline()
         if now < LEARN_S:
             for k in self.sensors:
                 self.base[k].add(hour, r[k])
@@ -164,6 +178,10 @@ class Node:
                 self.hal.send(m)
         stuck = any(now - m["t"] > RETRY_S for m in self.store.queue)     # unanswered for > 2 min
         self.hal.led("red" if self.alerts else "yellow" if stuck else "green")
+
+    def save_baseline(self):
+        if self.base_path:
+            save_atomic(self.base_path, json.dumps({k: b.__dict__ for k, b in self.base.items()}))
 
     def summarise(self, now, r):
         i = int(now // SUMMARY_S)
@@ -185,7 +203,7 @@ class FlatNode(Node):
 
     def __init__(self, node_id, hal):
         super().__init__(node_id, hal)
-        self.night_run = self.high_run = 0
+        self.night_run = self.high_run = self.cont_run = 0
 
     def check(self, now, hour, r):
         """Leak checks, flow only (leak_detection/README.md section 5). Runs once a minute."""
@@ -195,6 +213,11 @@ class FlatNode(Node):
         self.night_run = self.night_run + 1 if at_night and flow > NIGHT_FLOW_LPS else 0
         if self.night_run >= NIGHT_FLOW_MIN:
             self.alert("LEAK_NIGHT_FLOW", flow=round(flow, 4))
+        # Continuous flow: a home's water is off now and then; a leak never stops. Catches small
+        # leaks that start in the daytime hours before the night check, and ones below its limit
+        self.cont_run = self.cont_run + 1 if flow > CONT_FLOW_LPS else 0
+        if self.cont_run >= CONT_FLOW_MIN:
+            self.alert("LEAK_CONTINUOUS_FLOW", flow=round(flow, 4))
         # Abnormal consumption against this flat's own daily pattern
         limit = max(HIGH_USE_FACTOR * self.base["flow_lps"].mean(hour), HIGH_USE_MIN_LPS)
         self.high_run = self.high_run + 1 if flow > limit else 0
@@ -275,4 +298,40 @@ if __name__ == "__main__":
     assert [m["s"] for m in Store(path).queue] == [1, 2], "old queue must survive intact"
     st.add({"s": 4, "k": "SUM", "t": 180})                               # power back: next save works
     assert [m["s"] for m in Store(path).queue] == [1, 2, 3, 4]
+
+    class FakeHAL:
+        def __init__(self, path, flow):
+            self.t, self.storage_path, self.flow = 0, path, flow
+        def now(self): return self.t
+        def read(self): return {"flow_lps": self.flow(self.t), "pressure_m": 10.0}
+        def receive(self): return []
+        def send(self, m, at_s=None, cad=False): pass
+        def led(self, colour): pass
+
+    def run(node, until):
+        while node.hal.t < until:
+            node.step()
+            node.hal.t += 60
+
+    use = lambda t: 0.012 if t % DAY // HOUR in (7, 8, 9, 18, 19, 20) else 0.0    # mornings, evenings
+    tmp = tempfile.mkdtemp()
+
+    # The baseline survives a power cut in the middle of learning
+    a = FlatNode("B-101", FakeHAL(os.path.join(tmp, "B-101.jsonl"), use))
+    run(a, 12 * HOUR)
+    b = FlatNode("B-101", FakeHAL(os.path.join(tmp, "B-101.jsonl"), use))   # power back, new process
+    nb, na = b.base["flow_lps"].n, a.base["flow_lps"].n
+    assert nb[:11] == na[:11] and nb[7] == 60 and nb[11] == 0     # at most the unfinished hour is lost
+
+    # Normal flat: no alerts. Small daytime leak (0.01 L/s from 10:00 on day 2, below the night
+    # limit): continuous-flow alert after 8 h, the night check never fires
+    alerts = {}
+    for name, flow in (("normal", use), ("leak", lambda t: use(t) + (0.01 if t >= DAY + 10 * HOUR else 0))):
+        n = FlatNode(name, FakeHAL(os.path.join(tmp, name + ".jsonl"), flow))
+        run(n, 2 * DAY)
+        alerts[name] = [(m["a"], m["t"]) for m in n.store.queue if m["k"] == "ALERT"]
+    assert alerts["normal"] == [], alerts["normal"]
+    assert [a for a, _ in alerts["leak"]] == ["LEAK_CONTINUOUS_FLOW"], alerts["leak"]
+    # morning use (from 07:00) runs straight into the leak, so the water has not stopped since 07:00
+    assert alerts["leak"][0][1] == DAY + 7 * HOUR + (CONT_FLOW_MIN - 1) * 60      # 14:59, day 2
     print("node self-check passed")

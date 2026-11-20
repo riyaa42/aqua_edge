@@ -10,7 +10,7 @@ All numbers below come from the code in `../firmware/aqua_edge.py` (the node fir
 |---|---|---|
 | Learning "normal" (hourly average and spread) | `../firmware/aqua_edge.py` | `class Baseline` |
 | All settings (limits, waits) | `../firmware/aqua_edge.py`, `../firmware/gateway.py` | Constants at the top of each file |
-| Night check, too-much check (every flat node, flow only) | `../firmware/aqua_edge.py` | `FlatNode.check` |
+| Night check, continuous-flow check, too-much check (every flat node, flow only) | `../firmware/aqua_edge.py` | `FlatNode.check` |
 | Litres per 15 minutes sent to the gateway (flat node) | `../firmware/aqua_edge.py` | `FlatNode.accumulate` |
 | Tank outflow check, tank level flag (tank node) | `../firmware/aqua_edge.py` | `TankNode.check` |
 | Building check (water in = water out) | `../firmware/gateway.py` | `Gateway.mass_balance` |
@@ -80,6 +80,7 @@ Most leak decisions are made **on the node itself**, not on the gateway. This is
 | Check | Runs on | Why there |
 |---|---|---|
 | Night check | Each flat node | Needs only that flat's own meter |
+| Continuous-flow check | Each flat node | Needs only that flat's own meter |
 | Too-much check | Each flat node | Needs only that flat's own meter and its learned normal |
 | Tank outflow check | Tank node | Needs only the tank's own meter |
 | Building check (water in = water out) | Gateway | Needs numbers from every node at once, and only the gateway receives them all |
@@ -101,6 +102,8 @@ So a flat learns that 7 am is busy (showers) and 3 am is quiet. A big family and
 
 This is the `Baseline` class in `aqua_edge.py`. We checked its math against Python's own statistics functions and it matches to about 15 decimal places.
 
+**Saved to the SD card.** Once an hour the node saves what it has learned (`<name>_baseline.json`, next to the message queue), using the same power-cut-safe save as the queue. After a power cut the node loads it and carries on; at most the unfinished hour of learning is lost. Without this, every building power cut (our nodes have no battery) would wipe what every node had learned.
+
 ---
 
 ## 5. The flow checks, one by one
@@ -115,7 +118,7 @@ Every check has a **"minutes in a row"** rule. A single odd reading never causes
 - **Example:** a running toilet leaks 0.05 L/s (180 litres an hour). At 2 am that is far above 0.02, so after 30 minutes the alarm goes off.
 - **Why 30 minutes:** a toilet flush or a glass of water at night lasts a minute or two, not half an hour.
 - **Good to know:** 0.02 L/s is a fixed number, not learned. So even a leak that was already there during day 1 is still caught.
-- **Limit:** a dripping tap is far smaller than 0.02 L/s and is not caught.
+- **Limit:** a leak below 0.02 L/s is not caught by this check. The continuous-flow check (5.5) catches any leak above 0.005 L/s.
 
 ### 5.2 Too-much check (flat node)
 
@@ -154,7 +157,7 @@ missing % = (tank out - (flat 1 + flat 2 + ... + flat 20)) / tank out x 100
 - **Why 10%:** cheap meters are never perfect. Each can be up to 2% off. Worst case, the tank reads 2% high and all flats read 2% low: (1.02 - 0.98) / 1.02 = 3.9%. So 10% leaves a safe gap.
 - **Why 2 blocks in a row:** one odd block (a glitch) is not enough.
 - **Blocks under 5 litres are skipped:** at night the tank might send out half a litre. A tiny meter error would then look like a huge percentage.
-- **What it cannot see:** a leak inside a flat. That water passes through the flat's meter first, so it counts as "used". The flat's own checks (5.1 and 5.2) catch those.
+- **What it cannot see:** a leak inside a flat. That water passes through the flat's meter first, so it counts as "used". The flat's own checks (5.1, 5.2 and 5.5) catch those.
 
 ---
 
@@ -199,6 +202,18 @@ This follows common practice for LoRa networks: track when each device was last 
 
 **Summaries:** every 15 minutes, each node also sends a summary (litres used, lowest pressure). These go out in the node's own time slot, so they do not collide. The building check is built from these.
 
+### 5.5 Continuous-flow check (flat node)
+
+> **Rule:** if flow stays above **0.005 L/s** for **8 hours in a row**, at any time of day, raise `LEAK_CONTINUOUS_FLOW`.
+
+- **Idea:** in a normal home the water is off now and then (nobody runs a tap all day). A leak never stops. Commercial ultrasonic meters use the same idea (Ultrimis: steady low flow for 720 minutes).
+- **What it adds:**
+  - a small leak that starts in the daytime is caught hours before the night check sees it
+  - leaks between 0.005 and 0.02 L/s, which the night check never sees, are caught
+- **Example (self-check in `aqua_edge.py`):** a 0.01 L/s leak starts at 10:00, right after morning use (07:00 to 10:00). The water has not stopped since 07:00, so the alarm goes off at 14:59. The night check never fires because 0.01 is below its 0.02 limit.
+- **Why 8 hours:** in our simulation, normal flats keep a trickle running for up to **6 h 1 min** in a row, because the simulated use is smooth. 8 hours leaves a safe gap. Real use comes in bursts with zero flow in between, so this can probably be shorter; retune it on real household data.
+- **Good to know:** like the night check, it uses fixed numbers, not the learned baseline. A leak that was already there on day 1 is still caught.
+
 ---
 
 ## 7b. Timing: how often checks run and when messages are sent
@@ -208,6 +223,7 @@ This follows common practice for LoRa networks: track when each device was last 
 | Check | Runs every | Fires after |
 |---|---|---|
 | Night check (flat) | 1 min | 30 min |
+| Continuous-flow check (flat) | 1 min | 8 h |
 | Too-much check (flat) | 1 min | 60 min |
 | Tank outflow (tank) | 1 min | 15 min |
 | Water quality (tank) | 1 min | 3 min |
@@ -245,7 +261,7 @@ The whole system ran for 48 simulated hours: real firmware on 22 nodes, the real
 
 | Leak added | Caught by | Reached gateway |
 |---|---|---|
-| Small leak in flat B-203 at 02:00 | Night check on B-203, 02:30 (30 min) | 02:33 |
+| Small leak in flat B-203 at 02:00 | Night check on B-203, 02:30 (30 min); continuous-flow check 10:00 (8 h) | 02:33 |
 | Medium leak in flat B-402 at 10:00 | Too-much check on B-402, 11:00 (60 min) | 11:01 |
 | Large burst on downtake B-D1 at 18:00 | Tank outflow check 18:15; gateway building check 18:31 (67% missing) | 18:16 / 18:31 |
 
@@ -270,7 +286,7 @@ See section 2. Flow caught every leak with no false alarms. Its detection times 
 | **Timestamps** | Simulation uses seconds since start. | Next, after discussion: UTC Unix seconds from the DS3231, ISO 8601 in log files. |
 | **Simulated water use is too smooth** | Each simulated flat uses a steady trickle (about 0.015 L/s at the 7 am peak). Real use comes in bursts (a shower is 0.1 to 0.15 L/s for 10 minutes). So "0 false alarms" is weak evidence. | Test the too-much check on real home data (Cache County, readings every 4 seconds). |
 | **Volume from one reading per minute** | The code works out litres as flow x 60 from a single reading. A 20-second flush between readings is missed. | On real hardware, count the flow sensor's pulses instead. Each pulse is a fixed amount of water. |
-| **Very small leaks** | A dripping tap is below the 0.02 L/s night limit. Cheap flow sensors may not even measure flows that low. | Check the minimum flow in the chosen sensor's datasheet. |
+| **Very small leaks** | Below the 0.02 L/s night limit. | **Improved:** the continuous-flow check (5.5) catches anything above 0.005 L/s. Sensors are simulated and ideal; real sensor limits are a parked note in `../docs/IMPROVEMENT_PLAN.md` section 7. |
 | **No location on the downtake** | The building check says "pipe leak", not which floor. | Accepted for now. |
 
 ---
@@ -282,6 +298,7 @@ See section 2. Flow caught every leak with no false alarms. Its detection times 
 | Learning period | 24 h | All checks |
 | Night window | 1 am to 5 am | Night check |
 | Night flow limit | 0.02 L/s for 30 min | Night check |
+| Continuous flow limit | above 0.005 L/s for 8 h, any time of day | Continuous-flow check |
 | Too-much limit | max(3 x hourly average, 0.05 L/s) for 60 min | Too-much check |
 | Tank outflow limit | average + max(4 x spread, 0.5 L/s) for 15 min | Tank outflow check |
 | Missing water limit | 10% for 2 blocks of 15 min, blocks under 5 L skipped | Building check |

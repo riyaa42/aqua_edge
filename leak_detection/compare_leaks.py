@@ -7,7 +7,7 @@ model (perfect radio) for many leaks, and scores each signal on its own.
 Each run: day 1 the nodes learn normal, a leak starts at a random time on day 2, the run goes
 on to 06:00 on day 3 so every leak sees one night (needed by the night-flow rule).
 Signals compared:
-  flat leak      flow:     LEAK_NIGHT_FLOW / ABNORMAL_CONSUMPTION from that flat
+  flat leak      flow:     LEAK_NIGHT_FLOW / LEAK_CONTINUOUS_FLOW / ABNORMAL_CONSUMPTION from that flat
                  pressure: PRESSURE_LOW flag from that flat (pressure alone, no flow condition)
   downtake leak  flow:     gateway mass balance PIPE_LEAK or tank ABNORMAL_SUPPLY
                  pressure: PRESSURE_LOW flag from any flat
@@ -33,7 +33,7 @@ END_S = 2 * DAY + 6 * 3600
 FLATS = ["B-401", "B-302", "B-203", "B-104", "B-G01"]       # one per floor, different corners
 DOWNTAKES = ["B-D4", "B-D3", "B-D2", "B-D1", "B-D0"]
 NO_LEAK_RUNS = 5
-FLOW_ALERTS = {"LEAK_NIGHT_FLOW", "ABNORMAL_CONSUMPTION"}
+FLOW_ALERTS = {"LEAK_NIGHT_FLOW", "LEAK_CONTINUOUS_FLOW", "ABNORMAL_CONSUMPTION"}
 
 
 class HAL:

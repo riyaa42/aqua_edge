@@ -27,7 +27,7 @@ EXPECTED = {                 # event -> (node that should alert, alert kinds); d
     "runoff": ("B-TANK", {"QUALITY_RUNOFF"}),
     "chemical": ("B-TANK", {"QUALITY_CHEMICAL"}),
 }
-FLAT_LEAK_ALERTS = {"LEAK_NIGHT_FLOW", "ABNORMAL_CONSUMPTION"}   # flow only (leak_detection/README.md)
+FLAT_LEAK_ALERTS = {"LEAK_NIGHT_FLOW", "LEAK_CONTINUOUS_FLOW", "ABNORMAL_CONSUMPTION"}   # flow only (leak_detection/README.md)
 
 
 def jsonl(name):
@@ -81,7 +81,7 @@ def main():
 
     # 2. Messages: created vs delivered (store-and-forward)
     sent = {(r["src"], int(r["seq"])) for r in up}
-    waiting = {(m["n"], m["s"]) for n in os.listdir(os.path.join(RUN, "sd")) for m in jsonl(os.path.join("sd", n))}
+    waiting = {(m["n"], m["s"]) for n in os.listdir(os.path.join(RUN, "sd")) if n.endswith(".jsonl") for m in jsonl(os.path.join("sd", n))}
     received = {(m["n"], m["s"]) for m in got}
     lost = (sent | waiting) - received
     resends = len(up) - len(sent)

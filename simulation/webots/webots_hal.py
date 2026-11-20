@@ -24,8 +24,9 @@ class WebotsHAL:
         self.led_dev = robot.getDevice("led")
         self.t = 0.0
         self.storage_path = os.path.join(RUN_DIR, f"{self.name}_sd.jsonl")
-        if os.path.exists(self.storage_path):               # every simulation run starts clean
-            os.remove(self.storage_path)
+        for p in (self.storage_path, self.storage_path.replace(".jsonl", "_baseline.json")):
+            if os.path.exists(p):                           # every simulation run starts clean
+                os.remove(p)
 
     def now(self):
         return self.t

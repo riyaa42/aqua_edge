@@ -63,10 +63,14 @@ In `simulation/webots/run_offline.py`, replace the "no false valve closures" tes
 
 ### 2.3 Save the baseline to SD
 
+**Status: done (2026-11-21).** Saved once an hour with `save_atomic()` to `<name>_baseline.json` next to the queue, loaded at startup. At most the unfinished hour of learning is lost.
+
 - **Problem.** The baseline (the learned 24-hour usage table) lives only in memory. After every power cut, a flat goes about 24 h with no leak detection while it learns again.
 - **Fix.** Save it with the 2.1 helper whenever it changes, and load it at startup.
 
 ### 2.4 Continuous-flow check
+
+**Status: done (2026-11-21).** `LEAK_CONTINUOUS_FLOW`: flow above 0.005 L/s for **8 h** (not 6 h: normal simulated flats run up to 6 h 1 min nonstop, because simulated use is smooth). Self-check: a 0.01 L/s daytime leak is caught, a normal flat raises nothing.
 
 - **Problem.** A small leak that starts in the daytime is only caught by the night check, up to about 20 h later.
 - **Fix.** Raise an alert if flow **never drops to zero for N hours**. Commercial ultrasonic meters do the same: Ultrimis raises a leak alarm after 720 minutes of steady low flow.
