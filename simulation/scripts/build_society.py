@@ -1,7 +1,7 @@
 """Build a small Indian housing-society water network for EPANET.
 
-Layout (like the housing complex in Alghamdi et al. [2], pressure-drop leak rule and
-smart valve closure over LoRaWAN, but with rooftop tanks):
+Layout (like the housing complex in Alghamdi et al. [2], which we use for the building
+layout, but with rooftop tanks):
     underground sump -> one pump per building -> rooftop tank -> gravity downtake
     -> each floor -> 4 flats per floor.
 4 buildings (A-D), ground + 4 floors, 4 flats per floor = 80 flats.

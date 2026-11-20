@@ -3,7 +3,6 @@
 It is a Supervisor only so it can draw text on screen and pause the simulation at the end.
 When the 48 h scenario finishes it writes results/webots_run/ and scores the run.
 """
-import json
 import os
 import sys
 
@@ -37,15 +36,9 @@ def overlay():
 
 
 def finish():
-    valve_log = []
-    for f in sorted(os.listdir(RUN_DIR)):
-        if f.endswith("_valve.jsonl"):
-            with open(os.path.join(RUN_DIR, f)) as fh:
-                valve_log += [json.loads(line) for line in fh]
     write_csv(os.path.join(RUN_DIR, "gateway_log.csv"), gw.log)
     write_csv(os.path.join(RUN_DIR, "gateway_events.csv"), gw.events or [{"t": "", "event": ""}])
-    write_csv(os.path.join(RUN_DIR, "valve_log.csv"), valve_log or [{"t": "", "node": ""}])
-    lines, _, _ = score(gw, valve_log, [])
+    lines, _, _ = score(gw, [])
     with open(os.path.join(RUN_DIR, "summary.txt"), "w") as f:
         f.write("Webots run\n" + "\n".join(lines) + "\n")
     print("\n".join(lines))

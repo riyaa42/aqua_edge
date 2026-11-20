@@ -13,7 +13,6 @@ directly; everything goes through a small hardware layer `hal` with these method
                                  cad: listen before talk (LoRa channel activity detection)
     hal.slot                  -> optional (index, count): this node's time slot in each minute
     hal.receive()             -> list of dict messages received since the last call
-    hal.set_valve(closed, reason)
     hal.led(colour)           -> "green" normal, "yellow" messages waiting, "red" alert active
     hal.storage_path          -> file for the store-and-forward queue (SD card), or None
 
@@ -51,6 +50,22 @@ SUPPLY_SIGMAS, SUPPLY_MARGIN_LPS, SUPPLY_MIN = 4.0, 0.5, 15
 PRIORITY = {"ALERT": 0, "FLAG": 1, "SUM": 2}       # FLAG: only the tank's SUPPLY_LOW now
 
 
+def save_atomic(path, text):
+    """Write a file so a power cut leaves either the old version or the new one, never half.
+    No battery on the nodes, so a power cut can land in the middle of any save."""
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        f.write(text)
+        f.flush()
+        os.fsync(f.fileno())          # new contents really on the SD card
+    os.replace(tmp, path)             # atomic swap: old file or new file, nothing in between
+    fd = os.open(os.path.dirname(os.path.abspath(path)), os.O_RDONLY)
+    try:
+        os.fsync(fd)                  # the swap itself really on the SD card
+    finally:
+        os.close(fd)
+
+
 class Store:
     """Store-and-forward queue, mirrored to a file (the SD card) so a reboot loses nothing."""
 
@@ -63,8 +78,7 @@ class Store:
     def _save(self):
         # ponytail: rewrites the whole file on change; switch to an append log if the queue gets long
         if self.path:
-            with open(self.path, "w") as f:
-                f.writelines(json.dumps(m) + "\n" for m in self.queue)
+            save_atomic(self.path, "".join(json.dumps(m) + "\n" for m in self.queue))
 
     def add(self, msg):
         self.queue.append(msg)
@@ -112,7 +126,6 @@ class Node:
         self.base = {k: Baseline() for k in self.sensors}
         self.alerts = {}               # active alert type -> last time its condition was seen
         self.interval, self.acc = None, {}
-        self.valve_closed = False
 
     # --- messaging ---
     def emit(self, kind, **payload):
@@ -124,16 +137,6 @@ class Node:
         if kind not in self.alerts:
             self.emit("ALERT", a=kind, **payload)
         self.alerts[kind] = self.hal.now()
-
-    def close_valve(self, reason):
-        if not self.valve_closed:
-            self.valve_closed = True
-            self.hal.set_valve(True, reason)
-
-    def open_valve(self, reason):
-        if self.valve_closed:
-            self.valve_closed = False
-            self.hal.set_valve(False, reason)
 
     # --- main loop, called once per minute ---
     def step(self):
@@ -192,7 +195,6 @@ class FlatNode(Node):
         self.night_run = self.night_run + 1 if at_night and flow > NIGHT_FLOW_LPS else 0
         if self.night_run >= NIGHT_FLOW_MIN:
             self.alert("LEAK_NIGHT_FLOW", flow=round(flow, 4))
-            self.close_valve("continuous night flow")
         # Abnormal consumption against this flat's own daily pattern
         limit = max(HIGH_USE_FACTOR * self.base["flow_lps"].mean(hour), HIGH_USE_MIN_LPS)
         self.high_run = self.high_run + 1 if flow > limit else 0
@@ -220,7 +222,7 @@ class TankNode(Node):
     def __init__(self, node_id, hal):
         super().__init__(node_id, hal)
         self.bad_run = self.good_run = self.supply_run = self.low_run = self.ok_run = 0
-        self.bad_class, self.low_flagged = None, False
+        self.bad_class, self.low_flagged, self.quality_alerted = None, False, False
 
     def check(self, now, hour, r):
         q = classify_quality(r["ph"], r["tds_ppm"], r["turbidity_pct"])
@@ -228,12 +230,12 @@ class TankNode(Node):
             self.bad_run, self.good_run, self.bad_class = self.bad_run + 1, 0, q
             if self.bad_run >= QUALITY_MIN:
                 self.alert(f"QUALITY_{q}", ph=round(r["ph"], 2), tds=round(r["tds_ppm"]))
-                self.close_valve(f"water quality {q.lower()}")
+                self.quality_alerted = True
         else:
             self.bad_run, self.good_run = 0, self.good_run + 1
-            if self.valve_closed and self.good_run >= QUALITY_CLEAR_MIN:
+            if self.quality_alerted and self.good_run >= QUALITY_CLEAR_MIN:
                 self.alerts.pop(f"QUALITY_{self.bad_class}", None)  # allow a new alert next time
-                self.open_valve("water quality back to normal")
+                self.quality_alerted = False
                 self.emit("ALERT", a="QUALITY_CLEARED")
         # Abnormal supply: far more water leaving the tank than normal for this hour
         b = self.base["outflow_lps"]
@@ -255,3 +257,22 @@ class TankNode(Node):
         self.acc["vol_l"] = self.acc.get("vol_l", 0.0) + r["outflow_lps"] * 60
         self.acc["in_l"] = self.acc.get("in_l", 0.0) + r["inflow_lps"] * 60
         self.acc["level_m"] = r["level_m"]
+
+
+if __name__ == "__main__":
+    # Self-check: a power cut in the middle of a save must not lose the queue
+    import tempfile
+    path = os.path.join(tempfile.mkdtemp(), "queue.jsonl")
+    st = Store(path)
+    st.add({"s": 1, "k": "ALERT", "t": 0}); st.add({"s": 2, "k": "SUM", "t": 60})
+    real_replace = os.replace
+    os.replace = lambda *a: (_ for _ in ()).throw(OSError("power cut"))   # die just before the swap
+    try:
+        st.add({"s": 3, "k": "SUM", "t": 120})
+    except OSError:
+        pass
+    os.replace = real_replace
+    assert [m["s"] for m in Store(path).queue] == [1, 2], "old queue must survive intact"
+    st.add({"s": 4, "k": "SUM", "t": 180})                               # power back: next save works
+    assert [m["s"] for m in Store(path).queue] == [1, 2, 3, 4]
+    print("node self-check passed")

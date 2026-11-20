@@ -8,7 +8,7 @@ Status as of 11 November 2026, branch `live-simulation`. This file is the single
 
 ## 1. The project in one paragraph
 
-Aqua Edge (CSD457 Internet of Things; earlier names: JalRakshak, HydroDrive) is an **offline-first** water monitoring system for one residential building, "building B": 20 flats on 5 floors (G, 1 to 4; 4 flats per floor) fed by a rooftop tank through a shared downtake pipe. Every flat and the tank get a small node (Raspberry Pi Zero 2 W on mains power) with sensors. Nodes detect **leaks, abnormal consumption and unsafe water on the device itself**, warn locally (buzzer, LED, valve), and send alerts and 15-minute summaries over **LoRa** (long-range, low-power radio; no internet needed) to a gateway in the building: a LoRa module on an ESP32 board, connected by USB to a laptop that runs the gateway program and does building-wide checks. Nothing depends on the internet or a cloud.
+Aqua Edge (CSD457 Internet of Things; earlier names: JalRakshak, HydroDrive) is an **offline-first** water monitoring system for one residential building, "building B": 20 flats on 5 floors (G, 1 to 4; 4 flats per floor) fed by a rooftop tank through a shared downtake pipe. Every flat and the tank get a small node (Raspberry Pi Zero 2 W on mains power) with sensors. Nodes detect **leaks, abnormal consumption and unsafe water on the device itself**, warn locally (buzzer, LED; the project has no valves), and send alerts and 15-minute summaries over **LoRa** (long-range, low-power radio; no internet needed) to a gateway in the building: a LoRa module on an ESP32 board, connected by USB to a laptop that runs the gateway program and does building-wide checks. Nothing depends on the internet or a cloud.
 
 ---
 
@@ -41,8 +41,8 @@ Every node runs one step **once a minute**: read sensors, learn or check, queue 
 
 - **Day 1 (first 24 h): learning only.** Each node records, for each hour of the day, the average and spread of every sensor (`Baseline` class). No alarms on day 1. Each flat learns its own pattern.
 - **Flat node, from day 2: flow only.**
-  - *Night check:* flow above 0.02 L/s for 30 minutes in a row between 1 and 5 am gives `LEAK_NIGHT_FLOW` and **closes the valve** (nobody runs water steadily at night).
-  - *Too-much check:* flow above max(3 x this hour's learned average, 0.05 L/s) for 60 minutes gives `ABNORMAL_CONSUMPTION` (alert only, no valve: it could be guests, not a leak).
+  - *Night check:* flow above 0.02 L/s for 30 minutes in a row between 1 and 5 am gives `LEAK_NIGHT_FLOW` (nobody runs water steadily at night).
+  - *Too-much check:* flow above max(3 x this hour's learned average, 0.05 L/s) for 60 minutes gives `ABNORMAL_CONSUMPTION` (it could be guests, not a leak).
   - Pressure is still read, learned and sent in summaries, but raises no alarm (section 5, decision D1).
 - **Tank node:**
   - *Outflow check:* outflow above average + max(4 x spread, 0.5 L/s) for 15 minutes gives `ABNORMAL_SUPPLY` (pipe burst).
@@ -90,7 +90,7 @@ Airtime is about 133 ms per 75-byte packet at SF7 (SF = spreading factor, LoRa's
 
 Docker: `simulation/live/Dockerfile` builds **one** image (Python 3.12 + libraries, no code); `simulation/live/compose.yaml` starts one container per node from it, mounts `simulation/` and `firmware/` into each, and gives each its `NODE_ID`. Editing the firmware needs no rebuild.
 
-Water quality values in the simulation are made up (EPANET cannot model pH or TDS). Valve actions are logged but do not change the simulated water.
+Water quality values in the simulation are made up (EPANET cannot model pH or TDS).
 
 ---
 
@@ -121,7 +121,7 @@ From `sh simulation/check_all.sh` on 11 November 2026: **all checks pass.**
 | D8 | **Time slots for summaries, listen before talk for alerts.** | Random sending gave about 10% collisions (489); slots brought it to 2 in about 4,066. Alerts are urgent, so they do not wait for a slot. |
 | D9 | **Live simulation is the main test; Webots parked.** | Webots water is fixed in advance and its radio has no LoRa timing. Webots may come back as a 3D demo if the course expects one. |
 | D10 | **Pi fit will be tested on a real Pi Zero 2 W**, not by limiting Docker containers. | A laptop container can only estimate Pi processor time. |
-| D11 | **Valve closes only on the night check.** | The too-much check cannot tell a leak from a busy day. |
+| D11 | **No valves.** The response to any problem is the buzzer, the LED and an alert to the gateway. | Team decision (November 2026). The valve code was removed. |
 | D12 | **Hardware: each node is a Raspberry Pi Zero 2 W on mains power (no battery); the gateway is LoRa module + ESP32 + laptop.** | Mains removes the battery-life problem of a Pi running Linux (about 0.5 to 0.7 W even when idle). The laptop has the power and screen for gateway analysis and a dashboard; the ESP32 only bridges the radio. |
 
 ---
@@ -153,7 +153,7 @@ Settled on 11 November 2026: nodes on mains power, gateway = LoRa + ESP32 + lapt
 | An alert can collide with the first slot at quarter-hour boundaries | Seen once (B-203 at 02:30:00.2 vs B-401's summary); recovered by the 2-minute re-send. |
 | Retry storm during long radio cuts | About 13,000 re-send attempts in 3.5 h; add backoff. |
 | No location for downtake leaks | Building check says "pipe leak", not which floor. |
-| Simulation-only parts | CAD, radio, clock setting and valves are imitated; ns-3 uses EU868 (no Indian band in the module); one uplink channel modelled (IN865 has 3); packets are JSON text. |
+| Simulation-only parts | CAD, radio and clock setting are imitated; ns-3 uses EU868 (no Indian band in the module); one uplink channel modelled (IN865 has 3); packets are JSON text. |
 | `matplotlib` is in `simulation/pyproject.toml` but nothing imports it directly | Can probably be removed. |
 
 ---
@@ -165,7 +165,7 @@ Settled on 11 November 2026: nodes on mains power, gateway = LoRa + ESP32 + lapt
 1. Decide open decision 1 (quality model classes).
 2. **Real Pi Zero 2 W test:** run one node's firmware with simulated readings; measure memory (`/usr/bin/time -v`), processor (`htop`), temperature (`vcgencmd measure_temp`).
 3. **Hardware layers** (same interface as `NetHAL` in `simulation/live/node.py`):
-   - `firmware/pi_hal.py` for the nodes: real LoRa module with CAD, DS3231 clock, SD card, flow pulses, buzzer, LED, valve.
+   - `firmware/pi_hal.py` for the nodes: reads recorded sensor readings row by row from a file (the sensors are simulated), plus the real LoRa module with CAD, DS3231 clock, SD card, buzzer and LED.
    - A laptop hardware layer for the gateway that exchanges packets with the ESP32 over USB serial, plus a small ESP32 program that bridges LoRa and serial (and sends the ACKs the laptop asks for).
 4. **TinyML model:** train on the chosen dataset, quantize to 8 bits, replace `classify_quality`.
 5. Timestamps (UTC Unix seconds, ISO 8601 logs).

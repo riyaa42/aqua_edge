@@ -12,7 +12,7 @@ step "radio self-check"
 python3 live/radio.py
 step "water engine self-check"
 uv run python live/water.py
-step "offline firmware test (planted events, no false valve closures)"
+step "offline firmware test (planted events, no false alerts)"
 out=$(python3 webots/run_offline.py 2>&1) || { echo "$out"; exit 1; }   # on failure, show the full report
 echo "$out" | tail -3
 step "leak comparison scoring self-check"

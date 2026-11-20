@@ -1,5 +1,5 @@
 """Which leak signal works better: flow or pressure? Runs the real firmware on the live water
-model (perfect radio, no valves) for many leaks, and scores each signal on its own.
+model (perfect radio) for many leaks, and scores each signal on its own.
 
     cd simulation && uv run python ../leak_detection/compare_leaks.py           # ~35 runs of 54 h, in parallel
     cd simulation && uv run python ../leak_detection/compare_leaks.py --check   # self-check of the scoring only
@@ -37,7 +37,7 @@ FLOW_ALERTS = {"LEAK_NIGHT_FLOW", "ABNORMAL_CONSUMPTION"}
 
 
 class HAL:
-    """Perfect radio: every message reaches everyone else straight away. Valves do nothing."""
+    """Perfect radio: every message reaches everyone else straight away."""
     storage_path = None
 
     def __init__(self, name, clock, readings, inboxes):
@@ -58,9 +58,6 @@ class HAL:
     def receive(self):
         msgs, self.inboxes[self.name] = self.inboxes[self.name], []
         return msgs
-
-    def set_valve(self, closed, reason):
-        pass
 
     def led(self, colour):
         pass

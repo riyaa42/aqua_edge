@@ -272,7 +272,6 @@ See section 2. Flow caught every leak with no false alarms. Its detection times 
 | **Volume from one reading per minute** | The code works out litres as flow x 60 from a single reading. A 20-second flush between readings is missed. | On real hardware, count the flow sensor's pulses instead. Each pulse is a fixed amount of water. |
 | **Very small leaks** | A dripping tap is below the 0.02 L/s night limit. Cheap flow sensors may not even measure flows that low. | Check the minimum flow in the chosen sensor's datasheet. |
 | **No location on the downtake** | The building check says "pipe leak", not which floor. | Accepted for now. |
-| **Valves** | Valve closing is logged but has no effect on the simulated water. | Left for later. |
 
 ---
 

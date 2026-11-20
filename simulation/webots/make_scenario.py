@@ -34,7 +34,7 @@ LEVEL_NOISE_M = 0.01        # tank level sensor noise
 
 EVENTS = [  # name, kind, start (s), end (s), where, which detector should catch it
     ("E1", "flat_leak", DAY + 2 * H, 2 * DAY, "B-203", "night flow at flat node"),
-    ("E2", "power_cut", DAY + 9 * H, DAY + 17 * H, "B-PUMP", "gateway: supply event, no valve closures"),
+    ("E2", "power_cut", DAY + 9 * H, DAY + 17 * H, "B-PUMP", "gateway: supply event, no false alerts"),
     ("E3", "pipe_burst", DAY + 18 * H, 2 * DAY, "B-D1", "tank node supply anomaly + gateway mass balance"),
     ("E4", "quality_runoff", DAY + 6 * H, DAY + 7 * H, "B-TANK", "tank node quality check"),
     ("E5", "quality_chemical", DAY + 20 * H, DAY + 20 * H + 45 * 60, "B-TANK", "tank node quality check"),

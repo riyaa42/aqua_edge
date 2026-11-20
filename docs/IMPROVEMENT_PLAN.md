@@ -42,12 +42,16 @@ It comes from two reviews:
 
 ### 2.1 Save the SD queue safely
 
+**Status: done (2026-11-21).** `save_atomic()` in `firmware/aqua_edge.py`, self-check `python3 firmware/aqua_edge.py`.
+
 - **Problem.** `Store._save()` in `firmware/aqua_edge.py` opens the queue file with `"w"`, which **empties the file first** and then writes it again. If the power cuts in between, every unsent message is lost. Our nodes have no battery, so this will happen.
 - **Fix.** Write to a temporary file (`queue.tmp`), call `flush()` and `os.fsync()`, then `os.replace(tmp, real)`. `os.replace` is *atomic*: after a power cut you have either the old file or the new one, never half of each.
 - **Reuse.** This becomes one small helper, used by the queue (2.1), the baseline (2.3) and the message counter (3.2).
 - **Self-check.** Simulate a crash before the replace and check that the old queue is still complete.
 
 ### 2.2 Remove the valve code
+
+**Status: done (2026-11-21).** All checks pass; results unchanged (all events caught, 0 unexplained alerts).
 
 Carried over from the leak detection review. Remove the following:
 

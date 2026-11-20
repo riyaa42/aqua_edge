@@ -56,10 +56,6 @@ class NetHAL:
             self.synced_at = self.t                  # set the RTC from the gateway's time
         return msgs
 
-    def set_valve(self, closed, reason):     # no valves for now: log only
-        with open(os.path.join(RUN, "valves.jsonl"), "a") as f:
-            f.write(json.dumps({"t": self.t, "node": self.name, "closed": closed, "reason": reason}) + "\n")
-
     def led(self, colour):
         self.colour = colour
 

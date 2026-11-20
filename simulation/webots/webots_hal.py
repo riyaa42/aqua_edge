@@ -24,10 +24,8 @@ class WebotsHAL:
         self.led_dev = robot.getDevice("led")
         self.t = 0.0
         self.storage_path = os.path.join(RUN_DIR, f"{self.name}_sd.jsonl")
-        self.valve_path = os.path.join(RUN_DIR, f"{self.name}_valve.jsonl")
-        for p in (self.storage_path, self.valve_path):      # every simulation run starts clean
-            if os.path.exists(p):
-                os.remove(p)
+        if os.path.exists(self.storage_path):               # every simulation run starts clean
+            os.remove(self.storage_path)
 
     def now(self):
         return self.t
@@ -50,10 +48,6 @@ class WebotsHAL:
             if self.link_ok():
                 msgs.append(json.loads(data))
         return msgs
-
-    def set_valve(self, closed, reason):
-        with open(self.valve_path, "a") as f:
-            f.write(json.dumps({"t": self.t, "node": self.name, "closed": closed, "reason": reason}) + "\n")
 
     def led(self, colour):
         self.led_dev.set(LED_INDEX[colour])
