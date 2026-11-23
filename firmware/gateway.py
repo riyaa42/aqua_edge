@@ -17,20 +17,37 @@ Same hardware layer as the nodes (hal.now / send / receive). Jobs:
      marks each one NEW_ALERT or REPEAT_ALERT (same node and alert type as before).
   6. Clock check: a message stamped more than 1 min in the future means that node's clock is
      wrong (CLOCK_SKEW). An old stamp is normal: the message waited on the SD card.
+  7. Packet check (packet.py): a packet with a wrong signature is dropped (BAD_PACKET), and a
+     (node, counter) pair already seen is a duplicate or a replay: acknowledged, not used again.
+     The pairs seen are saved to disk, so a gateway restart does not reopen the door to replays.
+     ACKs are signed with the node's key, so a fake ACK cannot make a node delete its messages.
 How the leak checks fit together: leak_detection/README.md.
 """
+import json
+import os
+
+from aqua_edge import save_atomic
+from packet import pack, unpack
+
 SUPPLY_WINDOW_S = 900          # a SUPPLY_LOW flag from the tank counts for this long
 MASS_BALANCE_PCT = 10.0        # Ali et al. [6] threshold
 MASS_BALANCE_INTERVALS = 2     # blocks in a row above threshold before alerting, and normal before re-arming
 MIN_SUPPLY_L = 5.0             # ignore near-empty blocks (division by tiny numbers)
 SILENT_S = 2700                # nothing heard from a node for 3 summary periods = silent
 CLOCK_AHEAD_S = 60             # message time this far ahead of the gateway clock = bad node clock
+SEEN_WINDOW = 1000             # counters this far below a node's newest are refused as too old
+# ponytail: 1000 is about 10 days of one node's messages; a longer outage loses its oldest backlog
 
 
 class Gateway:
     def __init__(self, hal, flat_ids, tank_id):
         self.hal, self.flats, self.tank = hal, set(flat_ids), tank_id
-        self.seen = set()
+        path = getattr(hal, "storage_path", None)
+        self.seen_path = path and os.path.splitext(path)[0] + "_seen.json"
+        self.seen = {}              # node -> counters already received
+        if self.seen_path and os.path.exists(self.seen_path):
+            with open(self.seen_path) as f:
+                self.seen = {n: set(v) for n, v in json.load(f).items()}
         self.log = []               # every unique message received, with receive time
         self.events = []            # gateway's own decisions
         self.alert_history = {}     # (node, alert) -> (time of latest, how many so far)
@@ -46,14 +63,24 @@ class Gateway:
         now = self.hal.now()
         if self.last_seen is None:
             self.last_seen = {n: now for n in self.flats | {self.tank}}
-        for m in self.hal.receive():
-            if m.get("k") not in ("ALERT", "FLAG", "SUM"):
+        bad, new = 0, False
+        for raw in self.hal.receive():
+            m = unpack(raw, self.hal.key)
+            if m is None:
+                bad += 1                                    # wrong signature or broken packet
                 continue
-            self.hal.send({"k": "ACK", "n": m["n"], "s": m["s"], "gt": now})   # gt: nodes sync their clock
+            if m["k"] not in ("ALERT", "FLAG", "SUM"):
+                continue
+            ack = {"k": "ACK", "n": m["n"], "s": m["s"], "gt": now}       # gt: nodes sync their clock
+            self.hal.send(pack(ack, self.hal.key(m["n"])))
             self.last_seen[m["n"]] = now
-            if (m["n"], m["s"]) in self.seen:
-                continue                                    # duplicate (our ACK was lost)
-            self.seen.add((m["n"], m["s"]))
+            seen = self.seen.setdefault(m["n"], set())
+            if m["s"] in seen or m["s"] <= max(seen, default=0) - SEEN_WINDOW:
+                continue                                    # duplicate (our ACK was lost) or replay
+            seen.add(m["s"])
+            if len(seen) > 2 * SEEN_WINDOW:
+                self.seen[m["n"]] = {x for x in seen if x > max(seen) - SEEN_WINDOW}
+            new = True
             self.log.append({**m, "rx": now})
             self.check_clock(now, m)
             if m["k"] == "ALERT" and not m["a"].endswith("_CLEARED"):     # all-clear is not a problem
@@ -62,6 +89,10 @@ class Gateway:
                 self.tank_low_t = m["t"]
             elif m["k"] == "SUM":
                 self.sums.setdefault(m["i"], {})[m["n"]] = m["vol_l"]
+        if bad:
+            self.decide(now, "BAD_PACKET", count=bad)
+        if new and self.seen_path:
+            save_atomic(self.seen_path, json.dumps({n: sorted(v) for n, v in self.seen.items()}))
         self.check_silence(now)
         self.supply_rule(now)
         self.mass_balance(now)
@@ -127,9 +158,15 @@ class Gateway:
 
 
 if __name__ == "__main__":
+    import tempfile
+    from packet import sim_key
+
     class FakeHAL:
+        storage_path = None
+        key = staticmethod(sim_key)
+
         def __init__(self):
-            self.t, self.box, self.seq = 0, [], 0
+            self.t, self.box, self.seq, self.sent = 0, [], 0, []
 
         def now(self):
             return self.t
@@ -138,38 +175,55 @@ if __name__ == "__main__":
             msgs, self.box = self.box, []
             return msgs
 
-        def send(self, msg):
-            pass
+        def send(self, raw):
+            self.sent.append(raw)
 
     def block(gw, i, vols):
         """Deliver one 15-minute block of summaries {node: litres}, then step the gateway 15 times."""
         for n, v in vols.items():
             gw.hal.seq += 1
-            gw.hal.box.append({"k": "SUM", "n": n, "s": gw.hal.seq, "t": gw.hal.t, "i": i, "vol_l": v})
+            m = {"k": "SUM", "n": n, "s": gw.hal.seq, "t": gw.hal.t, "i": i, "vol_l": v}
+            gw.hal.box.append(pack(m, sim_key(n)))
         for _ in range(15):
             gw.step()
             gw.hal.t += 60
 
     events = lambda gw: [e["event"] for e in gw.events]
-    gw = Gateway(FakeHAL(), ["F1", "F2"], "T")
-    ok, leak = {"T": 100, "F1": 50, "F2": 50}, {"T": 100, "F1": 40, "F2": 40}
+    F1, F2, T = "B-101", "B-102", "B-TANK"
+    gw = Gateway(FakeHAL(), [F1, F2], T)
+    ok, leak = {T: 100, F1: 50, F2: 50}, {T: 100, F1: 40, F2: 40}
     for i, v in enumerate([ok, leak, leak, ok, ok, leak, leak]):     # leak, fixed, second leak
         block(gw, i, v)
     assert events(gw) == ["PIPE_LEAK", "PIPE_LEAK"], events(gw)
     # F2 goes silent for 4 blocks (60 min): alert and pause; it comes back with its stored
     # summaries and the late blocks are checked
-    gw = Gateway(FakeHAL(), ["F1", "F2"], "T")
+    gw = Gateway(FakeHAL(), [F1, F2], T)
     for i in range(4):
-        block(gw, i, {"T": 100, "F1": 10})
+        block(gw, i, {T: 100, F1: 10})
     assert events(gw) == ["NODE_SILENT", "BALANCE_PAUSED"], events(gw)
     assert all(i not in gw.balance_done for i in range(4))
-    block(gw, 4, {"F2": 90, **{k: v for k, v in ok.items() if k != "F2"}})
+    block(gw, 4, {F2: 90, **{k: v for k, v in ok.items() if k != F2}})
     for i in range(4):
-        block(gw, i, {"F2": 90})
+        block(gw, i, {F2: 90})
     assert "NODE_BACK" in events(gw) and all(i in gw.balance_done for i in range(5)), events(gw)
     assert "PIPE_LEAK" not in events(gw)
     # a message stamped 5 minutes in the future: bad node clock
-    gw.hal.box.append({"k": "ALERT", "n": "F1", "s": 999, "t": gw.hal.t + 300, "a": "X"})
+    gw.hal.box.append(pack({"k": "ALERT", "n": F1, "s": 999, "t": gw.hal.t + 300, "a": "LEAK_NIGHT_FLOW"}, sim_key(F1)))
     gw.step()
     assert "CLOCK_SKEW" in events(gw)
+
+    # Packet checks: a forged alert is dropped; a replayed one is acknowledged but not used twice,
+    # even after the gateway restarts; the ACK goes back signed with the node's key
+    hal = FakeHAL()
+    hal.storage_path = os.path.join(tempfile.mkdtemp(), "GATEWAY.jsonl")
+    gw = Gateway(hal, [F1], T)
+    real = pack({"k": "ALERT", "n": F1, "s": 1, "t": 0, "a": "LEAK_NIGHT_FLOW", "flow": 0.05}, sim_key(F1))
+    hal.box = [pack({"k": "ALERT", "n": F1, "s": 2, "t": 0, "a": "LEAK_NIGHT_FLOW"}, b"attacker-guessed"), real]
+    gw.step()
+    assert len(gw.log) == 1 and sorted(events(gw)) == ["BAD_PACKET", "NEW_ALERT"], events(gw)
+    assert unpack(hal.sent[0], sim_key) == {"k": "ACK", "n": F1, "s": 1, "gt": 0}
+    gw = Gateway(hal, [F1], T)                                           # gateway restarts
+    hal.box = [real]                                                     # someone replays the alert
+    gw.step()
+    assert gw.log == [] and "NEW_ALERT" not in events(gw), "replay after restart must be ignored"
     print("gateway self-check passed")

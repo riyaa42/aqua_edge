@@ -78,6 +78,8 @@ In `simulation/webots/run_offline.py`, replace the "no false valve closures" tes
 
 ## 3. Phase 2: secure, compact radio messages
 
+**Status: built (2026-11-21)** in `firmware/packet.py`, with the defaults below for the open questions in 3.3. Each default is one constant or one function, easy to change.
+
 ### 3.1 Why
 
 - **No security today.** Plain LoRa has no encryption and no way to prove who sent a message. With a cheap radio, someone could:
@@ -113,7 +115,9 @@ It is used by the nodes and the gateway, and needs only the standard library (`s
   - a replayed message is dropped
   - a fake ACK is ignored
 
-### 3.3 To discuss before building
+### 3.3 To discuss (defaults used for now)
+
+Defaults chosen when building: **4-byte tag** (`TAG_BYTES`, the same size LoRaWAN uses), **signed only, not encrypted**, and simulation keys made from the node name (`sim_key`, simulation only). The real nodes still need a key file on the SD card (question 2).
 
 1. Is a 4-byte tag enough for us, or should we use 8 bytes (safer, 4 more bytes on air)?
 2. How do the keys get onto each node at installation, and what happens if one node's key leaks?

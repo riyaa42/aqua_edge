@@ -16,6 +16,7 @@ sys.path[:0] = [HERE, os.path.join(HERE, "..", "..", "firmware")]
 from aqua_edge import FlatNode, TankNode, DAY  # noqa: E402
 from gateway import Gateway  # noqa: E402
 from simlink import SensorFeed, load_outages, link_up, STEP_S  # noqa: E402
+from packet import sim_key  # noqa: E402
 
 GATEWAY = "GATEWAY"
 
@@ -31,10 +32,12 @@ class Radio:
             return
         for dst in self.inbox:
             if dst != src and link_up(dst, t, self.outages):
-                self.inbox[dst].append(dict(msg))
+                self.inbox[dst].append(msg)
 
 
 class OfflineHAL:
+    key = staticmethod(sim_key)
+
     def __init__(self, name, clock, feed, radio, storage_dir):
         self.name, self.clock, self.feed, self.radio = name, clock, feed, radio
         self.storage_path = os.path.join(storage_dir, f"{name}_sd.jsonl")

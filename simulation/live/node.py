@@ -18,6 +18,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "..", "firmware"))   # IOT_2026/firmware: the real node code
 from aqua_edge import FlatNode, TankNode  # noqa: E402
 from gateway import Gateway  # noqa: E402
+from packet import peek, sim_key  # noqa: E402
 
 RUN = os.environ.get("AQUA_RUN", os.path.join(HERE, "run"))
 ADDRESS = (os.environ.get("AQUA_TIMEKEEPER", "localhost"), 6000)
@@ -28,6 +29,8 @@ CLOCK_PPM = float(os.environ.get("AQUA_CLOCK_PPM", 2))   # RTC drift, DS3231 spe
 
 
 class NetHAL:
+    key = staticmethod(sim_key)              # simulation keys; a real node reads its key from SD
+
     def __init__(self, name, slot=None):
         self.name, self.t, self.r, self.inbox, self.outbox = name, 0.0, {}, [], []
         self.storage_path = os.path.join(RUN, "sd", f"{name}.jsonl")
@@ -52,7 +55,8 @@ class NetHAL:
 
     def receive(self):
         msgs, self.inbox = self.inbox, []
-        if any(m.get("k") == "ACK" and m.get("n") == self.name and "gt" in m for m in msgs):
+        # ponytail: the simulated RTC trusts the ACK header; the firmware itself only acts on checked packets
+        if any(peek(m)["k"] == "ACK" and peek(m)["n"] == self.name for m in msgs):
             self.synced_at = self.t                  # set the RTC from the gateway's time
         return msgs
 

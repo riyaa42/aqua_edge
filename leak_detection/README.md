@@ -230,7 +230,7 @@ This follows common practice for LoRa networks: track when each device was last 
 | Building check (gateway) | every 15 min | 2 blocks (30 min) |
 | Silent node (gateway) | 1 min | 45 min with nothing heard |
 
-**Alarms** are sent in the same minute they fire: listen before talk, then send. If the channel is busy, wait a random 0.1 to 1 s and listen again (up to 5 times). The packet takes about 0.14 s on air at SF7, so the gateway should have it about 1 second after the decision. If it is lost (for example a collision), the node re-sends after 2 minutes; this is the worst-case extra delay. Example from the live run: B-203's night alarm at 02:30:00.2 collided with B-401's summary sent in the same instant, and arrived on the re-send at 02:32:01.
+**Alarms** are sent in the same minute they fire: listen before talk, then send. If the channel is busy, wait a random 0.1 to 1 s and listen again (up to 5 times). The packet takes about 0.06 s on air at SF7 (21-byte signed alert), so the gateway should have it about 1 second after the decision. If it is lost (for example a collision), the node re-sends after 2 minutes; this is the worst-case extra delay. Example from the live run: B-203's night alarm at 02:30:00.2 collided with B-401's summary sent in the same instant, and arrived on the re-send at 02:32:01.
 
 **Summaries** cover 15-minute blocks. Each is made at :00, :15, :30 and :45 for the block just ended, and sent in that same minute at the node's own slot second:
 
@@ -265,7 +265,7 @@ The whole system ran for 48 simulated hours: real firmware on 22 nodes, the real
 | Medium leak in flat B-402 at 10:00 | Too-much check on B-402, 11:00 (60 min) | 11:01 |
 | Large burst on downtake B-D1 at 18:00 | Tank outflow check 18:15; gateway building check 18:31 (67% missing) | 18:16 / 18:31 |
 
-- 4,061 of 4,063 radio messages got through. The 2 collisions were re-sent automatically.
+- 4,021 of 4,023 radio messages got through (signed binary packets). The 2 collisions were re-sent automatically.
 - No message was lost.
 - No alarms from flats without a leak.
 

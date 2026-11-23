@@ -7,12 +7,14 @@ directly; everything goes through a small hardware layer `hal` with these method
                                  Simulation: seconds since start. Real node: from the DS3231 RTC
                                  (planned, to discuss next: UTC Unix seconds, ISO 8601 in logs).
     hal.read()                -> dict of sensor readings, e.g. {"flow_lps": 0.01, "pressure_m": 10.4}
-    hal.send(msg: dict, at_s=None, cad=False)
+    hal.send(packet: bytes, at_s=None, cad=False)
                               -> radio send (LoRa on the real node); may be lost silently.
+                                 Packets are signed binary (packet.py).
                                  at_s: second of the minute to send at (time slot);
                                  cad: listen before talk (LoRa channel activity detection)
     hal.slot                  -> optional (index, count): this node's time slot in each minute
-    hal.receive()             -> list of dict messages received since the last call
+    hal.receive()             -> list of packets (bytes) received since the last call
+    hal.key(name)             -> the 16-byte secret this node shares with the gateway
     hal.led(colour)           -> "green" normal, "yellow" messages waiting, "red" alert active
     hal.storage_path          -> file for the store-and-forward queue (SD card), or None;
                                  the learned baseline is kept next to it (<name>_baseline.json)
@@ -30,6 +32,8 @@ alerts sent first (Mariadhason et al. [4], timestamped store-and-forward to SD c
 """
 import json
 import os
+
+from packet import pack, unpack
 
 DAY, HOUR = 86400, 3600
 LEARN_S = DAY                 # first day: learn this node's normal pattern
@@ -72,21 +76,34 @@ def save_atomic(path, text):
 
 
 class Store:
-    """Store-and-forward queue, mirrored to a file (the SD card) so a reboot loses nothing."""
+    """Store-and-forward queue, mirrored to a file (the SD card) so a reboot loses nothing.
+    Also owns the message counter: saved in the same file (first line), so it never repeats,
+    even after a power cut with an empty queue. The gateway drops a repeated number as a
+    duplicate or replay, so a counter starting again from 1 would silence the node."""
 
     def __init__(self, path):
-        self.path, self.queue, self.last_sent = path, [], {}
+        self.path, self.queue, self.last_sent, self.seq = path, [], {}, 0
         if path and os.path.exists(path):
             with open(path) as f:
-                self.queue = [json.loads(line) for line in f if line.strip()]
+                for line in f:
+                    if line.strip():
+                        d = json.loads(line)
+                        if "k" in d:
+                            self.queue.append(d)
+                        else:
+                            self.seq = d["seq"]
+        self.seq = max([self.seq] + [m["s"] for m in self.queue])
 
     def _save(self):
         # ponytail: rewrites the whole file on change; switch to an append log if the queue gets long
         if self.path:
-            save_atomic(self.path, "".join(json.dumps(m) + "\n" for m in self.queue))
+            save_atomic(self.path, json.dumps({"seq": self.seq}) + "\n"
+                        + "".join(json.dumps(m) + "\n" for m in self.queue))
 
     def add(self, msg):
-        self.queue.append(msg)
+        """Give the message the next counter value and keep it until acknowledged."""
+        self.seq += 1
+        self.queue.append({**msg, "s": self.seq})
         self._save()
 
     def ack(self, seq):
@@ -127,7 +144,7 @@ class Node:
     def __init__(self, node_id, hal):
         self.id, self.hal = node_id, hal
         self.store = Store(hal.storage_path)
-        self.seq = max([m["s"] for m in self.store.queue], default=0)
+        self.key = hal.key(node_id)
         self.base = {k: Baseline() for k in self.sensors}
         self.base_path = hal.storage_path and os.path.splitext(hal.storage_path)[0] + "_baseline.json"
         if self.base_path and os.path.exists(self.base_path):    # restart after a power cut: keep what was learned
@@ -140,8 +157,7 @@ class Node:
 
     # --- messaging ---
     def emit(self, kind, **payload):
-        self.seq += 1
-        self.store.add({"n": self.id, "s": self.seq, "t": self.hal.now(), "k": kind, **payload})
+        self.store.add({"n": self.id, "t": self.hal.now(), "k": kind, **payload})
 
     def alert(self, kind, **payload):
         """Called every minute the condition holds; sends once per episode."""
@@ -152,8 +168,9 @@ class Node:
     # --- main loop, called once per minute ---
     def step(self):
         now, r = self.hal.now(), self.hal.read()
-        for m in self.hal.receive():
-            if m.get("k") == "ACK" and m.get("n") == self.id:
+        for raw in self.hal.receive():
+            m = unpack(raw, lambda n: self.key if n == self.id else None)   # None: not ours, or forged
+            if m and m["k"] == "ACK":
                 self.store.ack(m["s"])
         hour = int(now % DAY // HOUR)
         if hour != self.hour:              # once an hour: keep the learned baseline on the SD card
@@ -170,12 +187,13 @@ class Node:
         # this node's own time slot (TDMA), kept in step by the gateway time in every ACK
         slot = getattr(self.hal, "slot", None)
         for m in self.store.due(now, MAX_SENDS_PER_STEP):
+            raw = pack(m, self.key)
             if m["k"] == "ALERT":
-                self.hal.send(m, cad=True)
+                self.hal.send(raw, cad=True)
             elif slot:
-                self.hal.send(m, at_s=slot[0] * 60 / slot[1] + SLOT_GUARD_S)
+                self.hal.send(raw, at_s=slot[0] * 60 / slot[1] + SLOT_GUARD_S)
             else:
-                self.hal.send(m)
+                self.hal.send(raw)
         stuck = any(now - m["t"] > RETRY_S for m in self.store.queue)     # unanswered for > 2 min
         self.hal.led("red" if self.alerts else "yellow" if stuck else "green")
 
@@ -285,19 +303,23 @@ class TankNode(Node):
 if __name__ == "__main__":
     # Self-check: a power cut in the middle of a save must not lose the queue
     import tempfile
+    from packet import sim_key
     path = os.path.join(tempfile.mkdtemp(), "queue.jsonl")
     st = Store(path)
-    st.add({"s": 1, "k": "ALERT", "t": 0}); st.add({"s": 2, "k": "SUM", "t": 60})
+    st.add({"k": "ALERT", "t": 0}); st.add({"k": "SUM", "t": 60})
     real_replace = os.replace
     os.replace = lambda *a: (_ for _ in ()).throw(OSError("power cut"))   # die just before the swap
     try:
-        st.add({"s": 3, "k": "SUM", "t": 120})
+        st.add({"k": "SUM", "t": 120})
     except OSError:
         pass
     os.replace = real_replace
     assert [m["s"] for m in Store(path).queue] == [1, 2], "old queue must survive intact"
-    st.add({"s": 4, "k": "SUM", "t": 180})                               # power back: next save works
+    st.add({"k": "SUM", "t": 180})                                       # power back: next save works
     assert [m["s"] for m in Store(path).queue] == [1, 2, 3, 4]
+    for s in (1, 2, 3, 4):
+        st.ack(s)
+    assert Store(path).seq == 4 and Store(path).queue == []      # empty queue, counter remembered
 
     class FakeHAL:
         def __init__(self, path, flow):
@@ -307,6 +329,7 @@ if __name__ == "__main__":
         def receive(self): return []
         def send(self, m, at_s=None, cad=False): pass
         def led(self, colour): pass
+        def key(self, name): return sim_key(name)
 
     def run(node, until):
         while node.hal.t < until:
@@ -326,12 +349,25 @@ if __name__ == "__main__":
     # Normal flat: no alerts. Small daytime leak (0.01 L/s from 10:00 on day 2, below the night
     # limit): continuous-flow alert after 8 h, the night check never fires
     alerts = {}
-    for name, flow in (("normal", use), ("leak", lambda t: use(t) + (0.01 if t >= DAY + 10 * HOUR else 0))):
+    for name, flow in (("B-102", use), ("B-103", lambda t: use(t) + (0.01 if t >= DAY + 10 * HOUR else 0))):
         n = FlatNode(name, FakeHAL(os.path.join(tmp, name + ".jsonl"), flow))
         run(n, 2 * DAY)
         alerts[name] = [(m["a"], m["t"]) for m in n.store.queue if m["k"] == "ALERT"]
+    alerts["normal"], alerts["leak"] = alerts.pop("B-102"), alerts.pop("B-103")
     assert alerts["normal"] == [], alerts["normal"]
     assert [a for a, _ in alerts["leak"]] == ["LEAK_CONTINUOUS_FLOW"], alerts["leak"]
     # morning use (from 07:00) runs straight into the leak, so the water has not stopped since 07:00
     assert alerts["leak"][0][1] == DAY + 7 * HOUR + (CONT_FLOW_MIN - 1) * 60      # 14:59, day 2
+
+    # Only a correctly signed ACK deletes a message: a forged one (wrong key) is ignored
+    hal = FakeHAL(os.path.join(tmp, "B-104.jsonl"), use)
+    n = FlatNode("B-104", hal)
+    n.emit("SUM", i=0, vol_l=1.0, p_min=10.0)
+    ack = {"k": "ACK", "n": "B-104", "s": 1, "gt": 60}
+    hal.receive = lambda: [pack(ack, b"attacker-guessed")]
+    n.step()
+    assert len(n.store.queue) == 1, "forged ACK must not delete the message"
+    hal.receive = lambda: [pack(ack, sim_key("B-104"))]
+    n.step()
+    assert all(m["s"] != 1 for m in n.store.queue), "real ACK deletes it"
     print("node self-check passed")

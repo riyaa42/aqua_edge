@@ -82,7 +82,7 @@ At SF7, four back-to-back packets plus the guard time take about 0.8 s, well ins
 
 ### Python radio model (`live/radio.py`)
 
-- **Airtime** follows the Semtech LoRa formula (75 bytes: 133 ms at SF7, 3.1 s at SF12) [Semtech AN1200.13, for the time-on-air formula].
+- **Airtime** follows the Semtech LoRa formula (our signed binary packets are 14 to 34 bytes: 46 to 77 ms at SF7, 1.2 to 1.8 s at SF12; the old 75-byte JSON took 133 ms at SF7) [Semtech AN1200.13, for the time-on-air formula].
 - **Collision rule:** two uplinks that overlap in time on the same channel and spreading factor are both lost.
 - **Other results:** a packet sent during a radio cut is marked `radio_cut`. A packet can also be lost at random according to the link's delivery rate (`weak_link`).
 - **Listen before talk:** a CAD listen does not hear a packet that started less than 2 symbols earlier, so two alerts that start at almost the same instant still collide. That is realistic.
@@ -110,7 +110,7 @@ The scenario contains:
 | Check | Result |
 |---|---|
 | Uplink attempts that got through while the radio was up | **100.0%** (pass mark 95%; was 89.3% before slots) |
-| Collisions | **2** out of about 4,066 (was 489) |
+| Collisions | **2** out of about 4,000 (was 489 before slots; same with the shorter signed packets) |
 | Messages never delivered | **0** |
 | Usual delay with the radio up | 1 minute |
 | Stored alerts delivered after the radio cut | 4 minutes after the radio came back (pass mark 5) |
@@ -153,7 +153,7 @@ Self-checks: `python3 live/radio.py` and `python3 webots/run_offline.py`.
 - **Hearing assumption.** The radio model assumes every node can hear every other node (one building). Hidden nodes are not checked.
 - **Uplink channels.** Only one uplink channel is used, although IN865 offers 3.
 - **Frequency band in ns-3.** ns-3 uses the EU868 frequency, because the module has no Indian band. The physics is the same.
-- **Packet format.** Packets are sent as JSON text. Packing them into bytes would shorten airtime.
+- **Packet format.** Packets are signed binary (`firmware/packet.py`), about a third of the JSON size. Keys are made from the node name for the simulation; real nodes need a key file on the SD card.
 - **Leak modelling.** Leaks use internal WNTR settings (tested with wntr 1.5.0).
 - **Water-quality classifier.** It is still threshold rules. The TinyML model is not trained yet.
 - **Gateway repeat check.** The gateway cannot yet tell "the same leak flickering" from "a new leak". It only marks repeats.

@@ -28,6 +28,7 @@ sys.path[:0] = [os.path.join(HERE, "..", "simulation", "live"), os.path.join(HER
 from water import Water, LEAK_SIZES_LPS  # noqa: E402
 from aqua_edge import FlatNode, TankNode, DAY  # noqa: E402
 from gateway import Gateway  # noqa: E402
+from packet import sim_key  # noqa: E402
 
 END_S = 2 * DAY + 6 * 3600
 FLATS = ["B-401", "B-302", "B-203", "B-104", "B-G01"]       # one per floor, different corners
@@ -39,6 +40,7 @@ FLOW_ALERTS = {"LEAK_NIGHT_FLOW", "LEAK_CONTINUOUS_FLOW", "ABNORMAL_CONSUMPTION"
 class HAL:
     """Perfect radio: every message reaches everyone else straight away."""
     storage_path = None
+    key = staticmethod(sim_key)
 
     def __init__(self, name, clock, readings, inboxes):
         self.name, self.clock, self.readings, self.inboxes = name, clock, readings, inboxes
@@ -53,7 +55,7 @@ class HAL:
     def send(self, msg, at_s=None, cad=False):
         for n, box in self.inboxes.items():
             if n != self.name:
-                box.append(dict(msg))
+                box.append(msg)
 
     def receive(self):
         msgs, self.inboxes[self.name] = self.inboxes[self.name], []

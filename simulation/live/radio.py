@@ -7,14 +7,16 @@ Collisions are worked out here, because they depend on who sends when.
     python3 live/radio.py       # self-check
 """
 import csv
-import json
 import math
 import os
 import random
+import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 LINK_TABLE = os.path.join(HERE, "..", "ns3", "link_table.csv")
 GATEWAY = "GATEWAY"
+sys.path.insert(0, os.path.join(HERE, "..", "..", "firmware"))
+from packet import NAMES, pack, peek, sim_key  # noqa: E402
 
 BW_HZ, CODING_RATE, PREAMBLE = 125_000, 1, 8   # LoRa defaults: 125 kHz, 4/5, 8 symbols
 DEFAULT_SF, DEFAULT_PDR = 7, 1.0               # used until ns-3 gives real numbers
@@ -68,11 +70,12 @@ class Radio:
             sf = self.link(src)["sf"] if src != GATEWAY else None
             free_at = t
             for offset, msg, cad in sorted(((*s, False)[:3] for s in sends), key=lambda s: s[0]):
-                nbytes = len(json.dumps(msg, separators=(",", ":")))   # ponytail: JSON on air; pack to binary to cut airtime
-                dsts = [msg["n"]] if src == GATEWAY and msg.get("k") == "ACK" else \
+                h = peek(msg)                                   # packets are signed binary (firmware/packet.py)
+                nbytes = len(msg)
+                dsts = [h["n"]] if src == GATEWAY and h["k"] == "ACK" else \
                     [n for n in outs if n != GATEWAY] if src == GATEWAY else [GATEWAY]
                 air = airtime_s(nbytes, sf or max(self.link(d)["sf"] for d in dsts))
-                x = {"src": src, "dsts": dsts, "msg": msg, "bytes": nbytes, "air": air, "sf": sf, "backoffs": 0,
+                x = {"src": src, "dsts": dsts, "msg": msg, "h": h, "bytes": nbytes, "air": air, "sf": sf, "backoffs": 0,
                      "ch": self.rng.randrange(UPLINK_CHANNELS) if src != GATEWAY else "down"}
                 if cad and src != GATEWAY:
                     x["want"] = t + offset
@@ -110,10 +113,10 @@ class Radio:
                     result = "weak_link"
                 else:
                     result = "ok"
-                    inbox.setdefault(d, []).append(dict(x["msg"]))
+                    inbox.setdefault(d, []).append(x["msg"])
                 if self.writer:
-                    self.writer.writerow({"t_s": round(x["start"], 3), "src": x["src"], "dst": d, "kind": x["msg"].get("k"),
-                                          "seq": x["msg"].get("s"), "bytes": x["bytes"], "sf": self.link(node)["sf"],
+                    self.writer.writerow({"t_s": round(x["start"], 3), "src": x["src"], "dst": d, "kind": x["h"]["k"],
+                                          "seq": x["h"]["s"], "bytes": x["bytes"], "sf": self.link(node)["sf"],
                                           "ch": x["ch"], "airtime_ms": round(1000 * x["air"], 1),
                                           "backoffs": x["backoffs"], "result": result})
         if self.log:
@@ -126,29 +129,33 @@ if __name__ == "__main__":
     print(f"airtime 75 bytes: SF7 {1000 * a:.1f} ms, SF12 {1000 * airtime_s(75, 12):.0f} ms")
     assert abs(a - 0.1334) < 0.001
     r = Radio(None)
-    m = lambda n, s: {"n": n, "s": s, "k": "SUM"}
+    pk = lambda m: pack({"t": 0, **m}, sim_key(m["n"]))
+    m = lambda n, s: pk({"n": n, "s": s, "k": "SUM"})
+    A, B = "B-101", "B-102"
     # two nodes at the same second on the same channel and SF: both lost
-    got = r.transmit(0, {"A": [(10, m("A", 1))], "B": [(10.05, m("B", 1))], GATEWAY: []})
+    got = r.transmit(0, {A: [(10, m(A, 1))], B: [(10.01, m(B, 1))], GATEWAY: []})   # short packets: 10 ms apart
     assert GATEWAY not in got
     # far apart: both arrive
-    got = r.transmit(60, {"A": [(10, m("A", 2))], "B": [(40, m("B", 2))], GATEWAY: []})
+    got = r.transmit(60, {A: [(10, m(A, 2))], B: [(40, m(B, 2))], GATEWAY: []})
     assert len(got[GATEWAY]) == 2
     # one node's two packets never overlap each other
-    got = r.transmit(120, {"A": [(5, m("A", 3)), (5, m("A", 4))], GATEWAY: []})
+    got = r.transmit(120, {A: [(5, m(A, 3)), (5, m(A, 4))], GATEWAY: []})
     assert len(got[GATEWAY]) == 2
     # ACK reaches only its node; a radio cut blocks it
-    r.cut("B", 180, 240)
-    got = r.transmit(180, {GATEWAY: [(1, {"k": "ACK", "n": "A", "s": 1}), (2, {"k": "ACK", "n": "B", "s": 1})], "A": [], "B": []})
-    assert list(got) == ["A"]
-    # time slots: 22 nodes, each in its own slot of the minute, all arrive
-    slots = {f"N{i}": [(i * 60 / 22 + 0.2, m(f"N{i}", 1))] for i in range(22)}
+    r.cut(B, 180, 240)
+    ack = lambda n: pack({"k": "ACK", "n": n, "s": 1, "gt": 0}, sim_key(n))
+    got = r.transmit(180, {GATEWAY: [(1, ack(A)), (2, ack(B))], A: [], B: []})
+    assert list(got) == [A]
+    # time slots: 21 nodes, each in its own slot of the minute, all arrive
+    nodes = NAMES[1:]
+    slots = {n: [(i * 60 / len(nodes) + 0.2, m(n, 1))] for i, n in enumerate(nodes)}
     got = r.transmit(240, {**slots, GATEWAY: []})
-    assert len(got[GATEWAY]) == 22
+    assert len(got[GATEWAY]) == len(nodes)
     # listen before talk: an alert that hears a packet on air waits, and both arrive
-    a = {"n": "A", "s": 9, "k": "ALERT"}
-    got = r.transmit(300, {"B": [(10, m("B", 5))], "A": [(10.05, a, True)], GATEWAY: []})
+    a = pk({"n": A, "s": 9, "k": "ALERT", "a": "LEAK_NIGHT_FLOW"})
+    got = r.transmit(300, {B: [(10, m(B, 5))], A: [(10.05, a, True)], GATEWAY: []})
     assert len(got[GATEWAY]) == 2
     # two alerts starting at the very same instant both hear silence and collide: CAD cannot stop that
-    got = r.transmit(360, {"A": [(10, a, True)], "B": [(10, {"n": "B", "s": 9, "k": "ALERT"}, True)], GATEWAY: []})
+    got = r.transmit(360, {A: [(10, a, True)], B: [(10, pk({"n": B, "s": 9, "k": "ALERT", "a": "LEAK_NIGHT_FLOW"}), True)], GATEWAY: []})
     assert GATEWAY not in got
     print("radio self-check passed")

@@ -70,10 +70,11 @@ Hardware: LoRa module + ESP32 (radio bridge: passes packets between LoRa and USB
 | Own time slot per node (TDMA) | Summaries: node k sends at second k x 60/21 + 0.2 of the minute (2.86 s slots, 0.2 s guard) |
 | Listen before talk (LoRa CAD) + random backoff 0.1 to 1 s, up to 5 tries | Alerts: sent the same minute they fire |
 | Re-send if no ACK within 2 minutes | Everything |
+| Signed binary packets (`firmware/packet.py`) | Every packet, ACKs included: about a third of the JSON size, 4-byte signature (HMAC-SHA256) with a key shared by that node and the gateway. Forged or changed packets are dropped (`BAD_PACKET`); a repeated counter is a duplicate or replay and is not used again, even after a gateway restart. Signed, not encrypted. |
 | Store-and-forward to SD card | Messages wait during radio cuts [Mariadhason et al. [4], for timestamped store-and-forward to SD card] |
 | At most 4 messages per node per minute; 10 ms gap between own packets | Keeps traffic inside the slot |
 
-Airtime is about 133 ms per 75-byte packet at SF7 (SF = spreading factor, LoRa's speed vs range setting). ns-3 says every node in building B reaches the gateway on SF7 with about 26 dB to spare.
+Airtime is about 67 ms per 29-byte summary and 46 ms per 14-byte ACK at SF7 (was 133 ms for the old 75-byte JSON) (SF = spreading factor, LoRa's speed vs range setting). ns-3 says every node in building B reaches the gateway on SF7 with about 26 dB to spare.
 
 ### 3.4 Time
 
@@ -153,7 +154,7 @@ Settled on 11 November 2026: nodes on mains power, gateway = LoRa + ESP32 + lapt
 | An alert can collide with the first slot at quarter-hour boundaries | Seen once (B-203 at 02:30:00.2 vs B-401's summary); recovered by the 2-minute re-send. |
 | Retry storm during long radio cuts | About 13,000 re-send attempts in 3.5 h; add backoff. |
 | No location for downtake leaks | Building check says "pipe leak", not which floor. |
-| Simulation-only parts | CAD, radio and clock setting are imitated; ns-3 uses EU868 (no Indian band in the module); one uplink channel modelled (IN865 has 3); packets are JSON text. |
+| Simulation-only parts | CAD, radio and clock setting are imitated; ns-3 uses EU868 (no Indian band in the module); one uplink channel modelled (IN865 has 3); keys are made from the node name (`sim_key`), real key files on the SD card are not built yet. |
 | `matplotlib` is in `simulation/pyproject.toml` but nothing imports it directly | Can probably be removed. |
 
 ---
@@ -245,7 +246,8 @@ Full citations: `docs/presentations/first/references.md`.
 | 07fd3bd | ns3/ moved back after an accidental move |
 | 67e849f | docs/ folder; `check_all.sh` |
 | d5f05c3 | Power-cut-safe SD saves (`os.replace`); all valve code removed |
-| (next) | Baseline saved to SD hourly; continuous-flow check |
+| a470ed8 | Baseline saved to SD hourly; continuous-flow check |
+| (next) | Signed binary radio packets; message counter that never repeats; replay record on the gateway |
 
 Earlier work (on `main`): first presentation, components list, Webots test bench, early quality-check script.
 

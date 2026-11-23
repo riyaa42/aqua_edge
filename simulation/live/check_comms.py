@@ -81,7 +81,7 @@ def main():
 
     # 2. Messages: created vs delivered (store-and-forward)
     sent = {(r["src"], int(r["seq"])) for r in up}
-    waiting = {(m["n"], m["s"]) for n in os.listdir(os.path.join(RUN, "sd")) if n.endswith(".jsonl") for m in jsonl(os.path.join("sd", n))}
+    waiting = {(m["n"], m["s"]) for n in os.listdir(os.path.join(RUN, "sd")) if n.endswith(".jsonl") for m in jsonl(os.path.join("sd", n)) if "k" in m}
     received = {(m["n"], m["s"]) for m in got}
     lost = (sent | waiting) - received
     resends = len(up) - len(sent)
