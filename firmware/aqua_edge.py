@@ -37,6 +37,8 @@ from packet import pack, unpack
 
 DAY, HOUR = 86400, 3600
 LEARN_S = DAY                 # first day: learn this node's normal pattern
+EWMA_A = 1 / 14               # after day 1, each clean hour moves the baseline 1/14 of the way to
+                              # today's value: remembers about 2 weeks (Phyn learns in 21 days, Moen 7)
 SUMMARY_S = 900               # send a summary every 15 minutes
 MAX_SENDS_PER_STEP = 4        # radio duty-cycle budget per minute
 RETRY_S = 120                 # resend if no acknowledgement after 2 minutes
@@ -122,13 +124,29 @@ class Store:
 
 
 class Baseline:
-    """Mean and spread of one sensor for each hour of the day, learned on day 1."""
+    """Mean and spread of one sensor for each hour of the day: learned on day 1, then kept up to
+    date with an EWMA (an average that gives recent days more weight), one hour at a time."""
 
     def __init__(self):
         self.n, self.s, self.ss = [0] * 24, [0.0] * 24, [0.0] * 24
+        self.today = [0, 0.0, 0.0]          # readings of the hour now running (after day 1)
 
     def add(self, hour, x):
         self.n[hour] += 1; self.s[hour] += x; self.ss[hour] += x * x
+
+    def collect(self, x):
+        t = self.today
+        t[0] += 1; t[1] += x; t[2] += x * x
+
+    def blend(self, hour, clean):
+        """End of an hour: mix it in with weight EWMA_A, only if no alert was active (clean),
+        so a leak is never learned as normal. Mean and spread both follow."""
+        tn, ts, tss = self.today
+        self.today = [0, 0.0, 0.0]
+        if clean and tn and self.n[hour]:
+            n = self.n[hour]
+            self.s[hour] = (1 - EWMA_A) * self.s[hour] + EWMA_A * ts * n / tn
+            self.ss[hour] = (1 - EWMA_A) * self.ss[hour] + EWMA_A * tss * n / tn
 
     def mean(self, hour):
         return self.s[hour] / max(self.n[hour], 1)
@@ -152,6 +170,7 @@ class Node:
                 for k, d in json.load(f).items():
                     self.base[k].__dict__.update(d)
         self.hour = None
+        self.clean = True              # no alert so far in the hour now running
         self.alerts = {}               # active alert type -> last time its condition was seen
         self.interval, self.acc = None, {}
 
@@ -173,15 +192,22 @@ class Node:
             if m and m["k"] == "ACK":
                 self.store.ack(m["s"])
         hour = int(now % DAY // HOUR)
-        if hour != self.hour:              # once an hour: keep the learned baseline on the SD card
-            self.hour = hour
+        if hour != self.hour:              # once an hour: update the baseline, keep it on the SD card
+            for b in self.base.values():
+                b.blend(self.hour, self.clean)
+            self.hour, self.clean = hour, True
             self.save_baseline()
         if now < LEARN_S:
             for k in self.sensors:
                 self.base[k].add(hour, r[k])
         else:
+            for k in self.sensors:
+                self.base[k].collect(r[k])
             self.check(now, hour, r)
             self.alerts = {k: seen for k, seen in self.alerts.items() if now - seen < ALERT_CLEAR_S}
+            # ponytail: minutes before an alert fires (up to 8 h for continuous flow) still count
+            # as clean; at EWMA_A = 1/14 that moves the baseline a few percent at most
+            self.clean = self.clean and not self.alerts
         self.summarise(now, r)
         # Collisions: alerts go out now, listening first (CSMA/CA); everything else waits for
         # this node's own time slot (TDMA), kept in step by the gateway time in every ACK
@@ -358,6 +384,18 @@ if __name__ == "__main__":
     assert [a for a, _ in alerts["leak"]] == ["LEAK_CONTINUOUS_FLOW"], alerts["leak"]
     # morning use (from 07:00) runs straight into the leak, so the water has not stopped since 07:00
     assert alerts["leak"][0][1] == DAY + 7 * HOUR + (CONT_FLOW_MIN - 1) * 60      # 14:59, day 2
+
+    # EWMA: habits that change are learned (about 2 weeks), a leak while alerting is not
+    more = lambda t: use(t) * (2 if t >= DAY else 1)                  # mornings and evenings double
+    n = FlatNode("B-201", FakeHAL(None, more))
+    run(n, 15 * DAY)
+    m7 = n.base["flow_lps"].mean(7)
+    assert 0.012 + 0.6 * 0.012 < m7 < 0.024, m7                  # 1-(13/14)^14 = 65% of the way
+    assert n.base["flow_lps"].mean(3) == 0.0
+    n.hal.flow = lambda t: 0.05                                        # burst: alerts within the hour
+    run(n, 17 * DAY)
+    assert any(m["k"] == "ALERT" for m in n.store.queue)
+    assert n.base["flow_lps"].s[3] < 0.01 * 60, "leak hours must not be learned"
 
     # Only a correctly signed ACK deletes a message: a forged one (wrong key) is ignored
     hal = FakeHAL(os.path.join(tmp, "B-104.jsonl"), use)

@@ -127,6 +127,8 @@ Defaults chosen when building: **4-byte tag** (`TAG_BYTES`, the same size LoRaWA
 
 ### 4.1 Rolling baseline with EWMA (fix 4)
 
+**Status: done (2026-11-23).** `EWMA_A = 1/14` (about 2 weeks; home monitors use 7 to 21 days: Moen 7, Phyn 21). An hour is learned only if no alert was active in it. The fixed checks (night flow, continuous flow) never learn, so they stay the safety net against a slow leak being learned. Not built: "guest mode" (needs a gateway-to-node command; none exists yet besides ACK) and CUSUM on the gateway building balance (needs a 30-day scenario to show it works; our runs are 48 h).
+
 - **Problem.** The baseline is frozen after day 1:
   - a leak present on day 1 is learned as "normal"
   - real changes in habits (a guest, summer) are never learned

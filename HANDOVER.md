@@ -148,7 +148,7 @@ Settled on 11 November 2026: nodes on mains power, gateway = LoRa + ESP32 + lapt
 | Volume = flow x 60 from one reading per minute | Real hardware should count flow-sensor pulses. |
 | Leaks below the 0.02 L/s night limit | Now caught by the continuous-flow check above 0.005 L/s. Sensors are simulated and ideal. |
 | Mains only: a building power cut switches nodes off | No detection until power returns, and the tank still feeds the flats by gravity, so a leak keeps running. The simulated "power cut" event only stops the pump; nodes stay on. On return, nodes need about 30 s or more to boot. Sudden power loss can also damage an SD card being written; keep writes small. |
-| Baseline learned once, from one day | A leak on day 1 is learned as normal; habits change; weekdays differ from Sundays. |
+| Baseline learned from day 1, then a slow EWMA (about 2 weeks, paused during alerts) | A leak on day 1 is still learned at first (the fixed night and continuous-flow checks catch it); weekdays differ from Sundays. |
 | A full radio cut gives 21 separate `NODE_SILENT` | Better: one "all nodes silent: radio or gateway problem". |
 | A leak that drains the tank can trigger `SUPPLY_EVENT` | Seen in the flow-leak run at 10:31 and 17:56. |
 | An alert can collide with the first slot at quarter-hour boundaries | Seen once (B-203 at 02:30:00.2 vs B-401's summary); recovered by the 2-minute re-send. |
@@ -247,7 +247,8 @@ Full citations: `docs/presentations/first/references.md`.
 | 67e849f | docs/ folder; `check_all.sh` |
 | d5f05c3 | Power-cut-safe SD saves (`os.replace`); all valve code removed |
 | a470ed8 | Baseline saved to SD hourly; continuous-flow check |
-| (next) | Signed binary radio packets; message counter that never repeats; replay record on the gateway |
+| 411ee85 | Signed binary radio packets; message counter that never repeats; replay record on the gateway |
+| (next) | Rolling baseline (EWMA, 2 weeks, paused during alerts) |
 
 Earlier work (on `main`): first presentation, components list, Webots test bench, early quality-check script.
 

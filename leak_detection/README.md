@@ -102,6 +102,8 @@ So a flat learns that 7 am is busy (showers) and 3 am is quiet. A big family and
 
 This is the `Baseline` class in `aqua_edge.py`. We checked its math against Python's own statistics functions and it matches to about 15 decimal places.
 
+**Kept up to date after day 1.** Every hour, that hour's readings move the learned value 1/14 of the way towards today's (EWMA, an average that gives recent days more weight; it remembers about 2 weeks), so changed habits are learned. An hour with an active alert is skipped, so a leak is not learned as normal. The night and continuous-flow checks use fixed numbers and never learn.
+
 **Saved to the SD card.** Once an hour the node saves what it has learned (`<name>_baseline.json`, next to the message queue), using the same power-cut-safe save as the queue. After a power cut the node loads it and carries on; at most the unfinished hour of learning is lost. Without this, every building power cut (our nodes have no battery) would wipe what every node had learned.
 
 ---
