@@ -155,7 +155,6 @@ Self-checks: `python3 live/radio.py` and `python3 webots/run_offline.py`.
 - **Frequency band in ns-3.** ns-3 uses the EU868 frequency, because the module has no Indian band. The physics is the same.
 - **Packet format.** Packets are signed binary (`firmware/packet.py`), about a third of the JSON size. Keys are made from the node name for the simulation; real nodes need a key file on the SD card.
 - **Leak modelling.** Leaks use internal WNTR settings (tested with wntr 1.5.0).
-- **Water-quality classifier.** It is still threshold rules. The TinyML model is not trained yet.
 - **Gateway repeat check.** The gateway cannot yet tell "the same leak flickering" from "a new leak". It only marks repeats.
 - **Retry storm.** During a 3.5-hour radio cut, nodes made about 13,000 re-send attempts.
 - **Power cuts.** Real nodes run on mains, so a building power cut switches them off. The simulated power cut only stops the pump; nodes stay on.
@@ -169,6 +168,6 @@ Self-checks: `python3 live/radio.py` and `python3 webots/run_offline.py`.
 5. **Hidden nodes.** Use ns-3 node-to-node links to check whether nodes can hear each other.
 6. **Retry storm.** Back off re-sends during long radio cuts to save energy.
 7. **New or ongoing leak.** Decide on the laptop whether a repeat alert is a new problem or the same one.
-8. **TinyML model.** Train the water-quality model and replace the threshold rules.
+8. **TinyML model.** Done: the tank node runs the 8-bit model (`../tinyml/README.md`).
 9. **Monitoring dashboard.** Build a Grafana dashboard for the real output.
 10. **Pass marks.** Agree final pass marks as a team.

@@ -90,7 +90,7 @@ class Water:
         tod = (self.t % M.DAY) / M.H
         r["B-TANK"] = {"outflow_lps": self._meter("B-DT4"), "inflow_lps": self._meter("B-RISE"),
                        "level_m": self._last("node", "pressure", "B-TANK") + self.rng.normal(0, M.LEVEL_NOISE_M),
-                       "ph": ph, "tds_ppm": tds, "turbidity_pct": turb,
+                       "ph": ph, "tds_ppm": tds, "turbidity_ntu": turb,
                        "temp_c": 26 + 2 * np.sin((tod - 9) / 24 * 2 * np.pi) + self.rng.normal(0, 0.1)}
         return r
 

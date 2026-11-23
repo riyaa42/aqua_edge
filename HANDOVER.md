@@ -20,7 +20,7 @@ Aqua Edge (CSD457 Internet of Things; earlier names: JalRakshak, HydroDrive) is 
 | `firmware/gateway.py` | **The real gateway code.** ACKs, building check, silent nodes, supply events, repeat alerts, clock check. Has a self-check (`python3 firmware/gateway.py`). |
 | `leak_detection/README.md` | How leak detection works: checks, math, timing, results, known problems. |
 | `leak_detection/compare_leaks.py` | Flow vs pressure experiment (35 runs). Run from `simulation/`. Results go to `leak_detection/results/` (not in git). |
-| `tinyml/` | Water-quality model work: dataset survey, open decision, a teammate's early quantized-network script (`pre-quality-check/quality.py`, trained on made-up data). |
+| `tinyml/` | Water-quality model: `train_quality.py` (data, training, 8-bit quantization, tests), results, datasets. The node runs `firmware/quality_model.py`. |
 | `simulation/live/` | **Main test system.** Live simulation: water engine, timekeeper, one process or Docker container per node, LoRa radio model, control panel, checker, scenarios. |
 | `simulation/ns3/` | ns-3 (research network simulator) with the LoRaWAN module, in Docker. Produces the radio link table and replays live runs to cross-check the radio model. |
 | `simulation/webots/` | Older 3D test bench (Webots), the pre-made 48 h sensor scenario, and `run_offline.py` (fast firmware test without Webots). Parked, see section 6. |
@@ -48,7 +48,7 @@ Every node runs one step **once a minute**: read sensors, learn or check, queue 
 - **Tank node:**
   - *Outflow check:* outflow above average + max(4 x spread, 0.5 L/s) for 15 minutes gives `ABNORMAL_SUPPLY` (pipe burst).
   - *Level low:* level below average - max(4 x spread, 0.3 m) for 10 minutes sends a `SUPPLY_LOW` flag (pump or power problem).
-  - *Water quality:* pH, TDS, turbidity, temperature; **threshold rules for now** (`classify_quality`: TDS > 600 or pH > 8.5 is chemical; TDS < 120 and pH < 6.8 is runoff), to be replaced by the TinyML model. Fires after 3 bad readings in a row (about 2 to 3 minutes); `QUALITY_CLEARED` when it is normal again.
+  - *Water quality:* pH, TDS, turbidity (NTU) into an **8-bit neural network** (`firmware/quality_model.py`, 308 bytes): NORMAL / RUNOFF / CHEMICAL. Trained on real Kenyan tap water mixed with runoff or cleaner, labelled by the Indian standard IS 10500; 99.5% on held-out data, 0 false alarms on real held-out tap water (`tinyml/README.md`). Fires after 3 bad readings in a row (about 2 to 3 minutes); `QUALITY_CLEARED` when it is normal again.
 - **One alarm per problem:** an alert re-arms after 10 quiet minutes (`ALERT_CLEAR_S`).
 - **Messages:** `ALERT` (urgent), `FLAG`, `SUM` (15-minute summary: litres used, lowest pressure). Every message carries node id `n`, sequence `s`, node time `t`.
 
@@ -125,12 +125,13 @@ From `sh simulation/check_all.sh` on 11 November 2026: **all checks pass.**
 | D10 | **Pi fit will be tested on a real Pi Zero 2 W**, not by limiting Docker containers. | A laptop container can only estimate Pi processor time. |
 | D11 | **No valves.** The response to any problem is the buzzer, the LED and an alert to the gateway. | Team decision (November 2026). The valve code was removed. |
 | D12 | **Hardware: each node is a Raspberry Pi Zero 2 W on mains power (no battery); the gateway is LoRa module + ESP32 + laptop.** | Mains removes the battery-life problem of a Pi running Linux (about 0.5 to 0.7 W even when idle). The laptop has the power and screen for gateway analysis and a dashboard; the ESP32 only bridges the radio. |
+| D13 | **Water-quality model: real tap water mixed with runoff or cleaner, labelled by IS 10500; no temperature input; 8-bit network in plain Python.** | No public data has runoff/chemical labels. Temperature only told sources apart in the Kenya data, not contamination. A 308-byte model needs no TensorFlow on the Pi. |
 
 ---
 
 ## 6. Open decisions (need the team)
 
-1. **Water-quality model classes:** normal / anomaly (matches the GECCO 2019 dataset directly) or normal / runoff / chemical (needs extra labels we make ourselves)? Blocks the TinyML work. Datasets surveyed in `tinyml/README.md`.
+1. **Water-quality model classes:** settled as normal / runoff / chemical (the firmware's alerts and Sharma et al. [1]); labels from IS 10500 on mixtures of real tap water. Revisit if the team wants a "normal vs unusual for this tank" check too (`tinyml/README.md` section 4).
 2. **Timestamps** (section 3.4): agree UTC Unix seconds and ISO 8601 logs, then build.
 3. **Webots:** keep as 3D demo or drop (was it promised in the proposal?).
 4. **Pass marks** in `simulation/live/check_comms.py` are placeholders; agree final values.
@@ -168,7 +169,7 @@ Settled on 11 November 2026: nodes on mains power, gateway = LoRa + ESP32 + lapt
 3. **Hardware layers** (same interface as `NetHAL` in `simulation/live/node.py`):
    - `firmware/pi_hal.py` for the nodes: reads recorded sensor readings row by row from a file (the sensors are simulated), plus the real LoRa module with CAD, DS3231 clock, SD card, buzzer and LED.
    - A laptop hardware layer for the gateway that exchanges packets with the ESP32 over USB serial, plus a small ESP32 program that bridges LoRa and serial (and sends the ACKs the laptop asks for).
-4. **TinyML model:** train on the chosen dataset, quantize to 8 bits, replace `classify_quality`.
+4. **TinyML model:** done (2026-11-23). Next step there: lab tests with tap water spiked with known runoff or cleaner.
 5. Timestamps (UTC Unix seconds, ISO 8601 logs).
 6. One combined "all silent" alert; re-send backoff.
 7. Test the too-much check on Cache County data.
@@ -218,7 +219,7 @@ Scenarios are JSON lines in `simulation/live/scenarios/` (leaks, quality events,
 
 | # | Paper | What we use it for |
 |---|---|---|
-| [1] | Sharma et al., Scientific Reports 2026 | 8-bit on-device neural network for water quality (planned TinyML model) |
+| [1] | Sharma et al., Scientific Reports 2026 | 8-bit on-device neural network for water quality (our model's shape and classes) |
 | [2] | Alghamdi et al., Sensors 2022 | Pressure-drop leak rule and valve closure over LoRaWAN (tested, then removed in favour of flow) |
 | [3] | Babazadeh, ISA Transactions 2019 | Anomaly detection on the node, only anomalies sent over LoRa |
 | [4] | Mariadhason et al., Sensors 2026 | Timestamped store-and-forward to SD card; DS3231 clock |
@@ -248,7 +249,8 @@ Full citations: `docs/presentations/first/references.md`.
 | d5f05c3 | Power-cut-safe SD saves (`os.replace`); all valve code removed |
 | a470ed8 | Baseline saved to SD hourly; continuous-flow check |
 | 411ee85 | Signed binary radio packets; message counter that never repeats; replay record on the gateway |
-| (next) | Rolling baseline (EWMA, 2 weeks, paused during alerts) |
+| 65b767b | Rolling baseline (EWMA, 2 weeks, paused during alerts) |
+| (next) | TinyML water-quality model: 8-bit network trained on real tap water + IS 10500 labels; turbidity now in NTU |
 
 Earlier work (on `main`): first presentation, components list, Webots test bench, early quality-check script.
 

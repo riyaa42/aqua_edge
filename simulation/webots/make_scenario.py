@@ -82,8 +82,8 @@ def build_network():
 
 # Made-up water quality: (mean, noise std) per value; an event replaces the normal values it lists
 QUALITY = {
-    "normal": {"ph": (7.2, 0.05), "tds": (250, 5), "turb": (95, 1)},       # turbidity = clarity %, as in Sharma et al. [1]
-    "runoff": {"ph": (6.4, 0.05), "tds": (60, 5), "turb": (88, 0)},        # rainwater-like: acidic, few dissolved solids
+    "normal": {"ph": (7.2, 0.05), "tds": (250, 5), "turb": (0.5, 0.1)},    # turbidity in NTU; IS 10500 limit 1 (5 at most)
+    "runoff": {"ph": (6.4, 0.05), "tds": (60, 5), "turb": (25, 0)},        # rainwater-like: acidic, few dissolved salts, muddy
     "chemical": {"ph": (8.8, 0.05), "tds": (900, 20)},                     # bleach-like: alkaline, many dissolved solids
 }
 
@@ -129,7 +129,7 @@ if __name__ == "__main__":
     cols["B-TANK:inflow_lps"] = meter(1000 * r.link["flowrate"]["B-RISE"].values)
     cols["B-TANK:level_m"] = level + rng.normal(0, LEVEL_NOISE_M, len(t))
     ph, tds, turb, temp = quality(t, rng)
-    cols.update({"B-TANK:ph": ph, "B-TANK:tds_ppm": tds, "B-TANK:turbidity_pct": turb, "B-TANK:temp_c": temp})
+    cols.update({"B-TANK:ph": ph, "B-TANK:tds_ppm": tds, "B-TANK:turbidity_ntu": turb, "B-TANK:temp_c": temp})
 
     pd.DataFrame(cols).round(5).to_csv(os.path.join(HERE, "data", "sensors.csv"), index=False)
     pd.DataFrame(EVENTS, columns=["event", "kind", "start_s", "end_s", "where", "expected_detector"]).to_csv(

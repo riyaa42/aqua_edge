@@ -1,0 +1,10 @@
+1. Held-out mixtures (12810 samples, unseen tap water): float 0.9982, int8 0.9945, int8 agrees with float on 0.9956
+   confusion (rows = true, cols = int8 model): NORMAL [4265, 0, 5]; RUNOFF [46, 4224, 0]; CHEMICAL [19, 0, 4251]
+2. Real Kenya safe water (test part, 9072 readings): false alarms 0.0000
+   Real Kenya unsafe water (70560 readings, rivers, boreholes, sea): flagged 0.9600; of the 67855 that break an IS 10500 limit, flagged 0.9961; classes {'NORMAL': 2822, 'RUNOFF': 60491, 'CHEMICAL': 7247}
+3. GECCO normal readings (215726): called NORMAL 0.2005; of those inside IS 10500 limits (40700): 1.0000; pH above 8.5 in 0.8113 of normal readings
+   GECCO labelled events: 29 of 36 flagged, but not a fair score: the site's pH is above the Indian limit most of the time anyway (event readings breaking a limit: 0.8162). The model follows IS 10500, not this utility's own normal
+4. Accuracy with sensor drift: pH +0.2 0.9795, pH -0.2 0.9550, TDS +10% 0.9948, TDS -10% 0.9947, turbidity +1 NTU 0.9909
+5. Simulation profiles classified correctly: {'NORMAL': 1.0, 'RUNOFF': 1.0, 'CHEMICAL': 1.0}
+6. Model: 200 int8 weights + 27 int32 biases = 308 bytes; file 1344 bytes; 26 us per reading on this laptop (about 0.4 ms on a Pi Zero 2 W at 15x slower; one reading a minute)
+Done in 12 s

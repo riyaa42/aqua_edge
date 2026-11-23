@@ -34,6 +34,7 @@ import json
 import os
 
 from packet import pack, unpack
+from quality_model import QualityModel
 
 DAY, HOUR = 86400, 3600
 LEARN_S = DAY                 # first day: learn this node's normal pattern
@@ -273,14 +274,7 @@ class FlatNode(Node):
         self.acc["p_min"] = min(self.acc.get("p_min", 1e9), r["pressure_m"])
 
 
-def classify_quality(ph, tds, turbidity_pct):
-    """Stand-in for the 8-bit neural network of Sharma et al. [1]; same three classes."""
-    # ponytail: threshold rules; replace with the quantized model once trained on real readings
-    if tds > 600 or ph > 8.5:
-        return "CHEMICAL"
-    if tds < 120 and ph < 6.8:
-        return "RUNOFF"
-    return "NORMAL"
+QUALITY_MODEL = QualityModel()    # 8-bit network, Sharma et al. [1]; trained by tinyml/train_quality.py
 
 
 class TankNode(Node):
@@ -292,7 +286,7 @@ class TankNode(Node):
         self.bad_class, self.low_flagged, self.quality_alerted = None, False, False
 
     def check(self, now, hour, r):
-        q = classify_quality(r["ph"], r["tds_ppm"], r["turbidity_pct"])
+        q = QUALITY_MODEL.classify(r["ph"], r["tds_ppm"], r["turbidity_ntu"])
         if q != "NORMAL":
             self.bad_run, self.good_run, self.bad_class = self.bad_run + 1, 0, q
             if self.bad_run >= QUALITY_MIN:

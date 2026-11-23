@@ -54,4 +54,4 @@ After changing the scenario: `uv run python make_scenario.py` (needs the uv proj
 ## Limits
 - Webots radio is range based; it does not model LoRa airtime, spreading factors or collisions (the live simulation and ns-3 do that, see `../live/` and `../ns3/`).
 - Water quality readings are made up, with events planted on purpose; EPANET cannot model pH or TDS.
-- The quality check is threshold rules, to be replaced by a trained quantized model.
+- The quality check is the 8-bit model (`../../tinyml/README.md`); turbidity is in NTU.

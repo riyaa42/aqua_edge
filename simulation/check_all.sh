@@ -8,6 +8,8 @@ step() { printf '\n=== %s ===\n' "$1"; }
 
 step "gateway self-check (re-arm, silent node, clock)"
 python3 ../firmware/gateway.py
+step "water-quality model self-check"
+python3 ../firmware/quality_model.py
 step "radio self-check"
 python3 live/radio.py
 step "water engine self-check"
