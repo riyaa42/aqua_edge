@@ -1,0 +1,15 @@
+[project]
+name = "aqua-edge"
+version = "0.1.0"
+description = "Aqua Edge simulations and edge-water-quality prototype"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "matplotlib>=3.8",
+    "numpy>=2.4.6",
+    "pandas>=2.0",
+    "wntr>=1.5",
+]
+
+[tool.uv]
+package = false

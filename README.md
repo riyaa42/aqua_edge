@@ -7,3 +7,12 @@ Aqua Edge (CSD457 Internet of Things): an offline-first IoT node that detects un
 | `prep_work/` | Components and connections list, early water-quality check |
 | `first_presentation/` | Slides, speaking script and Q&A prep for the first review, reference list |
 | `simulation/` | EPANET/WNTR water simulations, Webots test bench, simulation progress report |
+
+## Python setup
+
+This repository uses one uv project at the repository root. From here or any
+subdirectory:
+
+```sh
+uv sync
+```

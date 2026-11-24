@@ -45,7 +45,7 @@ webots worlds/aqua_edge.wbt         # Webots R2025a
 
 In Webots, press play. One step is one minute of water time, so 48 h takes about 6 minutes at normal speed; use fast-forward to skip ahead. LEDs: green normal, yellow messages stuck waiting to send, red alert. Results are written to `results/webots_run/` when the 48 h end. `AQUA_SNAPSHOTS=1` before the command saves two screenshots for slides.
 
-After changing the scenario: `uv run python make_scenario.py` (needs the uv project in `simulation/`), then `python3 make_world.py` if the node list changed.
+After changing the scenario: `uv run python make_scenario.py` (using the repository-root uv project), then `python3 make_world.py` if the node list changed.
 
 ## Limits
 - Webots radio is range based; it does not model LoRa airtime, spreading factors or collisions (that is the NS-3 part of the plan).

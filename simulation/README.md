@@ -92,7 +92,7 @@ So inside a building, **a leak shows up clearly as flow (night-time flow, pump s
 
 ## How to run
 
-Uses [uv](https://docs.astral.sh/uv/), like the rest of the repo. From this `simulation/` folder:
+Uses the repository-root [uv](https://docs.astral.sh/uv/) project. From this `simulation/` folder:
 
 ```
 sh scripts/get_swifeed_data.sh                          # download SWI-FEED NET_6 (about 48 MB)
