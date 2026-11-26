@@ -1,10 +1,19 @@
-1. Held-out mixtures (12810 samples, unseen tap water): float 0.9982, int8 0.9945, int8 agrees with float on 0.9956
-   confusion (rows = true, cols = int8 model): NORMAL [4265, 0, 5]; RUNOFF [46, 4224, 0]; CHEMICAL [19, 0, 4251]
-2. Real Kenya safe water (test part, 9072 readings): false alarms 0.0000
-   Real Kenya unsafe water (70560 readings, rivers, boreholes, sea): flagged 0.9600; of the 67855 that break an IS 10500 limit, flagged 0.9961; classes {'NORMAL': 2822, 'RUNOFF': 60491, 'CHEMICAL': 7247}
-3. GECCO normal readings (215726): called NORMAL 0.2005; of those inside IS 10500 limits (40700): 1.0000; pH above 8.5 in 0.8113 of normal readings
-   GECCO labelled events: 29 of 36 flagged, but not a fair score: the site's pH is above the Indian limit most of the time anyway (event readings breaking a limit: 0.8162). The model follows IS 10500, not this utility's own normal
-4. Accuracy with sensor drift: pH +0.2 0.9795, pH -0.2 0.9550, TDS +10% 0.9948, TDS -10% 0.9947, turbidity +1 NTU 0.9909
-5. Simulation profiles classified correctly: {'NORMAL': 1.0, 'RUNOFF': 1.0, 'CHEMICAL': 1.0}
-6. Model: 200 int8 weights + 27 int32 biases = 308 bytes; file 1344 bytes; 26 us per reading on this laptop (about 0.4 ms on a Pi Zero 2 W at 15x slower; one reading a minute)
-Done in 12 s
+1. Leakage-free 5-Fold CV on mixtures (mean +/- std across folds):
+   float32 acc: 0.9972 +/- 0.0012 | int8 acc: 0.9963 +/- 0.0011 | int8/float agree: 0.9979 | macro-F1: 0.9963
+   NORMAL   : P=0.9964  R=0.9924  F1=0.9944
+   RUNOFF   : P=0.9973  R=0.9980  F1=0.9976
+   CHEMICAL : P=0.9951  R=0.9983  F1=0.9967
+   CV confusion (rows=true, cols=int8): NORMAL [11550, 31, 57]; RUNOFF [23, 11615, 0]; CHEMICAL [19, 1, 11618]
+2. Held-out Kenya Safe water (N=6048): FPR=0.0000 (0 flagged)
+   Real Kenya Unsafe water (N=70560): flagged=0.9459; of N=67855 exceeding IS 10500: TPR=0.9809; classes={'NORMAL': 3819, 'RUNOFF': 58790, 'CHEMICAL': 7951}
+3. GECCO 2019 German utility (normal N=215690):
+   Under IS 10500: 40695 compliant -> TinyML NORMAL=1.0000, FPR=0.0000
+   Under German TrinkwV (pH 6.5-9.5): 215688 compliant (pH>8.5 in 0.8113); TinyML flags 0.4572 of TrinkwV-compliant water because TinyML was trained on IS 10500 limits.
+4. CSU ROSS 2019 River Dataset (N_final=44133, temp -0.1..20.7 C):
+   IS-10500-compliant river rows (N=16451): TinyML NORMAL=0.9554, FPR=0.0446
+   Rows exceeding IS 10500 (N=27682, mainly turbidity/runoff): TPR=0.9876 (RUNOFF=11790, CHEMICAL=15550)
+   Raw vs QAQC'd episodes (2-stage window=3 + confirm=3): raw=224 alert episodes vs final=239 alert episodes
+5. Temperature stress test on NORMAL water (N=2890): 10C:FPR=0.0021, 15C:FPR=0.0028, 20C:FPR=0.0024, 25C:FPR=0.0024, 30C:FPR=0.0024, 35C:FPR=0.0031
+6. Sensor drift accuracy: pH +0.2 0.9826, pH -0.2 0.9496, TDS +10% 0.9932, TDS -10% 0.9922, turb +1 NTU 0.9902
+7. Model footprint (4->16->8->3): 216 int8 weights + 27 int32 biases = 324 bytes; JSON 1435 bytes; 33 us/reading on host (runs on Raspberry Pi 4 in <1 ms)
+Done in 32.1 s

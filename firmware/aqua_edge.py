@@ -34,7 +34,7 @@ import json
 import os
 
 from packet import pack, unpack
-from quality_model import QualityModel
+from quality_model import QualityModel, QualityMonitor
 
 DAY, HOUR = 86400, 3600
 LEARN_S = DAY                 # first day: learn this node's normal pattern
@@ -71,11 +71,12 @@ def save_atomic(path, text):
         f.flush()
         os.fsync(f.fileno())          # new contents really on the SD card
     os.replace(tmp, path)             # atomic swap: old file or new file, nothing in between
-    fd = os.open(os.path.dirname(os.path.abspath(path)), os.O_RDONLY)
-    try:
-        os.fsync(fd)                  # the swap itself really on the SD card
-    finally:
-        os.close(fd)
+    if os.name != "nt":               # POSIX: fsync parent directory; Windows does not support os.open on dirs
+        fd = os.open(os.path.dirname(os.path.abspath(path)), os.O_RDONLY)
+        try:
+            os.fsync(fd)              # the swap itself really on the SD card
+        finally:
+            os.close(fd)
 
 
 class Store:
@@ -282,21 +283,20 @@ class TankNode(Node):
 
     def __init__(self, node_id, hal):
         super().__init__(node_id, hal)
-        self.bad_run = self.good_run = self.supply_run = self.low_run = self.ok_run = 0
-        self.bad_class, self.low_flagged, self.quality_alerted = None, False, False
+        self.qmon = QualityMonitor(QUALITY_MODEL, window=3, confirm_n=QUALITY_MIN, clear_n=QUALITY_CLEAR_MIN)
+        self.supply_run = self.low_run = self.ok_run = 0
+        self.bad_class, self.low_flagged = None, False
 
     def check(self, now, hour, r):
-        q = QUALITY_MODEL.classify(r["ph"], r["tds_ppm"], r["turbidity_ntu"])
-        if q != "NORMAL":
-            self.bad_run, self.good_run, self.bad_class = self.bad_run + 1, 0, q
-            if self.bad_run >= QUALITY_MIN:
-                self.alert(f"QUALITY_{q}", ph=round(r["ph"], 2), tds=round(r["tds_ppm"]))
-                self.quality_alerted = True
-        else:
-            self.bad_run, self.good_run = 0, self.good_run + 1
-            if self.quality_alerted and self.good_run >= QUALITY_CLEAR_MIN:
-                self.alerts.pop(f"QUALITY_{self.bad_class}", None)  # allow a new alert next time
-                self.quality_alerted = False
+        _, _, _, q_ev = self.qmon.update(r.get("temp_c", 25.0), r["ph"], r["tds_ppm"], r["turbidity_ntu"])
+        if q_ev:
+            kind, cls_name, avg, _ = q_ev
+            if kind == "ALERT":
+                self.bad_class = cls_name
+                self.alert(f"QUALITY_{cls_name}", ph=round(avg[1], 2), tds=round(avg[2]))
+            elif kind == "CLEARED" and self.bad_class:
+                self.alerts.pop(f"QUALITY_{self.bad_class}", None)
+                self.bad_class = None
                 self.emit("ALERT", a="QUALITY_CLEARED")
         # Abnormal supply: far more water leaving the tank than normal for this hour
         b = self.base["outflow_lps"]

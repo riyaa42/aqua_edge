@@ -25,7 +25,7 @@ KINDS = ["", "ALERT", "FLAG", "SUM", "ACK"]
 # ponytail: node table for building B; at installation it comes from the same file as the keys
 NAMES = ["GATEWAY", "B-TANK"] + [f"B-{floor}{flat:02d}" for floor in "G1234" for flat in range(1, 5)]
 ALERTS = ["LEAK_NIGHT_FLOW", "LEAK_CONTINUOUS_FLOW", "ABNORMAL_CONSUMPTION", "ABNORMAL_SUPPLY",
-          "QUALITY_RUNOFF", "QUALITY_CHEMICAL", "QUALITY_CLEARED"]
+          "QUALITY_RUNOFF", "QUALITY_CHEMICAL", "QUALITY_LIMIT_VIOLATION", "QUALITY_CLEARED"]
 FLAGS = ["SUPPLY_LOW"]
 # field name -> how its value is packed; its number on air is its position here; "B" = index into ALERTS/FLAGS
 FIELDS = {"a": "B", "f": "B", "i": ">I", "vol_l": ">f", "p_min": ">f", "in_l": ">f", "level_m": ">f",
