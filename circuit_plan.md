@@ -19,16 +19,28 @@
 10. USB cable to connect the ESP32 to the laptop
 11. Laptop for gateway processing, cross-node analysis, maintenance prioritization, and dashboard
 
-### C. Omitted Physical Components & Simulation Workarounds
+### C. Omitted Physical Components & Dataset-Replay Workaround
 
 Because we do not have the Battery HAT, 18650 battery cells, the 8-channel ADC, or any of the physical water sensors (pH, TDS, turbidity, water temperature, water flow, and water pressure sensors), the following workarounds are used in place of physical sensing and battery hardware:
 
 12. **Power workaround:** The Raspberry Pi 4 is powered directly via a 5 V USB cable rather than a Battery HAT and 18650 cells.
-13. **Sensor & ADC workaround (Dataset & Simulation Replay):** Real public water-quality and water-consumption datasets collected online, together with EPANET/WNTR hydraulic simulation outputs (for pipeline flow, pressure, leaks, and supply drops), are stored locally and replayed row-by-row into the node firmware. Because no physical analog sensors are attached, the 8-channel ADC and sensor signal-conditioning / voltage-level converter circuits are not required.
+13. **Sensor & ADC workaround (Dataset-Replay Layer):** Instead of physical sensor connections, the Raspberry Pi 4 receives readings through a **dataset-replay layer** fed from two sources of data:
+    * **Water-quality and consumption datasets:** Existing datasets collected online provide readings such as pH, TDS, turbidity, temperature, or water consumption, depending on what each dataset contains.
+    * **EPANET/WNTR outputs:** Hydraulic simulations provide simulated hydraulic measurements such as flow and pressure under normal and leak conditions.
+
+    Because no physical analog sensors are attached, the 8-channel ADC and sensor signal-conditioning / voltage-level converter circuits are not required.
 
 ## 2. Component Connections and Data Flow
 
-In the absence of physical pH, TDS, turbidity, temperature, flow, and pressure sensors (and the 8-channel ADC), simulated and real-world dataset readings are fed directly into the monitoring node software running on the Raspberry Pi 4 through a dataset-replay hardware abstraction layer. The RTC is connected to the Raspberry Pi to timestamp sensor readings and detected events; its connection interface will be determined after the RTC model is finalized (I²C or direct). The microSD card holds the operating system, the pre-loaded sensor datasets, the TinyML model used for local inference, and a timestamped log of sensor readings and detected events, which are kept locally and re-sent when the LoRa link becomes available. The buzzer connects directly to the Raspberry Pi GPIO to provide audible alerts when a configured anomaly is detected. The Raspberry Pi is powered directly over USB without a Battery HAT or battery cells.
+The most important difference between the original and updated architecture is that the Raspberry Pi 4 receives sensor readings through a **dataset-replay layer** rather than physical sensor connections (and without an 8-channel ADC). Two data sources feed this replay layer: existing water-quality and consumption datasets (providing pH, TDS, turbidity, temperature, or water-consumption readings depending on the dataset) and EPANET/WNTR hydraulic simulation outputs (providing simulated flow and pressure under normal and leak conditions).
+
+The RTC is connected to the Raspberry Pi to timestamp sensor readings and detected events; its connection interface will be determined after the RTC model is finalized (I²C or direct). The microSD card stores:
+- The Raspberry Pi operating system and application.
+- Locally available datasets used for replay.
+- The trained TinyML model used for local inference.
+- Timestamped readings and detection-event logs, which are kept locally and re-sent when the LoRa link becomes available.
+
+The buzzer connects directly to the Raspberry Pi GPIO to provide audible alerts when a configured anomaly is detected. The Raspberry Pi is powered directly via a 5 V USB cable without a Battery HAT or battery cells.
 
 The Raspberry Pi processes the replayed sensor readings locally and runs the configured detection logic for water-quality anomalies, pipeline leakage, and abnormal consumption. It can continue detecting anomalies and generating local buzzer alerts without Internet connectivity, while locally storing readings and relevant event information for later use. The Pi transmits sensor readings, detected events, and node status through LoRa transceiver module 1. At the gateway, LoRa transceiver module 2 receives these messages and passes them to the ESP32, which relays the data to the laptop over USB serial. The laptop runs the gateway application and performs cross-node analysis by combining information received from monitoring nodes, assessing risk, and prioritizing maintenance. It also displays the collected data and analysis results. When Internet connectivity is available, the laptop can optionally synchronize data with a cloud service for remote monitoring and historical analysis. When Internet access is unavailable, local detection and alerts at the monitoring node continue, and gateway-level analysis can continue on the laptop as long as the LoRa link and local gateway hardware remain operational.
 
@@ -46,4 +58,4 @@ Paper [5] uses EPANET to model water-distribution behaviour and NS-3 to simulate
 
 Paper [6] develops a physical water-distribution prototype with flow and water-quality sensors arranged across network nodes, synchronizes measurements, and compares main-pipe and branch-flow measurements to identify leakage conditions. Its flow-balance methodology informs our leakage-detection approach, while its cloud-oriented data pipeline provides the baseline against which our project's offline-first design can be evaluated.
 
-Taken together, these methodologies support the selection of water-quality and pipeline parameters, local processing, LoRa communication, timestamping, and local storage. Using direct USB power for the Raspberry Pi, replaying real and simulated datasets in place of physical sensors and an 8-channel ADC, and connecting a local buzzer and ESP32 USB-serial bridge are practical implementation choices needed to build and evaluate our chosen hardware setup; they should not be presented as components specifically validated by all six papers. The reviewed papers provide methodological precedents for individual functions, while our project's proposed integration of water-quality anomaly detection, leakage detection, and abnormal-consumption detection in an offline-first architecture is what we intend to evaluate.
+Taken together, these methodologies support the selection of water-quality and pipeline parameters, local processing, LoRa communication, timestamping, and local storage. Using direct USB power for the Raspberry Pi, replaying real datasets and EPANET/WNTR outputs in place of physical sensors and an 8-channel ADC, and connecting a local buzzer and ESP32 USB-serial bridge are practical implementation choices needed to build and evaluate our chosen hardware setup; they should not be presented as components specifically validated by all six papers. The reviewed papers provide methodological precedents for individual functions, while our project's proposed integration of water-quality anomaly detection, leakage detection, and abnormal-consumption detection in an offline-first architecture is what we intend to evaluate.
