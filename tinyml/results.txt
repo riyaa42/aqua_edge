@@ -1,19 +1,22 @@
-1. Leakage-free 5-Fold CV on mixtures (mean +/- std across folds):
-   float32 acc: 0.9972 +/- 0.0012 | int8 acc: 0.9963 +/- 0.0011 | int8/float agree: 0.9979 | macro-F1: 0.9963
-   NORMAL   : P=0.9964  R=0.9924  F1=0.9944
-   RUNOFF   : P=0.9973  R=0.9980  F1=0.9976
-   CHEMICAL : P=0.9951  R=0.9983  F1=0.9967
-   CV confusion (rows=true, cols=int8): NORMAL [11550, 31, 57]; RUNOFF [23, 11615, 0]; CHEMICAL [19, 1, 11618]
-2. Held-out Kenya Safe water (N=6048): FPR=0.0000 (0 flagged)
-   Real Kenya Unsafe water (N=70560): flagged=0.9459; of N=67855 exceeding IS 10500: TPR=0.9809; classes={'NORMAL': 3819, 'RUNOFF': 58790, 'CHEMICAL': 7951}
-3. GECCO 2019 German utility (normal N=215690):
-   Under IS 10500: 40695 compliant -> TinyML NORMAL=1.0000, FPR=0.0000
-   Under German TrinkwV (pH 6.5-9.5): 215688 compliant (pH>8.5 in 0.8113); TinyML flags 0.4572 of TrinkwV-compliant water because TinyML was trained on IS 10500 limits.
-4. CSU ROSS 2019 River Dataset (N_final=44133, temp -0.1..20.7 C):
-   IS-10500-compliant river rows (N=16451): TinyML NORMAL=0.9554, FPR=0.0446
-   Rows exceeding IS 10500 (N=27682, mainly turbidity/runoff): TPR=0.9876 (RUNOFF=11790, CHEMICAL=15550)
-   Raw vs QAQC'd episodes (2-stage window=3 + confirm=3): raw=224 alert episodes vs final=239 alert episodes
-5. Temperature stress test on NORMAL water (N=2890): 10C:FPR=0.0021, 15C:FPR=0.0028, 20C:FPR=0.0024, 25C:FPR=0.0024, 30C:FPR=0.0024, 35C:FPR=0.0031
-6. Sensor drift accuracy: pH +0.2 0.9826, pH -0.2 0.9496, TDS +10% 0.9932, TDS -10% 0.9922, turb +1 NTU 0.9902
-7. Model footprint (4->16->8->3): 216 int8 weights + 27 int32 biases = 324 bytes; JSON 1435 bytes; 33 us/reading on host (runs on Raspberry Pi 4 in <1 ms)
-Done in 32.1 s
+1. Leakage-free 5-Fold CV (expanded mixtures, mean +/- std):
+   float32 acc: 0.9848 +/- 0.0012 | int8 acc: 0.9839 +/- 0.0013 | int8/float agree: 0.9956 | macro-F1: 0.9839
+   NORMAL   : P=0.9932  R=0.9928  F1=0.9930
+   RUNOFF   : P=0.9724  R=0.9885  F1=0.9804
+   CHEMICAL : P=0.9865  R=0.9705  F1=0.9784
+   CV confusion (rows=true, cols=int8): NORMAL [10008, 35, 38]; RUNOFF [20, 9965, 96]; CHEMICAL [49, 248, 9784]
+2. RUNOFF vs CHEMICAL Overlap Experiment (held-out sources, Turb 5-40 NTU & pH 5.5-8.5, N=1779):
+   2-class accuracy in overlap zone: 0.9944
+   2-class confusion: RUNOFF(N=1752) -> [RUNOFF=1748, CHEM=0] | CHEMICAL(N=27) -> [RUNOFF=6, CHEM=21]
+3. Held-out Kenya Safe (N=6048): FPR=0.0000 (0 flagged)
+   Kenya Unsafe (N=70560, over IS 10500 N=67855): TPR=0.9998, classes={'NORMAL': 2099, 'RUNOFF': 21068, 'CHEMICAL': 47393}
+4. GECCO 2019 (normal N=215690):
+   Under IS 10500 (N=40695 compliant): FPR=0.0000
+   Under German TrinkwV (N=215688 compliant, pH>8.5 in 0.8113): TinyML flags 0.2638 (trained on IS 10500 cutoffs)
+5. CSU ROSS 2019 (N_final=44133): IS-compliant N=16451 FPR=0.0218; over-IS N=27682 TPR=0.9758 (RUNOFF=8513, CHEM=18500)
+6. Loddon Catchment Storm-Window Comparison (before/during/after):
+   Pre-storm (-6..-1h) (N= 76): med Turb= 10.4 NTU, med TDS= 391 ppm, med pH=7.94 | RUNOFF=0.605, CHEM=0.395, NORM=0.000
+   During storm       (N=207): med Turb=  9.4 NTU, med TDS= 396 ppm, med pH=7.90 | RUNOFF=0.541, CHEM=0.449, NORM=0.010
+   Post-storm (+1..6h) (N= 54): med Turb= 12.4 NTU, med TDS= 388 ppm, med pH=7.92 | RUNOFF=0.648, CHEM=0.352, NORM=0.000
+7. Temperature stress test on NORMAL (N=2560): 10C:0.0055, 15C:0.0043, 20C:0.0039, 25C:0.0051, 30C:0.0047, 35C:0.0047
+8. Footprint (4->16->8->3): 216 int8 weights + 27 int32 biases = 324 bytes; 37 us/reading on host (<1 ms on Raspberry Pi 4)
+Done in 23.8 s
