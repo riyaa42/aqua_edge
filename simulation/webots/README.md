@@ -1,6 +1,6 @@
 # Aqua Edge in Webots: firmware test bench
 
-EPANET (through WNTR) simulates the water. Webots runs the **real node firmware** on 20 flat nodes, 1 tank node and 1 gateway in a 3D model of building B. The firmware never talks to Webots directly, only to a small hardware layer, so the same `../../firmware/` files are meant to run on the real hardware (Raspberry Pi Zero 2 W nodes; gateway on a laptop with an ESP32 radio bridge).
+EPANET (through WNTR) simulates the water. Webots runs the **real node firmware** on 20 flat nodes, 1 tank node and 1 gateway in a 3D model of building B. The firmware never talks to Webots directly, only to a small hardware layer, so the same `../../firmware/` files are meant to run on the real hardware (Raspberry Pi 4 nodes; gateway on a laptop with an ESP32 radio bridge).
 
 **Status: parked.** The main test is now the live simulation (`../live/`, see `../LIVE_SIMULATION.md`), which has realistic LoRa timing and lets events be added while it runs. Webots may be kept as a 3D demo. `run_offline.py` here is still used as a fast firmware test.
 
@@ -49,7 +49,7 @@ webots worlds/aqua_edge.wbt         # Webots R2025a
 
 In Webots, press play. One step is one minute of water time, so 48 h takes about 6 minutes at normal speed; use fast-forward to skip ahead. LEDs: green normal, yellow messages stuck waiting to send, red alert. Results are written to `results/webots_run/` when the 48 h end. `AQUA_SNAPSHOTS=1` before the command saves two screenshots for slides.
 
-After changing the scenario: `uv run python make_scenario.py` (needs the uv project in `simulation/`), then `python3 make_world.py` if the node list changed.
+After changing the scenario: `uv run python make_scenario.py` (uses the root `uv` project), then `python3 make_world.py` if the node list changed.
 
 ## Limits
 - Webots radio is range based; it does not model LoRa airtime, spreading factors or collisions (the live simulation and ns-3 do that, see `../live/` and `../ns3/`).

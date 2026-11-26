@@ -1,8 +1,8 @@
 """Which leak signal works better: flow or pressure? Runs the real firmware on the live water
 model (perfect radio) for many leaks, and scores each signal on its own.
 
-    cd simulation && uv run python ../leak_detection/compare_leaks.py           # ~35 runs of 54 h, in parallel
-    cd simulation && uv run python ../leak_detection/compare_leaks.py --check   # self-check of the scoring only
+    uv run python leak_detection/compare_leaks.py           # ~35 runs of 54 h, in parallel
+    uv run python leak_detection/compare_leaks.py --check   # self-check of the scoring only
 
 Each run: day 1 the nodes learn normal, a leak starts at a random time on day 2, the run goes
 on to 06:00 on day 3 so every leak sees one night (needed by the night-flow rule).

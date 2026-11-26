@@ -12,12 +12,12 @@
 
 Based on the current hardware availability and dataset-driven simulation plan, the physical hardware setup is updated as follows:
 
-* **Power:** Monitoring nodes use a **5V USB cable** connected directly to the Raspberry Pi Zero 2 W (the Battery HAT and 18650 Li-ion battery cells are removed).
+* **Power:** Monitoring nodes use a **5V USB cable** connected directly to the Raspberry Pi 4 (the Battery HAT and 18650 Li-ion battery cells are removed).
 * **Sensing:** No physical water-quality, flow, or pressure sensors are connected; consequently, the **8-channel ADC** and analog signal-conditioning circuits are not required. Real public datasets and EPANET/WNTR hydraulic simulation outputs are stored locally and replayed row-by-row to each node.
 
 ### A. Monitoring Node (Edge Device)
-1. **Raspberry Pi Zero 2 W** — Runs local TinyML water-quality inference, leakage detection, abnormal-consumption detection, and atomic store-and-forward buffering.
-2. **5V USB Power Cable** — Direct power supply to the Raspberry Pi Zero 2 W.
+1. **Raspberry Pi 4** — Runs local TinyML water-quality inference, leakage detection, abnormal-consumption detection, and atomic store-and-forward buffering.
+2. **5V USB Power Cable** — Direct power supply to the Raspberry Pi 4.
 3. **microSD Card** — Stores OS, quantized TinyML model, pre-loaded real/simulated sensor datasets, learned node baselines, and atomic store-and-forward queues.
 4. **RTC Module (e.g., DS3231 via I²C)** — Provides accurate UTC/ISO-8601 timestamps for sensor readings and offline-buffered events.
 5. **LoRa Transceiver Module 1 with Antenna (SPI + GPIO)** — Transmits alerts, flags, and periodic summaries independently of Wi-Fi/Internet.
@@ -91,4 +91,4 @@ Run identical 48-hour multi-fault scenarios (contamination, flat leaks, riser bu
 3. **Alert Latency (Online vs. Offline):** Time from event onset to alert delivery under normal connectivity vs. across each outage duration (Edge-First vs. Cloud Baseline A).
 4. **Data Loss / Recovery Rate (%):** Percentage of buffered alerts and summaries successfully recovered after link restoration.
 5. **Maintenance-Priority Accuracy:** Top-1 / Top-$k$ accuracy in ranking the highest-risk fault location first across multi-fault scenarios.
-6. **Edge Resource & Communication Footprint (Raspberry Pi Zero 2 W):** Measured RAM, SD flash usage, CPU time per sample (ms), and LoRa airtime / bytes transmitted (Edge-First vs. raw cloud streaming).
+6. **Edge Resource & Communication Footprint (Raspberry Pi 4):** Measured RAM, SD flash usage, CPU time per sample (ms), and LoRa airtime / bytes transmitted (Edge-First vs. raw cloud streaming).

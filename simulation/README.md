@@ -13,7 +13,7 @@ Full write-up of mechanisms, results and next steps: [`LIVE_SIMULATION.md`](LIVE
 
 ## How to run
 
-Uses [uv](https://docs.astral.sh/uv/). From this `simulation/` folder:
+Uses [uv](https://docs.astral.sh/uv/) (configured at the repository root). From this `simulation/` folder:
 
 ```
 sh live/run_local.sh --scenario live/scenarios/standard.jsonl     # no Docker: one process per node, 48 h in ~1 min

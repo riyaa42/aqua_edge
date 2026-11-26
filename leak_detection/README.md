@@ -20,7 +20,7 @@ All numbers below come from the code in `../firmware/aqua_edge.py` (the node fir
 | Flow vs pressure comparison | `compare_leaks.py` (this folder) | |
 | Live test scenario | `../simulation/live/scenarios/flow_leaks.jsonl` | |
 
-The same firmware files run in the simulation now and are meant to run on the Raspberry Pi Zero 2 W nodes and the gateway laptop later.
+The same firmware files run in the simulation now and are meant to run on the Raspberry Pi 4 nodes and the gateway laptop later.
 
 ---
 
@@ -317,14 +317,14 @@ See section 2. Flow caught every leak with no false alarms. Its detection times 
 
 ## 11. How to run the tests
 
-From the `simulation/` folder (it holds the Python environment and the water model):
+From the repository root (using the root `uv` environment):
 
 ```
-sh live/run_local.sh --scenario live/scenarios/flow_leaks.jsonl   # full live system, three leaks
-python3 live/check_comms.py                                       # PASS/FAIL report for that run
-python3 ../firmware/gateway.py                                    # gateway self-check (re-arm, silent node, clock)
-uv run python ../leak_detection/compare_leaks.py                  # flow vs pressure, 35 runs (~5 min; see note in the file)
-uv run python ../leak_detection/compare_leaks.py --check          # self-check of the scoring
+sh simulation/live/run_local.sh --scenario simulation/live/scenarios/flow_leaks.jsonl   # full live system, three leaks
+python3 simulation/live/check_comms.py                                                  # PASS/FAIL report for that run
+python3 firmware/gateway.py                                                             # gateway self-check (re-arm, silent node, clock)
+uv run python leak_detection/compare_leaks.py                                           # flow vs pressure, 35 runs (~5 min; see note in the file)
+uv run python leak_detection/compare_leaks.py --check                                   # self-check of the scoring
 ```
 
 Results of the comparison are written to `leak_detection/results/compare_leaks.csv`.

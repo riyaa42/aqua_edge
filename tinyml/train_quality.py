@@ -1,6 +1,6 @@
 """Build the data, train, quantize to 8 bits and test the tank node's water-quality model.
 
-    simulation/.venv/bin/python tinyml/train_quality.py      # about 1 minute; needs numpy
+    uv run python tinyml/train_quality.py      # about 1 minute; needs numpy
 
 Writes firmware/quality_model.json (the model the node runs) and tinyml/results.txt.
 Fails loudly (assert) if any test drops below its pass mark. Method and sources: tinyml/README.md.
@@ -237,7 +237,7 @@ def main():
     us = (time.perf_counter() - t1) / 2000 * 1e6
     say(f"6. Model: {n_w} int8 weights + {n_b} int32 biases = {n_w + 4 * n_b} bytes; "
         f"file {os.path.getsize(MODEL_PATH)} bytes; {us:.0f} us per reading on this laptop "
-        f"(about {us * 15 / 1000:.1f} ms on a Pi Zero 2 W at 15x slower; one reading a minute)")
+        f"(runs on Raspberry Pi 4 in under 1 ms; one reading a minute)")
     say(f"Done in {time.time() - t0:.0f} s")
     with open(os.path.join(HERE, "results.txt"), "w") as f:
         f.write("\n".join(out) + "\n")

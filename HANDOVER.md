@@ -2,13 +2,13 @@
 
 Status as of 11 November 2026, branch `live-simulation`. This file is the single place to catch up on the project: what exists, why it was built that way, how to check it, and what is still open. Read it first, then follow the links into the folder READMEs for detail.
 
-**Suggested reading order:** this file, then `leak_detection/README.md` (detection method and math), `simulation/LIVE_SIMULATION.md` (simulation and radio), `firmware/README.md`, `tinyml/README.md`, `docs/components.md` (hardware).
+**Suggested reading order:** this file, then `leak_detection/README.md` (detection method and math), `simulation/LIVE_SIMULATION.md` (simulation and radio), `firmware/README.md`, `tinyml/README.md`, `circuit_plan.md` (hardware), `branch_reference.md` (alignment & experimentation plan).
 
 ---
 
 ## 1. The project in one paragraph
 
-Aqua Edge (CSD457 Internet of Things; earlier names: JalRakshak, HydroDrive) is an **offline-first** water monitoring system for one residential building, "building B": 20 flats on 5 floors (G, 1 to 4; 4 flats per floor) fed by a rooftop tank through a shared downtake pipe. Every flat and the tank get a small node (Raspberry Pi Zero 2 W on mains power) with sensors. Nodes detect **leaks, abnormal consumption and unsafe water on the device itself**, warn locally (buzzer, LED; the project has no valves), and send alerts and 15-minute summaries over **LoRa** (long-range, low-power radio; no internet needed) to a gateway in the building: a LoRa module on an ESP32 board, connected by USB to a laptop that runs the gateway program and does building-wide checks. Nothing depends on the internet or a cloud.
+Aqua Edge (CSD457 Internet of Things; earlier names: JalRakshak, HydroDrive) is an **offline-first** water monitoring system for one residential building, "building B": 20 flats on 5 floors (G, 1 to 4; 4 flats per floor) fed by a rooftop tank through a shared downtake pipe. Every flat and the tank get a small node (Raspberry Pi 4 on USB power) with dataset replay. Nodes detect **leaks, abnormal consumption and unsafe water on the device itself**, warn locally (buzzer, LED; the project has no valves), and send alerts and 15-minute summaries over **LoRa** (long-range, low-power radio; no internet needed) to a gateway in the building: a LoRa module on an ESP32 board, connected by USB to a laptop that runs the gateway program and does building-wide checks. Nothing depends on the internet or a cloud.
 
 ---
 
@@ -26,10 +26,10 @@ Aqua Edge (CSD457 Internet of Things; earlier names: JalRakshak, HydroDrive) is 
 | `simulation/webots/` | Older 3D test bench (Webots), the pre-made 48 h sensor scenario, and `run_offline.py` (fast firmware test without Webots). Parked, see section 6. |
 | `simulation/scripts/build_society.py` | Builds the building B water network used everywhere. |
 | `simulation/check_all.sh` | **Runs every check in one go** (about 4 minutes). |
-| `docs/components.md` | Hardware components and connections. |
-| `docs/presentations/first/` | First review: slides, speaking script, Q&A prep, reference list. |
+| `circuit_plan.md` | Updated hardware components, USB power, and dataset-replay connections. |
+| `presentation/initial/` | First review: slides, speaking script, Q&A prep, reference list. |
 
-Python environment: `simulation/` is a `uv` project (uv is the Python package manager used here). The firmware itself needs no libraries.
+Python environment: this repository uses one `uv` project at the root (`pyproject.toml`, `uv.lock`). The firmware itself needs no libraries.
 
 ---
 
@@ -105,7 +105,7 @@ From `sh simulation/check_all.sh` on 11 November 2026: **all checks pass.**
 | Standard (48 h): 3.5 h radio cut, small flat leak, runoff, downtake burst, chemical | All events caught; stored alarms delivered 4 min after the radio returned; 100% of attempts through while radio up; 0 lost; 0 false alarms; radio model vs ns-3 gap 0.0 points |
 | Flow leaks: small leak in B-203 at 02:00, medium leak in B-402 at 10:00, large burst on downtake B-D1 at 18:00 | Night check 30 min (continuous-flow check also fires at 8 h); too-much check 60 min; tank outflow 15 min and building check 31 min (67% of water missing); 0 false alarms |
 | Flow vs pressure comparison (35 runs, firmware of commit 4f7867a) | Flow: 30/30 leaks caught, 0 false alarms. Pressure: 748 false alarms (mostly the wrong flat), small leaks missed, faster only on medium/large flat leaks (10 min) |
-| Laptop measurement of one flat node | About 0.2 ms of work per simulated minute, about 13 MB for the whole Python process. To be confirmed on a real Pi Zero 2 W |
+| Laptop measurement of one flat node | About 0.2 ms of work per simulated minute, about 13 MB for the whole Python process. To be confirmed on a real Raspberry Pi 4 |
 
 ---
 
@@ -122,9 +122,9 @@ From `sh simulation/check_all.sh` on 11 November 2026: **all checks pass.**
 | D7 | **Supply event from the tank level only.** | It used to count flats' low-pressure flags, which went away with D1. |
 | D8 | **Time slots for summaries, listen before talk for alerts.** | Random sending gave about 10% collisions (489); slots brought it to 2 in about 4,066. Alerts are urgent, so they do not wait for a slot. |
 | D9 | **Live simulation is the main test; Webots parked.** | Webots water is fixed in advance and its radio has no LoRa timing. Webots may come back as a 3D demo if the course expects one. |
-| D10 | **Pi fit will be tested on a real Pi Zero 2 W**, not by limiting Docker containers. | A laptop container can only estimate Pi processor time. |
+| D10 | **Pi fit will be tested on a real Raspberry Pi 4**, not by limiting Docker containers. | A laptop container can only estimate Pi processor time. |
 | D11 | **No valves.** The response to any problem is the buzzer, the LED and an alert to the gateway. | Team decision (November 2026). The valve code was removed. |
-| D12 | **Hardware: each node is a Raspberry Pi Zero 2 W on mains power (no battery); the gateway is LoRa module + ESP32 + laptop.** | Mains removes the battery-life problem of a Pi running Linux (about 0.5 to 0.7 W even when idle). The laptop has the power and screen for gateway analysis and a dashboard; the ESP32 only bridges the radio. |
+| D12 | **Hardware: each node is a Raspberry Pi 4 on USB power (no battery HAT/cells); the gateway is LoRa module + ESP32 + laptop.** | USB power removes the battery-life problem; datasets/simulations are replayed in place of physical sensors and ADC. The laptop has the power and screen for gateway analysis and a dashboard; the ESP32 only bridges the radio. |
 | D13 | **Water-quality model: real tap water mixed with runoff or cleaner, labelled by IS 10500; no temperature input; 8-bit network in plain Python.** | No public data has runoff/chemical labels. Temperature only told sources apart in the Kenya data, not contamination. A 308-byte model needs no TensorFlow on the Pi. |
 
 ---
@@ -165,7 +165,7 @@ Settled on 11 November 2026: nodes on mains power, gateway = LoRa + ESP32 + lapt
 **Newer agreed plan (2026-11-21): [`docs/IMPROVEMENT_PLAN.md`](docs/IMPROVEMENT_PLAN.md).** It covers safe SD saves, valve removal, signed binary radio messages and smarter leak checks. On real hardware the sensors are replaced by recorded readings fed row by row from a file. Where this list and that plan disagree, the plan wins.
 
 1. Decide open decision 1 (quality model classes).
-2. **Real Pi Zero 2 W test:** run one node's firmware with simulated readings; measure memory (`/usr/bin/time -v`), processor (`htop`), temperature (`vcgencmd measure_temp`).
+2. **Real Raspberry Pi 4 test:** run one node's firmware with simulated readings; measure memory (`/usr/bin/time -v`), processor (`htop`), temperature (`vcgencmd measure_temp`).
 3. **Hardware layers** (same interface as `NetHAL` in `simulation/live/node.py`):
    - `firmware/pi_hal.py` for the nodes: reads recorded sensor readings row by row from a file (the sensors are simulated), plus the real LoRa module with CAD, DS3231 clock, SD card, buzzer and LED.
    - A laptop hardware layer for the gateway that exchanges packets with the ESP32 over USB serial, plus a small ESP32 program that bridges LoRa and serial (and sends the ACKs the laptop asks for).
@@ -195,7 +195,7 @@ python3 live/check_comms.py                                       # PASS/FAIL re
 docker compose -f live/compose.yaml up                            # one container per node; panel at localhost:8501
 uv run streamlit run live/control_panel.py                        # control panel for the no-Docker run
 python3 webots/run_offline.py                                     # 1-second firmware test
-uv run python ../leak_detection/compare_leaks.py                  # flow vs pressure (~5 min; see note in file)
+uv run python ../leak_detection/compare_leaks.py                  # or from root: uv run python leak_detection/compare_leaks.py
 sh ns3/run_ns3.sh                                                 # ns-3 link table (first build 20-30 min)
 sh ns3/run_ns3.sh replay                                          # ns-3 replay of the last live run
 ```
@@ -208,7 +208,7 @@ Scenarios are JSON lines in `simulation/live/scenarios/` (leaks, quality events,
 
 - **Branch:** work is on `live-simulation`; the team repo is `riyaa42/aqua_edge`. Push after every significant change.
 - **Before pushing:** run `sh simulation/check_all.sh`; stage only the files you changed (check `git status`).
-- **Keep out of git:** paper PDFs (copyrighted; the repo is public; see `docs/presentations/first/references.md`), downloaded datasets (`tinyml/data/`), run output (`simulation/live/run/`, `leak_detection/results/`).
+- **Keep out of git:** paper PDFs (copyrighted; the repo is public; see `presentation/initial/references.md`), downloaded datasets (`tinyml/data/`), run output (`simulation/live/run/`, `leak_detection/results/`).
 - **One firmware copy:** every test loads `firmware/`. Never copy firmware into a test folder.
 - **Every folder has a README** saying what is inside; update it with the code.
 - **Self-checks:** each piece of logic has one runnable check (usually an `if __name__ == "__main__":` block with `assert`s).
@@ -226,7 +226,7 @@ Scenarios are JSON lines in `simulation/live/scenarios/` (leaks, quality events,
 | [5] | Pagano et al. (SWI-FEED), arXiv 2024 | Pairing a water simulator (EPANET) with ns-3 |
 | [6] | Ali et al., Internet of Things 2022 | Mass balance of supply vs branch flows for pipe leaks |
 
-Full citations: `docs/presentations/first/references.md`.
+Full citations: `presentation/initial/references.md`.
 
 ---
 

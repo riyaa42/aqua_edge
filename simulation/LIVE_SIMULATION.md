@@ -161,7 +161,7 @@ Self-checks: `python3 live/radio.py` and `python3 webots/run_offline.py`.
 
 ## 11. Next steps
 
-1. **Hardware layers.** A small file like `NetHAL` for the Raspberry Pi Zero 2 W nodes: real LoRa module (including CAD), DS3231 clock, SD card. And one for the gateway laptop, which exchanges packets with the ESP32 radio bridge over USB serial, plus the small ESP32 bridge program.
+1. **Hardware layers.** A small file like `NetHAL` for the Raspberry Pi 4 nodes: real LoRa module (including CAD), DS3231 clock, SD card. And one for the gateway laptop, which exchanges packets with the ESP32 radio bridge over USB serial, plus the small ESP32 bridge program.
 2. **Slot fit check.** Make the firmware send only as many packets as fit in its slot. Alternatively, give slower nodes wider slots. This is needed if any node ever needs SF10 or above.
 3. **Slot assignment on real nodes.** Set each node's slot at installation.
 4. **Real gateway position.** Re-run the ns-3 link table once the gateway's location is decided, for example in another building.

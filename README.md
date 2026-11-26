@@ -1,15 +1,24 @@
 # aqua_edge
 
-Aqua Edge (CSD457 Internet of Things): an offline-first IoT node that detects unsafe water, leaks and abnormal consumption on the device itself.
+Aqua Edge / JalRakshak (CSD457 Internet of Things): an offline-first IoT node that detects unsafe water, leaks and abnormal consumption on the device itself.
 
-| Folder | What is in it |
+| Folder / File | What is in it |
 |---|---|
-| `firmware/` | The real node and gateway code (runs in the simulation now; later on the Raspberry Pi Zero 2 W nodes and the gateway laptop) |
-| `leak_detection/` | How flow-based leak detection works, its math, and the flow vs pressure test |
-| `tinyml/` | Water-quality model: datasets, early model script |
+| `presentation/` | `initial/` (first review slides, speaking script, Q&A prep, reference list) and `final/` |
+| `circuit_plan.md` | Updated hardware components, USB power, and dataset-replay connections |
+| `branch_reference.md` | Alignment checklist for porting `live-simulation` and full experimentation plan |
+| `planning_archive/` | Archived planning notes (`IMPROVEMENT_PLAN.md`) |
+| `firmware/` | Node and gateway code (runs in the simulation now; later on the Raspberry Pi 4 nodes and the gateway laptop) |
+| `leak_detection/` | Flow-based leak detection documentation, math, and flow vs. pressure experiments |
+| `tinyml/` | Water-quality model: datasets, training/quantization script, and evaluation results |
 | `simulation/` | Simulation and network design: water network, live simulation, LoRa radio model, ns-3, Webots |
-| `docs/` | Components and connections list (`components.md`); presentations (`presentations/first/`: slides, speaking script, Q&A prep, reference list) |
 
-**New to the project? Start with [`HANDOVER.md`](HANDOVER.md)**: what exists, why, current results, open decisions and next steps.
+## Python setup
+
+This repository uses one `uv` project at the repository root (`pyproject.toml`, `uv.lock`, `.python-version`). From here or any subdirectory:
+
+```sh
+uv sync
+```
 
 Run every check in one go: `sh simulation/check_all.sh` (about 4 minutes).

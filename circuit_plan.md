@@ -4,7 +4,7 @@
 
 ### A. Monitoring Node (Physical Hardware Present)
 
-1. Raspberry Pi Zero 2 W
+1. Raspberry Pi 4
 2. 5 V USB power cable connected directly to the Raspberry Pi (replaces the Battery HAT and 18650 Li-ion battery cells, which are not available)
 3. LoRa transceiver module 1 with compatible antenna
 4. RTC (Real-Time Clock) module
@@ -23,12 +23,12 @@
 
 Because we do not have the Battery HAT, 18650 battery cells, the 8-channel ADC, or any of the physical water sensors (pH, TDS, turbidity, water temperature, water flow, and water pressure sensors), the following workarounds are used in place of physical sensing and battery hardware:
 
-12. **Power workaround:** The Raspberry Pi Zero 2 W is powered directly via a 5 V USB cable rather than a Battery HAT and 18650 cells.
+12. **Power workaround:** The Raspberry Pi 4 is powered directly via a 5 V USB cable rather than a Battery HAT and 18650 cells.
 13. **Sensor & ADC workaround (Dataset & Simulation Replay):** Real public water-quality and water-consumption datasets collected online, together with EPANET/WNTR hydraulic simulation outputs (for pipeline flow, pressure, leaks, and supply drops), are stored locally and replayed row-by-row into the node firmware. Because no physical analog sensors are attached, the 8-channel ADC and sensor signal-conditioning / voltage-level converter circuits are not required.
 
 ## 2. Component Connections and Data Flow
 
-In the absence of physical pH, TDS, turbidity, temperature, flow, and pressure sensors (and the 8-channel ADC), simulated and real-world dataset readings are fed directly into the monitoring node software running on the Raspberry Pi Zero 2 W through a dataset-replay hardware abstraction layer. The RTC is connected to the Raspberry Pi to timestamp sensor readings and detected events; its connection interface will be determined after the RTC model is finalized (I²C or direct). The microSD card holds the operating system, the pre-loaded sensor datasets, the TinyML model used for local inference, and a timestamped log of sensor readings and detected events, which are kept locally and re-sent when the LoRa link becomes available. The buzzer connects directly to the Raspberry Pi GPIO to provide audible alerts when a configured anomaly is detected. The Raspberry Pi is powered directly over USB without a Battery HAT or battery cells.
+In the absence of physical pH, TDS, turbidity, temperature, flow, and pressure sensors (and the 8-channel ADC), simulated and real-world dataset readings are fed directly into the monitoring node software running on the Raspberry Pi 4 through a dataset-replay hardware abstraction layer. The RTC is connected to the Raspberry Pi to timestamp sensor readings and detected events; its connection interface will be determined after the RTC model is finalized (I²C or direct). The microSD card holds the operating system, the pre-loaded sensor datasets, the TinyML model used for local inference, and a timestamped log of sensor readings and detected events, which are kept locally and re-sent when the LoRa link becomes available. The buzzer connects directly to the Raspberry Pi GPIO to provide audible alerts when a configured anomaly is detected. The Raspberry Pi is powered directly over USB without a Battery HAT or battery cells.
 
 The Raspberry Pi processes the replayed sensor readings locally and runs the configured detection logic for water-quality anomalies, pipeline leakage, and abnormal consumption. It can continue detecting anomalies and generating local buzzer alerts without Internet connectivity, while locally storing readings and relevant event information for later use. The Pi transmits sensor readings, detected events, and node status through LoRa transceiver module 1. At the gateway, LoRa transceiver module 2 receives these messages and passes them to the ESP32, which relays the data to the laptop over USB serial. The laptop runs the gateway application and performs cross-node analysis by combining information received from monitoring nodes, assessing risk, and prioritizing maintenance. It also displays the collected data and analysis results. When Internet connectivity is available, the laptop can optionally synchronize data with a cloud service for remote monitoring and historical analysis. When Internet access is unavailable, local detection and alerts at the monitoring node continue, and gateway-level analysis can continue on the laptop as long as the LoRa link and local gateway hardware remain operational.
 

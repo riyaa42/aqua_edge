@@ -1,6 +1,6 @@
 """Aqua Edge node firmware.
 
-Runs unchanged in Webots and on the Raspberry Pi Zero 2 W. It never touches hardware
+Runs unchanged in Webots and on the Raspberry Pi 4. It never touches hardware
 directly; everything goes through a small hardware layer `hal` with these methods:
 
     hal.now()                 -> current time in seconds; every message is stamped with it ("t").

@@ -8,7 +8,7 @@ Only water quality uses a model. Leaks and abnormal usage use simple statistics 
 
 | File | What it is |
 |---|---|
-| `train_quality.py` | Builds the data, trains, quantizes, tests, writes the model. `simulation/.venv/bin/python tinyml/train_quality.py` (about 10 s; needs the datasets in `data/`) |
+| `train_quality.py` | Builds the data, trains, quantizes, tests, writes the model. `uv run python tinyml/train_quality.py` (about 10 s; needs the datasets in `data/`) |
 | `results.txt` | Test results of the last training run |
 | `../firmware/quality_model.py` | The code the node runs: integer-only network, plain Python. Self-check: `python3 firmware/quality_model.py` |
 | `../firmware/quality_model.json` | The trained model (1.3 KB) |
@@ -19,8 +19,8 @@ Only water quality uses a model. Leaks and abnormal usage use simple statistics 
 - **Network:** 3 inputs, two hidden layers of 16 and 8, 3 outputs (a multilayer perceptron, the same shape as Sharma et al. [1]).
 - **Inputs:** pH, log(1 + TDS), log(1 + turbidity). TDS and turbidity range over 1000x, so the logarithm helps a small network.
 - **8-bit (int8) numbers:** after training, every weight is rounded to a whole number from -127 to 127, with one scale per layer. The node only does whole-number multiplications and sums, the same scheme as TensorFlow Lite Micro. 200 weights + 27 biases = **308 bytes**.
-- **Speed:** 24 microseconds per reading on the laptop, about 0.4 ms on a Pi Zero 2 W (assumed 15x slower). The node reads once a minute, so this is nothing.
-- **Why plain Python, not TensorFlow Lite:** the firmware uses only the Python standard library. The Pi Zero 2 W has full Linux, so it is not limited to microcontroller tools, but a 308-byte model does not need a 100 MB library. The integer math is the same.
+- **Speed:** 24 microseconds per reading on the laptop, easily under 1 ms on a Raspberry Pi 4. The node reads once a minute, so this is nothing.
+- **Why plain Python, not TensorFlow Lite:** the firmware uses only the Python standard library. The Raspberry Pi 4 has full Linux, so it is not limited to microcontroller tools, but a 308-byte model does not need a 100 MB library. The integer math is the same.
 - **Temperature is not an input.** Sharma et al. [1] use it, but no labelled data links temperature to contamination. In the Kenya data, the unsafe sources are simply warmer (26 vs 22 °C), so a model with temperature would learn "warm = unsafe", which is wrong. Temperature still matters for the TDS probe, which corrects its own reading for temperature.
 
 ## 2. The data
