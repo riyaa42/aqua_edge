@@ -85,37 +85,34 @@ def run_synthetic_supply(pump_off=False, tank_leak=False, low_level_normal_inflo
         t = m * 60
         clock[0] = t
         inflow = 0.125
-        outflow = 0.125
+        # each flat draws 0.05 L/s for 10 min in every 20: ordinary use, never a "leak"
+        flat_flow = 0.05 if m % 20 < 10 else 0.0
+        outflow = demand = flat_flow * len(flats)
         level = 1.5
         p_drop = 0.0
-        flat_flow = 0.025
         if t >= 26 * 3600:
             if pump_off and not tank_leak:
                 inflow = 0.0
                 level = 0.35
                 p_drop = 0.8
             elif tank_leak and not pump_off:
-                outflow = 1.8  # large leak draining tank
+                outflow = demand + 1.675  # large leak draining tank
                 level = 0.35
                 p_drop = 0.7
             elif pump_off and tank_leak:
                 inflow = 0.0
-                outflow = 1.6
+                outflow = demand + 1.475
                 level = 0.30
                 p_drop = 1.1
             elif low_level_normal_inflow:
                 inflow = 0.125
-                outflow = 0.125
                 level = 0.40
                 p_drop = 0.1
         r = {
-            f: {"flow_lps": flat_flow if not (tank_leak and f == "B-201") else (0.025 if t < 26 * 3600 else 0.025),
+            f: {"flow_lps": flat_flow,
                 "pressure_m": 10.0 - p_drop + (0.01 if m % 2 else -0.01)}
             for f in flats
         }
-        if tank_leak and t >= 26 * 3600:
-            # Downtake leak: tank outflow jumps while flat flows stay normal
-            outflow = 1.8
         r["B-TANK"] = {
             "outflow_lps": outflow,
             "inflow_lps": inflow,
@@ -228,6 +225,8 @@ def main():
 
     gw7 = run_synthetic_supply(pump_off=True, tank_leak=True)
     evs7 = [e["event"] for e in gw7.events]
+    for g in (gw4, gw5, gw6, gw7):          # none of these has a leak inside a flat
+        assert not [m for m in g.log if m["k"] == "ALERT" and m["a"].startswith("LEAK_")]
     print(f"  7. Simultaneous supply interruption + leak: {evs7}")
     assert "PIPE_LEAK" in evs7 or "LEAK_TANK_DRAIN" in evs7
     print("\nALL 8 REGRESSION SCENARIOS PASSED")

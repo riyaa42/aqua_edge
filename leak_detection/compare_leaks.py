@@ -7,15 +7,16 @@ model (perfect radio) for many leaks, and scores each signal on its own.
 Each run: day 1 the nodes learn normal, a leak starts at a random time on day 2, the run goes
 on to 06:00 on day 3 so every leak sees one night (needed by the night-flow rule).
 Signals compared:
-  flat leak      flow:     LEAK_NIGHT_FLOW / LEAK_CONTINUOUS_FLOW / ABNORMAL_CONSUMPTION from that flat
-                 pressure: PRESSURE_LOW flag from that flat (pressure alone, no flow condition)
+  flat leak      flow:     LEAK_NIGHT_FLOW / LEAK_CONTINUOUS_FLOW from that flat
+                 pressure: LEAK_PRESSURE_DROP from that flat (needs low pressure AND high flow)
   downtake leak  flow:     gateway mass balance PIPE_LEAK or tank ABNORMAL_SUPPLY
-                 pressure: PRESSURE_LOW flag from any flat
+                 pressure: nothing counts as a hit; a flat's LEAK_PRESSURE_DROP is a false alarm
 A signal from the wrong flat, before the leak, or in a no-leak run is a false alarm.
+Consumption alerts (including ABNORMAL_CONSUMPTION) and supply events are not scored.
 
-Note: the results in README.md section 2 were made with the firmware of commit 4f7867a, which
-still sent PRESSURE_LOW flags. Flat nodes are flow only now, so on today's firmware the pressure
-column always reads "missed"; check out 4f7867a to repeat the comparison.
+Note: the table in README.md section 2 was made with the firmware of commit 4f7867a, which sent
+pressure-only PRESSURE_LOW flags, and scored ABNORMAL_CONSUMPTION as a flow signal; run that
+commit's copy of this script to repeat it.
 """
 import csv
 import os

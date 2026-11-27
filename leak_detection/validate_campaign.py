@@ -1,6 +1,6 @@
 """Comprehensive Leakage-Detection Validation Campaign (Evaluation Only).
 
-Runs independent WNTR simulations against the uncommitted firmware on edge-simulation
+Runs independent WNTR simulations against the firmware
 WITHOUT modifying any detection thresholds or algorithms:
   1. Flat-level leakage detection across multiple flats, floors, severities, and
      independent bursty household-demand seeds (with causal timestamp checks and
@@ -168,6 +168,14 @@ def run_causal_firmware(wn, sensor_seed=7, extra_p_noise=0.0, p_drift_amp=0.0, d
     return flats, gw, node_map, diag
 
 
+def pressure_labels(gw, flat=None, since=0):
+    """-> (flat pressure alerts the gateway labelled possible_cause=PIPE_LEAK, unlabelled ones)."""
+    ev = [e for e in gw.events
+          if e.get("alert") == "LEAK_PRESSURE_DROP" and e["t"] >= since and flat in (None, e["node"])]
+    n = sum(e.get("possible_cause") == "PIPE_LEAK" for e in ev)
+    return n, len(ev) - n
+
+
 def _flat_job(args):
     flat, size, demand_seed = args
     start_s = 34 * 3600
@@ -201,6 +209,7 @@ def _flat_job(args):
         "latency_min": first[2] if first else None,
         "all_target_alerts": [(a, lat) for _, a, lat in target_alerts],
         "pre_leak_false_alerts": len(pre_alerts),
+        "real_pressure_alerts_labelled": pressure_labels(gw, flat, start_s)[0],
         "neighbor_false_leaks": len(neighbor_leaks),
         "target_consumption_alerts": sum(1 for m in cons_alerts if m["n"] == flat and m["t"] >= start_s),
         "neighbor_consumption_alerts": sum(1 for m in cons_alerts if not (m["n"] == flat and m["t"] >= start_s)),
@@ -245,6 +254,8 @@ def _downtake_job(args):
         "top2_hit": expected_floor in top2 if first else False,
         "drops": drops,
         "flat_false_leaks": len(flat_false_leaks),
+        "flat_pressure_labelled": pressure_labels(gw)[0],
+        "flat_pressure_unlabelled": pressure_labels(gw)[1],
     }
 
 

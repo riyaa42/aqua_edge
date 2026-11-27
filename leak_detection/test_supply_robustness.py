@@ -62,7 +62,12 @@ def run_profile(hours, tank_fn):
         t = m * 60.0
         clock[0] = t
         level, inflow, outflow = tank_fn(m, t)
-        r = {f: {"flow_lps": outflow / len(flats), "pressure_m": 10.0 + level} for f in flats}
+        # an outflow of 1 L/s or more in a profile is a pipe leak on top of normal 0.15 L/s use;
+        # flats draw their share in 10 min of every 20 (ordinary use, never a "leak")
+        demand = outflow if outflow < 1.0 else 0.15
+        use = 2 * demand / len(flats) if m % 20 < 10 else 0.0
+        outflow = use * len(flats) + (outflow - demand)
+        r = {f: {"flow_lps": use, "pressure_m": 10.0 + level} for f in flats}
         r["B-TANK"] = {
             "level_m": level, "inflow_lps": inflow, "outflow_lps": outflow,
             "ph": 7.2, "tds_ppm": 250.0, "turbidity_ntu": 0.5, "temp_c": 25.0,
@@ -72,6 +77,7 @@ def run_profile(hours, tank_fn):
             n.step()
         gw.step()
 
+    assert not [m for m in gw.log if m["k"] == "ALERT" and m["a"].startswith("LEAK_")], "false flat leak"
     evs = [(round(e["t"] / 3600, 2), e["event"]) for e in gw.events if e["event"] in ("SUPPLY_EVENT", "SUPPLY_UNCERTAIN", "LEAK_TANK_DRAIN", "PIPE_LEAK")]
     return tank.min_level, evs
 

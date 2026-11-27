@@ -20,13 +20,13 @@ directly; everything goes through a small hardware layer `hal` with these method
                                  the learned baseline is kept next to it (<name>_baseline.json)
 
 Detection rules (all thresholds are calibration knobs at the top):
-    Flat node: FLOW ONLY, as chosen and explained in leak_detection/README.md (flow beat
-      pressure in leak_detection/compare_leaks.py: every leak caught, no false alarms).
-      Continuous night flow and abnormal consumption against its own learned daily pattern
-      (idea of on-node anomaly detection from Babazadeh [3]). Pressure is still read, learned
-      and sent in summaries, but raises no alarms.
-    Tank node: water quality class (Sharma et al. [1], 8-bit neural network on the device;
-      a rule-based stand-in for now) and abnormal supply flow (possible pipe burst).
+    Flat node: night flow, continuous flow and high use (flow only), a pressure-assisted leak
+      check that needs a pressure drop AND high flow on the same flat (pressure alone raises
+      nothing; see leak_detection/README.md), and the consumption detector in
+      abnormal_consumption/detectors.py. On-node anomaly detection follows Babazadeh [3].
+    Tank node: water-quality standards check, 8-bit neural network (Sharma et al. [1]) and
+      temporal autoencoder (quality_model.py), abnormal supply flow, and low tank level.
+    A missing reading restarts the "minutes in a row" count of every check that uses it.
 Store-and-forward: every message is timestamped, kept until the gateway acknowledges it,
 alerts sent first (Mariadhason et al. [4], timestamped store-and-forward to SD card).
 """
@@ -67,8 +67,9 @@ NIGHT_FLOW_MIN = 30           # minutes in a row before a leak alert
 HIGH_USE_FACTOR, HIGH_USE_MIN_LPS, HIGH_USE_MIN = 3.0, 0.05, 60
 CONT_FLOW_LPS = 0.005         # below this the flat's water counts as "off"
 CONT_FLOW_MIN = 180           # water never off for 3 h in a row: leak alert, day or night
-# Retuned from 480 min (smooth-demand legacy) using bursty Building B (max 15 min over 280 flat-days)
-# and Cache County Sites 006/010/020 (max 91 min over 739 real house-days).
+# Retuned from 480 min. Longest run in bursty simulated Building B: 15 min. Cache County Sites
+# 006/010/020: 91 min (121.5 recorded days), but Sites 003 and 031 exceed 3 h (630 and 406 min),
+# so false alerts are possible: leak_detection/validation_results.md section 5.
 PRESSURE_SIGMAS, PRESSURE_MARGIN_M, PRESSURE_MIN = 4.0, 0.3, 10   # tank level check
 PRESSURE_DROP_SIGMAS, PRESSURE_DROP_MIN_M, PRESSURE_LEAK_MIN = 3.0, 0.35, 10  # pressure+flow flat leak check
 ALERT_CLEAR_S = 600           # an alert re-arms after its condition has been normal this long;
@@ -244,12 +245,12 @@ class Node:
                     self.base[k].collect(v)
             self.check(now, hour, r)
             self.alerts = {k: seen for k, seen in self.alerts.items() if now - seen < ALERT_CLEAR_S}
-            # ponytail: minutes before an alert fires (up to 8 h for continuous flow) still count
+            # ponytail: minutes before an alert fires (up to 3 h for continuous flow) still count
             # as clean; at EWMA_A = 1/14 that moves the baseline a few percent at most
             self.clean = self.clean and not self.alerts
         self.summarise(now, r)
         # Collisions: alerts go out now, listening first (CSMA/CA); everything else waits for
-        # this node's own time slot (TDMA), kept in step by the gateway time in every ACK
+        # this node's own time slot (TDMA); the hardware layer must keep node clocks in step
         slot = getattr(self.hal, "slot", None)
         for m in self.store.due(now, MAX_SENDS_PER_STEP):
             wire = {k: v for k, v in m.items() if k not in ("ts_utc", "ts_iso", "rtc_ok")}
@@ -329,7 +330,8 @@ class EdgeRuntime(Node):
     def _check_flat(self, now, hour, r):
         """Flat-side leak & consumption checks. Skips missing/NaN streams safely."""
         flow = r.get("flow_lps")
-        if not _finite(flow):
+        if not _finite(flow):       # a missing reading breaks every "minutes in a row" count
+            self.night_run = self.cont_run = self.high_run = self.p_leak_run = 0
             return
         at_night = NIGHT_START_H <= hour < NIGHT_END_H
         self.night_run = self.night_run + 1 if at_night and flow > NIGHT_FLOW_LPS else 0
@@ -395,6 +397,8 @@ class EdgeRuntime(Node):
             self.supply_run = self.supply_run + 1 if high else 0
             if self.supply_run >= SUPPLY_MIN:
                 self.alert("ABNORMAL_SUPPLY", flow=round(outflow, 3))
+        else:
+            self.supply_run = 0
 
         lvl = r.get("level_m")
         if _finite(lvl):
@@ -411,6 +415,8 @@ class EdgeRuntime(Node):
                 self.emit("FLAG", f="SUPPLY_LOW", level=round(lvl, 3), inflow=round(inflow_v, 3))
             elif self.ok_run >= PRESSURE_MIN:
                 self.low_flagged = False
+        else:
+            self.low_run = self.ok_run = 0
 
     def accumulate(self, r):
         now = self.hal.now()
@@ -513,7 +519,7 @@ if __name__ == "__main__":
     assert nb[:11] == na[:11] and nb[7] == 60 and nb[11] == 0     # at most the unfinished hour is lost
 
     # Normal flat: no alerts. Small daytime leak (0.01 L/s from 10:00 on day 2, below the night
-    # limit): continuous-flow alert after 8 h, the night check never fires
+    # limit): continuous-flow alert after 3 h, the night check never fires
     alerts = {}
     for name, flow in (("B-102", use), ("B-103", lambda t: use(t) + (0.01 if t >= DAY + 10 * HOUR else 0))):
         n = FlatNode(name, FakeHAL(os.path.join(tmp, name + ".jsonl"), flow))
@@ -523,6 +529,13 @@ if __name__ == "__main__":
     assert alerts["normal"] == [], alerts["normal"]
     assert [a for a, _ in alerts["leak"]] == ["LEAK_CONTINUOUS_FLOW"], alerts["leak"]
     assert alerts["leak"][0][1] == DAY + 10 * HOUR + (CONT_FLOW_MIN - 1) * 60      # 3 h after leak starts at 10:00, day 2
+
+    # A sensor dropout breaks "minutes in a row": 100 + 80 min of flow with a gap is not 3 h
+    gap = lambda t: 0.01 if 0 <= t - DAY - 10 * HOUR < 100 * 60 or 0 <= t - DAY - 20 * HOUR < 80 * 60 else (
+        math.nan if DAY + 10 * HOUR + 100 * 60 <= t < DAY + 20 * HOUR else 0.0)
+    n = FlatNode("B-103", FakeHAL(None, gap))
+    run(n, 2 * DAY)
+    assert not any(m["k"] == "ALERT" and m["a"] == "LEAK_CONTINUOUS_FLOW" for m in n.store.queue)
 
     # EWMA: habits that change are learned (about 2 weeks), a leak while alerting is not
     more = lambda t: use(t) * (2 if t >= DAY else 1)                  # mornings and evenings double

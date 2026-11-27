@@ -3,7 +3,8 @@ board bridges the radio to the laptop over USB serial.
 
 Same hardware layer as the nodes (hal.now / send / receive). Jobs:
   1. Acknowledge every node message (so nodes can delete it from their SD queue) and log it.
-     Every ACK carries the gateway time ("gt") so node clocks stay in step.
+     Every ACK carries the gateway time ("gt") for setting node clocks (a job for the hardware
+     layer; so far only the live simulation does it).
   2. Building check, the mass balance (Ali et al. [6], supply vs branch flows): water leaving
      the tank minus water used by all flats, per 15-minute summary; above 10% for 2 blocks means
      a leak in the pipes between the tank and the flats (a leak inside a flat is after its
@@ -14,7 +15,9 @@ Same hardware layer as the nodes (hal.now / send / receive). Jobs:
      summaries are still checked when they arrive (store-and-forward).
   4. Supply event: the tank node reports its level far below normal (pump or power problem).
   5. Repeat check: nodes send a fresh alert every time a problem comes back; the gateway
-     marks each one NEW_ALERT or REPEAT_ALERT (same node and alert type as before).
+     marks each one NEW_ALERT or REPEAT_ALERT (same node and alert type as before). A flat's
+     LEAK_PRESSURE_DROP stamped during an active pipe leak also gets possible_cause=PIPE_LEAK
+     (lower building pressure plus the flat's own heavy use can trigger it). Nothing is hidden.
   6. Clock check: a message stamped more than 1 min in the future means that node's clock is
      wrong (CLOCK_SKEW). An old stamp is normal: the message waited on the SD card.
   7. Packet check (packet.py): a packet with a wrong signature is dropped (BAD_PACKET), and a
@@ -26,7 +29,7 @@ How the leak checks fit together: leak_detection/README.md.
 import json
 import os
 
-from aqua_edge import iso_utc, save_atomic
+from aqua_edge import SUMMARY_S, iso_utc, save_atomic
 from packet import pack, unpack
 
 SUPPLY_WINDOW_S = 900          # a SUPPLY_LOW flag from the tank counts for this long
@@ -70,6 +73,7 @@ class Gateway:
         self.p_mean_base = {}       # flat -> clean baseline p_mean (EWMA)
         self.balance_done, self.balance_run, self.balance_ok = set(), 0, 0
         self.pipe_alerted = self.balance_paused = False
+        self.pipe_since = None      # start time of the first block of the active pipe leak
         self.last_seen = None       # node -> time last heard (set on the first step)
         self.silent = {}            # node -> time last heard before it went silent
         self.skewed = set()
@@ -130,7 +134,8 @@ class Gateway:
                     if "inflow" in m:
                         self.last_tank_inflow = m["inflow"]
                 elif m["k"] == "SUM":
-                    self.sums.setdefault(m["i"], {})[m["n"]] = m["vol_l"]
+                    if "vol_l" in m:        # absent if the flow sensor gave nothing all block
+                        self.sums.setdefault(m["i"], {})[m["n"]] = m["vol_l"]
                     if m["n"] == self.tank and "in_l" in m:
                         self.last_tank_inflow = m["in_l"] / 900.0
                     elif m["n"] in self.flats and "p_min" in m:
@@ -153,11 +158,16 @@ class Gateway:
         key = (m["n"], m["a"])
         prev = self.alert_history.get(key)
         self.alert_history[key] = (m["t"], prev[1] + 1 if prev else 1)
+        # "possibly": a real flat leak during a pipe leak is labelled too. An alert that arrives
+        # before PIPE_LEAK is decided is not labelled; the time test skips older stored alerts.
+        extra = {}
+        if m["a"] == "LEAK_PRESSURE_DROP" and self.pipe_alerted and m["t"] >= self.pipe_since:
+            extra["possible_cause"] = "PIPE_LEAK"
         if prev:
             self.decide(m["t"], "REPEAT_ALERT", node=m["n"], alert=m["a"], count=prev[1] + 1,
-                        since_last_min=round((m["t"] - prev[0]) / 60))
+                        since_last_min=round((m["t"] - prev[0]) / 60), **extra)
         else:
-            self.decide(m["t"], "NEW_ALERT", node=m["n"], alert=m["a"])
+            self.decide(m["t"], "NEW_ALERT", node=m["n"], alert=m["a"], **extra)
 
     def check_clock(self, now, m):
         ahead = m["t"] - now
@@ -277,6 +287,7 @@ class Gateway:
             self.balance_run, self.balance_ok = (self.balance_run + 1, 0) if leaking else (0, self.balance_ok + 1)
             if self.balance_run >= MASS_BALANCE_INTERVALS and not self.pipe_alerted:
                 self.pipe_alerted = True
+                self.pipe_since = (i - MASS_BALANCE_INTERVALS + 1) * SUMMARY_S
                 drops = self._cross_floor_drops(i)
                 suspected, floor_range, conf = self._localize_floor(drops)
                 self.decide(now, "PIPE_LEAK", interval=i, error_pct=round(err, 1),
@@ -324,6 +335,27 @@ if __name__ == "__main__":
     for i, v in enumerate([ok, leak, leak, ok, ok, leak, leak]):     # leak, fixed, second leak
         block(gw, i, v)
     assert events(gw) == ["PIPE_LEAK", "PIPE_LEAK"], events(gw)
+    # A flat pressure alert is labelled only during a pipe leak and only if stamped after it began
+    gw4 = Gateway(FakeHAL(), [F1, F2], T)
+
+    def label(t, alert="LEAK_PRESSURE_DROP"):
+        gw4.hal.seq += 1
+        m = {"k": "ALERT", "n": F1, "s": 500 + gw4.hal.seq, "t": t, "a": alert}
+        gw4.hal.box.append(pack(m, sim_key(F1)))
+        gw4.step()
+        return [e for e in gw4.events if e.get("alert") == alert][-1].get("possible_cause")
+
+    assert label(0) is None                                   # no pipe leak
+    for i, v in enumerate([ok, leak, leak]):
+        block(gw4, i, v)
+    assert gw4.pipe_since == 900                              # block 1 was the first leaking one
+    assert label(gw4.hal.t) == "PIPE_LEAK"                    # also covers REPEAT_ALERT
+    assert label(899) is None                                 # older alert arriving late
+    assert label(gw4.hal.t, "LEAK_NIGHT_FLOW") is None        # flow-only checks are not affected
+    for i, v in enumerate([ok, ok], start=3):
+        block(gw4, i, v)
+    assert label(gw4.hal.t) is None                           # pipe check re-armed
+
     # F2 goes silent for 4 blocks (60 min): alert and pause; it comes back with its stored
     # summaries and the late blocks are checked
     gw = Gateway(FakeHAL(), [F1, F2], T)
@@ -340,6 +372,13 @@ if __name__ == "__main__":
     gw.hal.box.append(pack({"k": "ALERT", "n": F1, "s": 999, "t": gw.hal.t + 300, "a": "LEAK_NIGHT_FLOW"}, sim_key(F1)))
     gw.step()
     assert "CLOCK_SKEW" in events(gw)
+
+    # A summary with no volume (flow sensor dead all block) is logged; that block is not balanced
+    gw3 = Gateway(FakeHAL(), [F1, F2], T)
+    block(gw3, 0, {T: 100, F1: 50})
+    gw3.hal.box = [pack({"k": "SUM", "n": F2, "s": 900, "t": gw3.hal.t, "i": 0, "p_min": 10.0}, sim_key(F2))]
+    gw3.step()
+    assert len(gw3.log) == 3 and 0 not in gw3.balance_done and "PIPE_LEAK" not in events(gw3)
 
     # Packet checks: a forged alert is dropped; a replayed one is acknowledged but not used twice,
     # even after the gateway restarts; the ACK goes back signed with the node's key

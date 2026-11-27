@@ -3,11 +3,18 @@
 Evaluates the downloaded HydroShare dataset (0b72cddfc51c45b188e0e6cd8927227e):
   - Audits sampling interval, units (pulses -> gal -> L/s), coverage, gaps, NaNs,
     and end-use labels (verifying no independent pipe-leak ground truth exists).
-  - Resamples 4-second pulse counts to 60-second flow_lps.
-  - Chronological split: Day 1 = LEARN_S (24h), Days 2..N = held-out evaluation.
+  - Resamples 4-second pulse counts to 60-second flow_lps. Minutes with no rows are recording
+    gaps and stay missing (NaN), not zero. Each series starts at its first midnight, so the
+    firmware's night and hourly rules see the right clock hours.
+  - Measures the longest run of minutes with flow > CONT_FLOW_LPS over each full record
+    (the evidence for CONT_FLOW_MIN).
+  - Chronological split of the first 30 calendar days: Day 1 = LEARN_S (24h), Days 2..30 =
+    held-out evaluation. Test days are counted from minutes that actually have data.
   - Evaluates false-positive rates on normal household demand across Sites 003, 006, 010, 020, 031.
   - Injects documented 0.05 L/s and 0.5 L/s synthetic leaks into held-out days of
-    indoor-focused sites (006, 010, 020) to verify flow-based detection & latency.
+    sites 006, 010, 020 to verify flow-based detection & latency. An injection is scored only
+    if the 24 h after its start are at least 99% recorded, and only alerts that the same data
+    without the leak does not raise count as detections.
 
 Outputs JSON summary to leak_detection/results/validation_cache_county.json.
 """
@@ -21,7 +28,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path[:0] = [os.path.join(ROOT, "firmware")]
 
-from aqua_edge import FlatNode, DAY  # noqa: E402
+from aqua_edge import FlatNode, DAY, CONT_FLOW_LPS, CONT_FLOW_MIN  # noqa: E402
 from gateway import Gateway  # noqa: E402
 from packet import sim_key  # noqa: E402
 
@@ -79,6 +86,19 @@ def run_flow_series(flow_lps_arr, inject_lps=0.0, inject_start_min=None):
     return leak_alerts, cons_alerts
 
 
+def to_minutes(df, res_gal):
+    """4 s pulse rows -> L/s per minute from the first midnight; unrecorded minutes stay NaN."""
+    m1 = df.set_index("t")["Pulses"].resample("1min").sum(min_count=1) * res_gal * GAL_TO_L / 60.0
+    return m1[m1.index >= m1.index[0].ceil("D")]
+
+
+def continuous_runs(m1):
+    """Lengths (min) of unbroken runs with flow above the limit; a missing minute breaks a run."""
+    on = m1 > CONT_FLOW_LPS
+    runs = on.groupby((~on).cumsum()).sum()
+    return runs[runs > 0]
+
+
 def main():
     sites = pd.read_csv(os.path.join(DATA, "sites.csv")).set_index("SiteID")
     sids = [3, 6, 10, 20, 31]
@@ -93,9 +113,10 @@ def main():
         t = pd.to_datetime(df["Time"])
         dt = t.diff().dt.total_seconds().dropna()
         nans = int(df["Pulses"].isna().sum())
-        days = float((t.iloc[-1] - t.iloc[0]).total_seconds() / 86400.0)
+        span_days = float((t.iloc[-1] - t.iloc[0]).total_seconds() / 86400.0)
         df["t"] = t
-        m1 = df.set_index("t")["Pulses"].resample("1min").sum().fillna(0.0) * res_gal * GAL_TO_L / 60.0
+        m1 = to_minutes(df, res_gal)
+        runs = continuous_runs(m1)
 
         ev = pd.read_csv(os.path.join(DATA, f"LabelledEvents_site_{sid:03d}.csv"))
         labels = ev["Label"].value_counts().to_dict() if "Label" in ev.columns else {}
@@ -104,7 +125,10 @@ def main():
         audit.append({
             "site_id": sid,
             "irrigation": irr,
-            "days": round(days, 1),
+            "span_days_incl_gaps": round(span_days, 1),
+            "days_with_data": round(int(m1.notna().sum()) / 1440.0, 1),
+            "max_continuous_flow_min": int(runs.max()),
+            "runs_reaching_limit": int((runs >= CONT_FLOW_MIN).sum()),
             "dt_mode_s": float(dt.mode().iloc[0]),
             "gaps_gt_4s": int((dt > 4).sum()),
             "nan_pulses": nans,
@@ -115,7 +139,7 @@ def main():
         # Evaluate first 30 days (Day 1 = LEARN_S, Days 2..30 = 29 test days)
         n_min = min(len(m1), 30 * 1440)
         arr = m1.values[:n_min]
-        eval_days = (n_min - 1440) / 1440.0
+        eval_days = int(m1.iloc[1440:n_min].notna().sum()) / 1440.0
         leaks, cons = run_flow_series(arr)
         by_type = {}
         for m in leaks:
@@ -125,24 +149,32 @@ def main():
             "irrigation": irr,
             "eval_days": round(eval_days, 1),
             "leak_alerts": len(leaks),
-            "leak_fp_per_day": round(len(leaks) / max(eval_days, 1e-9), 4),
+            "leak_fp_per_day": round(len(leaks) / eval_days, 4) if eval_days else None,
             "by_type": by_type,
             "consumption_alerts": len(cons),
         })
 
-        # Controlled leak injection on indoor-focused / non-anomalous sites (6, 10, 20)
+        # Controlled leak injection on sites 6, 10 and 20
         if sid in (6, 10, 20):
             # 14-day slice (Day 1 learn, inject at Day 3 10:00 = min 2880 + 600 = 3480)
             sl = m1.values[: min(len(m1), 14 * 1440)]
             inj_min = 2 * 1440 + 600
+            coverage = float(m1.iloc[inj_min : inj_min + 1440].notna().mean())
+            base_alerts = {(m["t"], m["a"]) for m in run_flow_series(sl)[0]}
             for lps in (0.05, 0.5):
+                if coverage < 0.99:
+                    inj_eval.append({"site_id": sid, "inject_lps": lps, "scored": False,
+                                     "coverage_24h": round(coverage, 3)})
+                    continue
                 la, _ = run_flow_series(sl, inject_lps=lps, inject_start_min=inj_min)
-                post = [m for m in la if m["t"] >= inj_min * 60]
+                post = [m for m in la if m["t"] >= inj_min * 60 and (m["t"], m["a"]) not in base_alerts]
                 pre = [m for m in la if m["t"] < inj_min * 60]
                 first = post[0] if post else None
                 inj_eval.append({
                     "site_id": sid,
                     "inject_lps": lps,
+                    "scored": True,
+                    "coverage_24h": round(coverage, 3),
                     "detected": first is not None,
                     "mechanism": first["a"] if first else None,
                     "latency_min": round((first["t"] - inj_min * 60) / 60.0, 1) if first else None,
@@ -155,6 +187,8 @@ def main():
     with open(out_path, "w") as f:
         json.dump(out, f, indent=2)
     print("Saved Cache County validation to", out_path)
+    for r in audit:
+        print("AUDIT:", {k: v for k, v in r.items() if k != "event_labels"})
     for r in fp_eval:
         print("FP:", r)
     for r in inj_eval:

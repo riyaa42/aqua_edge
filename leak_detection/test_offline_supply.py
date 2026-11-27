@@ -12,8 +12,9 @@ Gateway, binary signed packets (packet.py), and a simulated LoRa link with outag
   8. Simultaneous supply interruption and leakage during a LoRa outage.
 
 Verifies local alert generation, SD-card buffering, post-outage delivery,
-out-of-order survival (ALERT ahead of SUM), duplicate suppression, timestamp
-consistency, and priority ordering.
+duplicate suppression and timestamp consistency. The "internet unavailable" case is
+the same as any other run: nothing here uses the internet. Send priority (alerts first) is
+checked in the firmware/aqua_edge.py self-check, not here.
 """
 import os
 import sys
@@ -80,19 +81,23 @@ def run_scenario(name, outage_windows=(), supply_cut=False, tank_leak=False, fla
     for m in range(36 * 60):
         t = m * 60.0
         clock[0] = t
-        inflow, outflow, level, p_drop = 0.125, 0.125, 1.5, 0.0
+        # each flat draws 0.05 L/s for 10 min in every 20: ordinary use, never a "leak"
+        use = 0.05 if m % 20 < 10 else 0.0
+        leaking = flat_leak and t >= 26 * 3600
+        demand = use * len(flats) + (0.5 if leaking else 0.0)
+        inflow, outflow, level, p_drop = 0.125, demand, 1.5, 0.0
         if t >= 26 * 3600:
             if supply_cut and not tank_leak:
                 inflow, level, p_drop = 0.0, 0.35, 0.8
             elif tank_leak and not supply_cut:
-                outflow, level, p_drop = 1.8, 0.35, 0.7
+                outflow, level, p_drop = demand + 1.675, 0.35, 0.7
             elif supply_cut and tank_leak:
-                inflow, outflow, level, p_drop = 0.0, 1.6, 0.30, 1.1
+                inflow, outflow, level, p_drop = 0.0, demand + 1.475, 0.30, 1.1
 
         r = {
             f: {
-                "flow_lps": 0.525 if (flat_leak and f == "B-201" and t >= 26 * 3600) else 0.025,
-                "pressure_m": 10.0 - p_drop - (0.7 if (flat_leak and f == "B-201" and t >= 26 * 3600) else 0.0),
+                "flow_lps": use + (0.5 if leaking and f == "B-201" else 0.0),
+                "pressure_m": 10.0 - p_drop - (0.7 if leaking and f == "B-201" else 0.0),
             }
             for f in flats
         }
@@ -113,6 +118,11 @@ def run_scenario(name, outage_windows=(), supply_cut=False, tank_leak=False, fla
     keys = [(m["n"], m["s"]) for m in gw.log]
     assert len(keys) == len(set(keys)), f"{name}: duplicate packet logged!"
     # Check timestamp consistency: every logged packet has t <= receive time (causal)
+    assert all(m["t"] <= m["rx"] for m in gw.log), f"{name}: message stamped after it arrived!"
+    # Flat leak alerts may only come from the flat that has the leak
+    wrong = [(m["n"], m["a"], m["t"]) for m in gw.log
+             if m["k"] == "ALERT" and m["a"].startswith("LEAK_") and not (flat_leak and m["n"] == "B-201")]
+    assert not wrong, f"{name}: false flat leak alerts {wrong}"
     events = [e["event"] for e in gw.events]
     alerts = [(m["n"], m["a"], m["t"]) for m in gw.log if m["k"] == "ALERT"]
     return {
