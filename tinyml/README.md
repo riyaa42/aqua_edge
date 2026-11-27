@@ -11,7 +11,7 @@ Unlike leakage (`../leak_detection/`) and abnormal water consumption (`../abnorm
 
 If temperature is missing or `NaN`, only Module 1 runs: no stand-in temperature is fed to either model. If pH, TDS or turbidity is missing, none of the three runs.
 
-All three modules run locally in pure Python (standard library only, no cloud or TensorFlow Lite dependency). The target is a Raspberry Pi 4 edge node; so far they have only run on development machines.
+All three modules run locally in pure Python (standard library only, no cloud or TensorFlow Lite dependency). The target is a Raspberry Pi 3B edge node; so far they have only run on development machines.
 
 ---
 
@@ -124,7 +124,7 @@ To fix those shortcuts, `tinyml/train_quality.py` was updated as follows. No row
 - **CSU ROSS 2019 (`N=44,133`):** On IS-10500-compliant river rows (`N=16,451`): `FPR = 0.0218`; on rows exceeding IS 10500 (`N=27,682`): `TPR = 0.9758`.
 - **Loddon storm-window comparison:** Pre-storm (`N=76`, median `10.4 NTU`, `391 ppm`): `RUNOFF=0.605, CHEM=0.395`; During storm (`N=207`, median `9.4 NTU`, `396 ppm`): `RUNOFF=0.541, CHEM=0.449`; Post-storm (`N=54`, median `12.4 NTU`, `388 ppm`): `RUNOFF=0.648, CHEM=0.352`.
 - **Temperature stress test (`NORMAL`, `N=2,560`):** `FPR = 0.0055` (`10 °C`), `0.0043` (`15 °C`), `0.0039` (`20 °C`), `0.0051` (`25 °C`), `0.0047` (`30 °C`), `0.0047` (`35 °C`).
-- **Footprint & host speed:** `324 bytes` (`216` `int8` weights + `27` `int32` biases); `37 µs` per reading on host (`< 1 ms` estimated on Raspberry Pi 4, not yet benchmarked on physical Pi 4).
+- **Footprint & host speed:** `324 bytes` (`216` `int8` weights + `27` `int32` biases); `37 µs` per reading on host (not yet measured on a Raspberry Pi 3B).
 
 **What remains unproven:** High accuracy on synthetic overlapping mixtures shows the network can separate our constructed `RUNOFF` and `CHEMICAL` distributions, **not** that it reliably identifies real-world field contamination causes without physically measured, calibrated contamination datasets.
 
@@ -222,7 +222,7 @@ Using the six project selection criteria across our three experiments:
 | **False alarms** | High under drift (`37%` to `96%` on GECCO) | **`0.23` false alerts/day (`FPR = 0.0014`)** on GECCO | `0.0000` FPR on Kenya Safe & IS-compliant GECCO; `0.0218` on CSU ROSS |
 | **Added value over rules** | Catches in-range anomalies (`0%` by rules) | **Catches `21-24/28` GECCO events vs. `1/28` by *TrinkwV*** | **Distinguishes `RUNOFF` vs. `CHEMICAL`** beyond binary limits |
 | **Generalisation** | Fails under multi-week seasonal drift | Adapts to slow drift via causal EWMAs (shown on GECCO only) | Generalises to IS-compliant water; raw rivers exceed IS 10500 |
-| **Edge suitability (host; no Pi 4 measurement)** | `80-184 B` params, `< 1 µs` (NumPy, batched) | **`432 B` params, `~37 µs` (pure Python)** | **`324 B` params, `37 µs` (pure Python, `results.txt`)** |
+| **Edge suitability (host; no Pi 3B measurement)** | `80-184 B` params, `< 1 µs` (NumPy, batched) | **`432 B` params, `~37 µs` (pure Python)** | **`324 B` params, `37 µs` (pure Python, `results.txt`)** |
 | **Offline operation** | `100%` offline | `100%` offline | `100%` offline |
 
 Because `QualityModel` relies partly on synthetic contamination mixtures, it is retained as a **secondary contamination-pattern classifier**, never as the primary regulatory safety mechanism.
@@ -248,7 +248,7 @@ Their outputs stay separate, interpretable signals (`QUALITY_LIMIT_VIOLATION`, `
 - **Regulatory-standard differences:** GECCO 2019 demonstrates that a model trained on IS 10500 flags compliant water from utilities operating under higher pH limits (*TrinkwV*).
 - **Low event prevalence in GECCO:** With `0.44%` event prevalence, even `0.14%` FPR yields `0.23` false alerts/day (`P = 0.642`), and `4-7` of `28` events are still missed at high-precision thresholds.
 - **Temporal model scope:** Tested primarily on GECCO 2019; it is not yet proven to eliminate seasonal drift across all water utilities.
-- **No physical sensors or Pi 4 hardware benchmarks yet:** There is no physical sensor or Pi 4 hardware layer yet (`firmware/hal/` holds only a README); replays and timings (about `37 µs` per model call in pure Python) are from development machines.
+- **No physical sensors or Pi 3B hardware benchmarks yet:** There is no physical sensor or Pi 3B hardware layer yet (`firmware/hal/` holds only a README); replays and timings (about `37 µs` per model call in pure Python) are from development machines.
 
 ---
 
@@ -262,14 +262,14 @@ Their outputs stay separate, interpretable signals (`QUALITY_LIMIT_VIOLATION`, `
 | Experiment 1: Static Multivariate Benchmark | [tinyml/exp1_multivariate_anomaly.py](../tinyml/exp1_multivariate_anomaly.py), [tinyml/exp1_results.txt](../tinyml/exp1_results.txt) | **Archived benchmark** (not used in production) |
 | Unified multi-task node execution (`FlatNode` + `TankNode` merge) | [firmware/aqua_edge.py](../firmware/aqua_edge.py) | **Implemented in software** (`EdgeRuntime` `combined` mode, for resource validation). Deployment keeps them separate: `QualityMonitor` runs on `TankNode`, not on flat nodes |
 | Local buzzer output | `firmware/hal/` | **Pending** |
-| Raspberry Pi 4 RAM/CPU/latency hardware benchmark | `firmware/hal/` | **Pending** |
+| Raspberry Pi 3B RAM/CPU/latency hardware benchmark | `firmware/hal/` | **Pending** |
 
 ---
 
 ## 15. Future Work
 
-1. Write the Raspberry Pi 4 dataset-replay HAL, including the buzzer output.
-2. Benchmark full runtime RAM, flash, and per-minute CPU time on physical Raspberry Pi 4 hardware using that HAL.
+1. Write the Raspberry Pi 3B dataset-replay HAL, including the buzzer output.
+2. Benchmark full runtime RAM, flash, and per-minute CPU time on physical Raspberry Pi 3B hardware using that HAL.
 3. Validate `QualityModel` and `TemporalModel` against physically measured, NTU-calibrated contamination experiments if sensor calibration data becomes available.
 4. Evaluate `TemporalModel` on additional continuous drinking-water utility time series beyond GECCO 2019.
 

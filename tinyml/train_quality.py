@@ -444,7 +444,7 @@ def main():
     us = (time.perf_counter() - t1) / 2000 * 1e6
     say(
         f"8. Footprint (4->16->8->3): {n_w} int8 weights + {n_b} int32 biases = {n_w + 4 * n_b} bytes; "
-        f"{us:.0f} us/reading on host (<1 ms on Raspberry Pi 4)"
+        f"{us:.0f} us/reading on host (not measured on a Raspberry Pi 3B)"
     )
     say(f"Done in {time.time() - t0:.1f} s")
 
