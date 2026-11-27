@@ -47,7 +47,8 @@ button, select, input { font: inherit; color: inherit; }
 .clock #clock { font-family: var(--display); font-size: 1.4rem; font-weight: 500; font-variant-numeric: tabular-nums; }
 .chip { display: inline-block; padding: 4px 12px; border-radius: 999px; font-size: .85rem; font-weight: 700; background: var(--slab); box-shadow: var(--well-shadow); }
 .chip.racing { background: var(--action); color: #fff; box-shadow: inset -3px -4px 8px rgba(0, 0, 0, .15), inset 3px 4px 8px rgba(255, 255, 255, .35); }
-.controls { display: flex; gap: 10px; align-items: center; }
+.controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.controls .btn { white-space: nowrap; }
 
 /* Buttons and inputs: clay you can press */
 .btn { border: 0; cursor: pointer; padding: 11px 20px; border-radius: 20px; font-weight: 800; background: var(--clay);
@@ -188,6 +189,7 @@ input[type=range]::-moz-range-thumb { width: 30px; height: 30px; border: 0; bord
         <option value="60">Real time</option>
       </select>
       <button class="btn" id="playpause">Pause</button>
+      <button class="btn" id="reset">Start again</button>
     </div>
   </header>
 
@@ -487,6 +489,12 @@ $("#go").onclick = async () => {
   if (at > t) leak.at_s = at;
   if (await send(leak) && await send({do: "until_alert", node: picked, from_s: at}))
     toast(at > t ? `Leak in ${flatName(picked)} set for ${when(at)}` : `Leak started in ${flatName(picked)}`);
+};
+$("#reset").onclick = async () => {
+  if (!confirm("Start again from day 1? The current run and its results will be wiped.")) return;
+  const b = $("#reset"); b.disabled = true; b.textContent = "Restarting...";
+  if (await post("/api/reset")) toast("Starting again: about a minute of learning first");
+  b.disabled = false; b.textContent = "Start again";
 };
 $("#start").onclick = () => post("/api/start").then(ok => ok && toast("Starting the simulation"));
 $("#playpause").onclick = () => send({do: S.clock.paused ? "resume" : "pause"});

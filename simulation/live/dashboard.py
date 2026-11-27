@@ -7,7 +7,9 @@ Standard library only. Serves dashboard.html and two small JSON endpoints. It re
 run's files in live/run/ (what the gateway logged, what the timekeeper applied) and appends the
 buttons' commands to run/commands.jsonl for the timekeeper. "Start simulation" launches
 live/run_local.sh with the demo scenario: the nodes race through their learning day and the run
-pauses at the start of day 2, ready for a leak test.
+pauses at the start of day 2, ready for a leak test. "Start again" stops the run, waits for it to
+end and starts a fresh one (a new run wipes live/run/). Start and Start again are for the laptop
+run only; under Docker, restart the containers instead.
 """
 import argparse
 import csv
@@ -162,6 +164,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(200, f.read(), kind)
         self.reply(404, {"error": "not found"})
 
+    def start(self):
+        subprocess.Popen(DEMO, cwd=os.path.dirname(HERE), stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL, start_new_session=True)
+
     def do_POST(self):
         try:
             body = json.loads(self.rfile.read(min(int(self.headers.get("Content-Length", 0)), 10_000)) or b"{}")
@@ -171,8 +177,19 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/api/start":
             if s["running"]:
                 return self.reply(409, {"error": "a simulation is already running"})
-            subprocess.Popen(DEMO, cwd=os.path.dirname(HERE), stdout=subprocess.DEVNULL,
-                             stderr=subprocess.DEVNULL, start_new_session=True)
+            self.start()
+            return self.reply(200, {"started": True})
+        if self.path == "/api/reset":
+            if s["running"]:
+                with open(os.path.join(RUN, "commands.jsonl"), "a") as f:
+                    f.write(json.dumps({"do": "stop"}) + "\n")
+                deadline = time.time() + 20
+                while state()["running"] and time.time() < deadline:   # clock.json goes quiet once it stops
+                    time.sleep(0.5)
+                if state()["running"]:
+                    return self.reply(500, {"error": "the old run did not stop; stop it in its terminal"})
+                time.sleep(1)                    # nodes exit just after the timekeeper
+            self.start()
             return self.reply(200, {"started": True})
         if self.path == "/api/command":
             if not s["running"]:
