@@ -27,6 +27,7 @@ sys.path[:0] = [
 
 from aqua_edge import FlatNode, TankNode, DAY  # noqa: E402
 from gateway import Gateway  # noqa: E402
+from offline_radio import exchange  # noqa: E402
 from packet import sim_key  # noqa: E402
 import compare_leaks as CL  # noqa: E402
 
@@ -46,7 +47,7 @@ class OutageHAL:
     def read(self):
         return self.readings[0][self.name]
 
-    def send(self, msg, at_s=None, cad=False):
+    def send(self, msg, cad=False):
         t = self.clock[0]
         if any(s <= t < e for s, e in self.outage_windows):
             return
@@ -92,7 +93,7 @@ def run_case(hours, flow_fn, outage_windows=(), missing_fn=None):
         readings[0] = r
         for n in nodes:
             n.step()
-        gw.step()
+        exchange(nodes, gw, inboxes)
 
     remaining_q = sum(len(n.store.queue) for n in nodes)
     alerts = [(m["n"], m["a"], round(m["t"] / 3600, 2)) for m in gw.log if m["k"] == "ALERT"]

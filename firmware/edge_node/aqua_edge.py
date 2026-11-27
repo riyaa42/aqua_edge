@@ -7,14 +7,18 @@ directly; everything goes through a small hardware layer `hal` with these method
                                  Simulation: seconds since start. Real node: from the DS3231 RTC
                                  (planned, to discuss next: UTC Unix seconds, ISO 8601 in logs).
     hal.read()                -> dict of sensor readings, e.g. {"flow_lps": 0.01, "pressure_m": 10.4}
-    hal.send(packet: bytes, at_s=None, cad=False)
-                              -> radio send (LoRa on the real node); may be lost silently.
-                                 Packets are signed binary (packet.py).
-                                 at_s: second of the minute to send at (time slot);
-                                 cad: listen before talk (LoRa channel activity detection)
+    hal.send(packet: bytes, cad=False)
+                              -> radio send now (SX1278 at 433 MHz on the real node, settings in
+                                 lora433.py); may be lost silently. Packets are signed binary
+                                 (packet.py). cad: listen before talk (channel activity detection)
     hal.slot                  -> optional (index, count): this node's time slot in each minute
+    hal.buzzer(code)          -> optional: sound the local alarm for this alert
+    hal.on_gateway_alert(code, active)
+                              -> optional: the gateway says a cross-node problem started or ended.
+                                 This is where valve control could go later; nothing closes now.
     hal.receive()             -> list of packets (bytes) received since the last call
-    hal.key(name)             -> the 16-byte secret this node shares with the gateway
+    hal.key(name)             -> the 16-byte secret this node shares with the gateway; "GATEWAY"
+                                 is the building-wide key that signs the gateway's beacon
     hal.led(colour)           -> "green" normal, "yellow" messages waiting, "red" alert active
     hal.storage_path          -> file for the store-and-forward queue (SD card), or None;
                                  the learned baseline is kept next to it (<name>_baseline.json)
@@ -27,8 +31,12 @@ Detection rules (all thresholds are calibration knobs at the top):
     Tank node: water-quality standards check, 8-bit neural network (Sharma et al. [1]) and
       temporal autoencoder (quality_model.py), abnormal supply flow, and low tank level.
     A missing reading restarts the "minutes in a row" count of every check that uses it.
-Store-and-forward: every message is timestamped, kept until the gateway acknowledges it,
-alerts sent first (Mariadhason et al. [4], timestamped store-and-forward to SD card).
+Two entry points: step() once a minute (sensors and checks), and radio_poll(), which the HAL
+calls as soon as a packet arrives and again at the time radio_poll() returns.
+Delivery: every message is timestamped and kept until the gateway acknowledges it (Mariadhason
+et al. [4], timestamped store-and-forward to SD card). Alerts and tank flags go the moment they
+are raised and are retried every few seconds. The gateway sends a beacon; when it comes back
+after being away, stored alerts go at once, then the other messages one at a time.
 """
 from datetime import datetime, timezone
 import json
@@ -45,7 +53,9 @@ for _d in (_EDGE_DIR, os.path.join(_FW_DIR, "communication"), os.path.join(_ROOT
         sys.path.append(_d)
 
 from detectors import StatisticalZeroFlowDetector
-from packet import pack, unpack, violation_mask
+from lora433 import (BEACON_S, FLUSH_ROUTINE_AFTER_S, FLUSH_STEP_S, HEARD_S,  # noqa: F401
+                     AirtimeBudget, airtime_s, retry_wait)
+from packet import NAMES, pack, unpack, violation_mask
 from quality_model import QualityModel, QualityMonitor, TemporalModel
 
 DAY, HOUR = 86400, 3600
@@ -53,12 +63,12 @@ LEARN_S = DAY                 # first day: learn this node's normal pattern
 EWMA_A = 1 / 14               # after day 1, each clean hour moves the baseline 1/14 of the way to
                               # today's value: remembers about 2 weeks (Phyn learns in 21 days, Moen 7)
 SUMMARY_S = 900               # send a summary every 15 minutes
-MAX_SENDS_PER_STEP = 4        # radio duty-cycle budget per minute
-RETRY_S = 120                 # initial retry wait (2 minutes)
-BACKOFF_ALERT_S = (120, 240, 480, 900)        # alerts: 2 -> 4 -> 8 -> 15 min cap
-BACKOFF_ROUTINE_S = (120, 240, 480, 960, 1800)  # summaries/flags: 2 -> 4 -> 8 -> 16 -> 30 min cap
-JITTER_FRAC = 0.15            # +/- 15% jitter to prevent synchronized retry storms
-SLOT_GUARD_S = 0.2            # start this far into our time slot, margin for clock error
+STUCK_S = 30                  # unacknowledged this long: yellow light
+SLOT_GUARD_S = 0.2            # a summary starts this far into our time slot, margin for clock error
+SUPPLY_STATES = {"SUPPLY_EVENT", "LEAK_TANK_DRAIN", "SUPPLY_UNCERTAIN"}    # one at a time
+COMMAND_ENDS = {"PIPE_LEAK_CLEARED": {"PIPE_LEAK"}, "PIPE_LEAK_CAUSE_CLEARED": {"PIPE_LEAK_CAUSE"},
+                "SUPPLY_CLEARED": SUPPLY_STATES}
+REMEMBER_COMMANDS = 200
 
 
 def iso_utc(utc_s):
@@ -144,20 +154,44 @@ class Store:
         if len(self.queue) != before:
             self._save()
 
-    def due(self, now, budget):
-        ready = [m for m in self.queue if now >= self.next_try.get(m["s"], -1e9)]
-        ready.sort(key=lambda m: (PRIORITY[m["k"]], m["t"]))      # alerts first, then oldest
-        for m in ready[:budget]:
+    @staticmethod
+    def urgent(m):
+        return m["k"] != "SUM"                  # alerts and the tank's flags
+
+    def eligible(self):
+        """What may be on air: every unacknowledged alert and flag; with none waiting, only the
+        oldest summary (one at a time, so a long backlog does not flood the channel)."""
+        pending = sorted((m for m in self.queue if self.urgent(m)), key=lambda m: (PRIORITY[m["k"]], m["t"]))
+        if pending or not self.queue:
+            return pending
+        return [min(self.queue, key=lambda m: (m["t"], m["s"]))]
+
+    def due(self, now, heard):
+        """The messages to send now; each is scheduled to be sent again unless acknowledged."""
+        ready = [m for m in self.eligible() if now >= self.next_try.get(m["s"], -1e18)]
+        for m in ready:
             s = m["s"]
-            n_try = self.retries.get(s, 0)
-            if n_try > 0:
+            tries = self.retries.get(s, 0)
+            if tries:
                 self.total_resends += 1
-            sched = BACKOFF_ALERT_S if m["k"] == "ALERT" else BACKOFF_ROUTINE_S
-            base = sched[min(n_try, len(sched) - 1)]
-            wait = base * self.rng.uniform(1.0 - JITTER_FRAC, 1.0 + JITTER_FRAC)
-            self.next_try[s] = now + wait
-            self.retries[s] = n_try + 1
-        return ready[:budget]
+            self.next_try[s] = now + retry_wait(tries, self.urgent(m), heard, self.rng)
+            self.retries[s] = tries + 1
+        return ready
+
+    def wake(self, now):
+        """When something next needs sending, or None."""
+        times = [self.next_try.get(m["s"], now) for m in self.eligible()]
+        return min(times) if times else None
+
+    def flush(self, now, index):
+        """The gateway is back: send what is waiting, node by node so they do not all collide.
+        Only ever brings a retry forward."""
+        for m in self.queue:
+            s = m["s"]
+            if self.retries.get(s):
+                start = now + index * FLUSH_STEP_S + (0 if self.urgent(m) else FLUSH_ROUTINE_AFTER_S)
+                self.next_try[s] = min(self.next_try[s], start)
+                self.retries[s] = 0
 
 
 class Baseline:
@@ -212,21 +246,37 @@ class Node:
         # Problems reported and not yet reported recovered (alert names, and SUPPLY_LOW). Kept
         # on the SD card, so a rebooted node can still send the recovery.
         self.open = set()
+        # Gateway commands (cross-node problems): active ones, when each last ended, ones that
+        # were already over when they arrived, and the numbers acted on (never act twice)
+        self.remote, self.remote_ended, self.missed, self.commands_done = {}, {}, [], []
         self.open_path = hal.storage_path and os.path.splitext(hal.storage_path)[0] + "_open.json"
-        if self.open_path and os.path.exists(self.open_path):
+        if self.open_path and os.path.exists(self.open_path):    # restart after a power cut
             with open(self.open_path) as f:
-                self.open = set(json.load(f))
+                saved = json.load(f)
+            if isinstance(saved, list):                          # older form: open problems only
+                saved = {"open": saved}
+            self.open = set(saved["open"])
+            self.remote, self.remote_ended = saved.get("remote", {}), saved.get("ended", {})
+            self.missed, self.commands_done = saved.get("missed", []), saved.get("done", [])
+        slot = getattr(hal, "slot", None)
+        self.index = slot[0] if slot else NAMES.index(node_id) if node_id in NAMES else 0
+        self.beacon_key = hal.key("GATEWAY")
+        self.heard_at, self.gateway_boot, self.last_beacon_gt = None, None, -1
+        self.airtime = AirtimeBudget()
         self.ok_minutes = {}           # recovery message -> minutes in a row its problem looked over
         self.interval, self.acc = None, {}
 
     # --- messaging ---
     def emit(self, kind, **payload):
         sim_t = self.hal.now()
+        slot = getattr(self.hal, "slot", None)
         utc_fn = getattr(self.hal, "utc_now", None)
         utc_s, rtc_ok = utc_fn() if utc_fn else (sim_t, True)
         self.store.add(
             {"n": self.id, "t": sim_t, "ts_utc": round(utc_s), "ts_iso": iso_utc(utc_s), "rtc_ok": bool(rtc_ok), "k": kind, **payload}
         )
+        if kind == "SUM" and slot:      # summaries start in this node's own slot (TDMA)
+            self.store.next_try[self.store.seq] = sim_t + slot[0] * 60 / slot[1] + SLOT_GUARD_S
 
     def alert(self, kind, **payload):
         """Called every minute the condition holds; sends once per episode."""
@@ -234,13 +284,24 @@ class Node:
             self.set_open(self.open | {kind})      # saved before the alert is queued
         if kind not in self.alerts:
             self.emit("ALERT", a=kind, **payload)
+            self.buzz(kind)                        # the local alarm never waits for the gateway
         self.alerts[kind] = self.hal.now()
+
+    def buzz(self, code):
+        buzzer = getattr(self.hal, "buzzer", None)
+        if buzzer:
+            buzzer(code)
 
     def set_open(self, problems):
         if problems != self.open:
             self.open = problems
-            if self.open_path:
-                save_atomic(self.open_path, json.dumps(sorted(problems)))
+            self.save_open()
+
+    def save_open(self):
+        if self.open_path:
+            save_atomic(self.open_path, json.dumps({"open": sorted(self.open), "remote": self.remote,
+                                                    "ended": self.remote_ended, "missed": self.missed,
+                                                    "done": self.commands_done}))
 
     def recover(self, message, rules, looks_over):
         """Called every minute. Sends `message` once the open problems among `rules` have looked
@@ -254,13 +315,92 @@ class Node:
             self.set_open(self.open - mine)
             self.ok_minutes[message] = 0
 
+    # --- radio ---
+    def heard_gateway(self, now, boot=None):
+        back = (self.heard_at is None or now - self.heard_at > HEARD_S
+                or (boot is not None and self.gateway_boot not in (None, boot)))
+        self.heard_at = now
+        if boot is not None:
+            self.gateway_boot = boot
+        if back:
+            self.store.flush(now, self.index)
+
+    def receive(self, now):
+        keys = {self.id: self.key, "GATEWAY": self.beacon_key}
+        for raw in self.hal.receive():
+            m = unpack(raw, keys.get)           # None: not ours, or forged
+            if not m:
+                continue
+            if m["n"] == "GATEWAY":
+                if m["k"] == "BEACON" and m["gt"] > self.last_beacon_gt:    # an old one: replayed
+                    self.last_beacon_gt = m["gt"]
+                    self.heard_gateway(now, boot=m["s"])
+            elif m["k"] == "ACK":
+                self.heard_gateway(now)
+                self.store.ack(m["s"])
+            elif m["k"] == "CMD":
+                self.heard_gateway(now)
+                self.command(now, m)
+
+    def command(self, now, m):
+        """A cross-node problem from the gateway. Act once, save, then confirm; the gateway
+        repeats it until the confirmation arrives."""
+        done = self.commands_done
+        if m["s"] not in done and not (len(done) >= REMEMBER_COMMANDS and m["s"] < min(done)):
+            self.apply_command(m["a"], m["t"], m.get("over"))
+            self.commands_done = (done + [m["s"]])[-REMEMBER_COMMANDS:]
+            self.save_open()
+        got = pack({"k": "GOT", "n": self.id, "s": m["s"], "t": now}, self.key)
+        if self.airtime.take(now, airtime_s(len(got)), True):
+            self.hal.send(got, cad=True)
+
+    def apply_command(self, code, t, over):
+        hook = getattr(self.hal, "on_gateway_alert", lambda code, active: None)
+
+        def end(name):
+            if self.remote.pop(name, None) is not None:
+                hook(name, False)
+
+        if code in COMMAND_ENDS:
+            for name in COMMAND_ENDS[code]:
+                self.remote_ended[name] = max(t, self.remote_ended.get(name, t))
+                if name in self.remote and self.remote[name] <= t:
+                    end(name)
+        elif over:                      # it began and ended while it could not be delivered
+            self.missed = (self.missed + [[code, t]])[-20:]
+        elif t > self.remote_ended.get(code, -1e18):
+            if code in SUPPLY_STATES:
+                if any(self.remote.get(other, t) > t for other in SUPPLY_STATES):
+                    return              # a newer supply state is already in force
+                for other in SUPPLY_STATES - {code}:
+                    end(other)
+            self.remote[code] = t
+            self.buzz(code)
+            hook(code, True)
+
+    def transmit(self, now):
+        """Send what is due, set the light, and return when to call again (None: nothing waits)."""
+        heard = self.heard_at is not None and now - self.heard_at <= HEARD_S
+        for m in self.store.due(now, heard):
+            raw = pack({k: v for k, v in m.items() if k not in ("ts_utc", "ts_iso", "rtc_ok")}, self.key)
+            if self.airtime.take(now, airtime_s(len(raw)), self.store.urgent(m)):
+                self.hal.send(raw, cad=True)
+            else:                                       # transmit-time limit reached
+                self.store.next_try[m["s"]] = now + 60
+        stuck = any(now - m["t"] > STUCK_S for m in self.store.queue)
+        self.hal.led("red" if self.alerts or self.open or self.remote else "yellow" if stuck else "green")
+        return self.store.wake(now)
+
+    def radio_poll(self):
+        """Call when a packet arrives, and at the time this returns. Never touches the sensors."""
+        now = self.hal.now()
+        self.receive(now)
+        return self.transmit(now)
+
     # --- main loop, called once per minute ---
     def step(self):
         now, r = self.hal.now(), self.hal.read()
-        for raw in self.hal.receive():
-            m = unpack(raw, lambda n: self.key if n == self.id else None)   # None: not ours, or forged
-            if m and m["k"] == "ACK":
-                self.store.ack(m["s"])
+        self.receive(now)
         hour = int(now % DAY // HOUR)
         if hour != self.hour:              # once an hour: update the baseline, keep it on the SD card
             for b in self.base.values():
@@ -283,20 +423,7 @@ class Node:
             # as clean; at EWMA_A = 1/14 that moves the baseline a few percent at most
             self.clean = self.clean and not self.alerts
         self.summarise(now, r)
-        # Collisions: alerts go out now, listening first (CSMA/CA); everything else waits for
-        # this node's own time slot (TDMA); the hardware layer must keep node clocks in step
-        slot = getattr(self.hal, "slot", None)
-        for m in self.store.due(now, MAX_SENDS_PER_STEP):
-            wire = {k: v for k, v in m.items() if k not in ("ts_utc", "ts_iso", "rtc_ok")}
-            raw = pack(wire, self.key)
-            if m["k"] == "ALERT":
-                self.hal.send(raw, cad=True)
-            elif slot:
-                self.hal.send(raw, at_s=slot[0] * 60 / slot[1] + SLOT_GUARD_S)
-            else:
-                self.hal.send(raw)
-        stuck = any(now - m["t"] > RETRY_S for m in self.store.queue)     # unanswered for > 2 min
-        self.hal.led("red" if self.alerts else "yellow" if stuck else "green")
+        return self.transmit(now)           # alerts raised just now go in this same call
 
     def save_baseline(self):
         if self.base_path:
@@ -463,6 +590,7 @@ class EdgeRuntime(Node):
             if self.low_run >= PRESSURE_MIN and not self.low_flagged:
                 self.low_flagged = True
                 self.set_open(self.open | {"SUPPLY_LOW"})
+                self.buzz("SUPPLY_LOW")
                 self.emit("FLAG", f="SUPPLY_LOW", level=round(lvl, 3), inflow=round(inflow_v, 3))
             elif self.ok_run >= PRESSURE_MIN and self.low_flagged:
                 self.low_flagged = False
@@ -552,7 +680,7 @@ if __name__ == "__main__":
         def now(self): return self.t
         def read(self): return {"flow_lps": self.flow(self.t), "pressure_m": 10.0}
         def receive(self): return []
-        def send(self, m, at_s=None, cad=False): pass
+        def send(self, m, cad=False): pass
         def led(self, colour): pass
         def key(self, name): return sim_key(name)
 
@@ -661,14 +789,99 @@ if __name__ == "__main__":
     n.step()
     assert all(m["s"] != 1 for m in n.store.queue), "real ACK deletes it"
 
-    # Exponential backoff + priority: during 3.5h outage, total_resends is far lower than 105/item
-    st_bo = Store(None, seed=42)
-    st_bo.add({"k": "SUM", "t": 0})
-    st_bo.add({"k": "ALERT", "t": 0})
-    sends_by_kind = {"SUM": 0, "ALERT": 0}
-    for t_s in range(0, 210 * 60, 60):
-        for m in st_bo.due(t_s, 4):
-            sends_by_kind[m["k"]] += 1
-    assert sends_by_kind["SUM"] <= 12 and sends_by_kind["ALERT"] <= 18, sends_by_kind
-    assert sends_by_kind["ALERT"] >= sends_by_kind["SUM"], "alerts should retry at least as often as summaries"
+    # Delivery. A node on a fake radio that records what is sent and when
+    class RadioHAL(FakeHAL):
+        def __init__(self, path=None):
+            super().__init__(path, lambda t: 0.0)
+            self.rx, self.tx, self.buzzed, self.hooks = [], [], [], []
+        def receive(self):
+            msgs, self.rx = self.rx, []
+            return msgs
+        def send(self, raw, cad=False):
+            self.tx.append((self.t, unpack(raw, sim_key)))
+        def buzzer(self, code): self.buzzed.append(code)
+        def on_gateway_alert(self, code, active): self.hooks.append((code, active))
+
+    def beacon(hal, boot=1, key="GATEWAY"):
+        hal.rx.append(pack({"k": "BEACON", "n": "GATEWAY", "s": boot, "gt": hal.t}, sim_key(key)))
+
+    def tick(node, until, beacons=False, step=0.1):
+        while node.hal.t < until - 1e-9:
+            if beacons and round(node.hal.t * 10) % (BEACON_S * 10) == 0:
+                beacon(node.hal)
+            node.radio_poll()
+            node.hal.t = round(node.hal.t + step, 1)
+
+    sent_at = lambda hal, kind: [t for t, m in hal.tx if m["k"] == kind]
+    hal = RadioHAL()
+    n = FlatNode("B-101", hal)
+    tick(n, 20, beacons=True)
+    n.alert("LEAK_NIGHT_FLOW", flow=0.1)
+    assert hal.buzzed == ["LEAK_NIGHT_FLOW"], "local alarm at once, no gateway needed"
+    start = hal.t
+    tick(n, start + 40, beacons=True)               # gateway there, but every reply is lost
+    tries = sent_at(hal, "ALERT")
+    gaps = [b - a for a, b in zip(tries, tries[1:])]
+    assert tries[0] == start and 1 <= gaps[0] <= 2.1 and max(gaps) <= 8.1, gaps
+
+    # Gateway away: occasional tries only. Back: stored alerts at once, by node number, then
+    # summaries one at a time, oldest first
+    for i in range(3):
+        n.emit("SUM", i=i, vol_l=1.0)
+    away = hal.t
+    tick(n, away + 300)
+    quiet = [t for t in sent_at(hal, "ALERT") if t > away + 20]
+    assert 8 <= len(quiet) <= 12 and not sent_at(hal, "SUM"), (len(quiet), sent_at(hal, "SUM"))
+    back = hal.t
+    hal.tx.clear()
+    beacon(hal, boot=2)
+    tick(n, back + n.index * FLUSH_STEP_S + 0.2)
+    assert sent_at(hal, "ALERT") and sent_at(hal, "ALERT")[0] <= back + n.index * FLUSH_STEP_S + 0.1
+    ack = lambda m: hal.rx.append(pack({"k": "ACK", "n": "B-101", "s": m["s"], "gt": hal.t}, sim_key("B-101")))
+    ack(hal.tx[0][1])
+    order = []
+    while n.store.queue and hal.t < back + 20:
+        seen = len(hal.tx)
+        n.radio_poll()
+        for _, m in hal.tx[seen:]:
+            assert m["k"] == "SUM" and len(hal.tx) - seen == 1, "one summary at a time"
+            order.append(m["i"])
+            ack(m)
+        hal.t = round(hal.t + 0.1, 1)
+    assert order == [0, 1, 2] and not n.store.queue, (order, n.store.queue)
+
+    # A forged beacon or an old one recorded earlier does not count as the gateway
+    n.heard_at = None
+    beacon(hal, key="B-102")
+    hal.rx.append(pack({"k": "BEACON", "n": "GATEWAY", "s": 2, "gt": back - 100}, sim_key("GATEWAY")))
+    n.radio_poll()
+    assert n.heard_at is None
+
+    # Gateway commands: acted on once, confirmed every time, kept across a reboot; a forged one is
+    # ignored; one already over raises no alarm; an old "ended" does not cancel a newer problem
+    path = os.path.join(tmp, "B-402.jsonl")
+    hal = RadioHAL(path)
+    n = FlatNode("B-402", hal)
+
+    def command(number, code, t, over=0, key="B-402"):
+        hal.rx.append(pack({"k": "CMD", "n": "B-402", "s": number, "t": t, "a": code, "over": over}, sim_key(key)))
+        n.radio_poll()
+
+    command(10, "PIPE_LEAK", 100, key="B-101")
+    assert not n.remote and not hal.tx
+    command(11, "PIPE_LEAK", 100)
+    command(11, "PIPE_LEAK", 100)                    # repeated: the first GOT was lost
+    assert hal.hooks == [("PIPE_LEAK", True)] and hal.buzzed == ["PIPE_LEAK"] and len(sent_at(hal, "GOT")) == 2
+    n = FlatNode("B-402", hal)                       # power cut
+    command(11, "PIPE_LEAK", 100)
+    assert n.remote == {"PIPE_LEAK": 100} and len(hal.hooks) == 1
+    command(12, "PIPE_LEAK_CLEARED", 90)
+    assert n.remote == {"PIPE_LEAK": 100}
+    command(13, "PIPE_LEAK_CLEARED", 200)
+    command(14, "PIPE_LEAK", 150)                    # late: already ended
+    command(15, "SUPPLY_EVENT", 300, over=1)
+    assert not n.remote and n.missed == [["SUPPLY_EVENT", 300]] and hal.hooks[-1] == ("PIPE_LEAK", False)
+    command(16, "SUPPLY_UNCERTAIN", 400)
+    command(17, "LEAK_TANK_DRAIN", 410)
+    assert list(n.remote) == ["LEAK_TANK_DRAIN"]
     print("node self-check passed")

@@ -38,6 +38,7 @@ sys.path[:0] = [
 
 from aqua_edge import FlatNode, TankNode, DAY, HOUR  # noqa: E402
 from gateway import Gateway  # noqa: E402
+from offline_radio import exchange  # noqa: E402
 from packet import sim_key  # noqa: E402
 from water import LEAK_SIZES_LPS  # noqa: E402
 import make_scenario as M  # noqa: E402
@@ -62,7 +63,7 @@ class SimHAL:
     def read(self):
         return self.readings[0][self.name]
 
-    def send(self, msg, at_s=None, cad=False):
+    def send(self, msg, cad=False):
         for n, box in self.inboxes.items():
             if n != self.name:
                 box.append(msg)
@@ -166,7 +167,7 @@ def run_causal_firmware(wn, sensor_seed=7, extra_p_noise=0.0, p_drift_amp=0.0, d
         for n in nodes:
             n.step()
             assert n.hal.now() == t_f
-        gw.step()
+        exchange(nodes, gw, inboxes)
     return flats, gw, node_map, diag
 
 

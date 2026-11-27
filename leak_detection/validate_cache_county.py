@@ -34,6 +34,7 @@ sys.path[:0] = [
 
 from aqua_edge import FlatNode, DAY, CONT_FLOW_LPS, CONT_FLOW_MIN  # noqa: E402
 from gateway import Gateway  # noqa: E402
+from offline_radio import exchange  # noqa: E402
 from packet import sim_key  # noqa: E402
 
 DATA = os.path.join(ROOT, "simulation", "data", "cache_county")
@@ -56,7 +57,7 @@ class SimHAL:
     def read(self):
         return self.readings[0][self.name]
 
-    def send(self, msg, at_s=None, cad=False):
+    def send(self, msg, cad=False):
         for n, box in self.inboxes.items():
             if n != self.name:
                 box.append(msg)
@@ -83,7 +84,7 @@ def run_flow_series(flow_lps_arr, inject_lps=0.0, inject_start_min=None):
             f += inject_lps
         readings[0] = {"B-101": {"flow_lps": f, "pressure_m": 15.0}}
         node.step()
-        gw.step()
+        exchange([node], gw, inboxes)
 
     leak_alerts = [m for m in gw.log if m["k"] == "ALERT" and m["a"] in LEAK_ALERTS]
     cons_alerts = [m for m in gw.log if m["k"] == "ALERT" and m["a"] in CONSUMPTION_ALERTS]

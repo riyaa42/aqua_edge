@@ -28,6 +28,7 @@ sys.path[:0] = [
 
 from aqua_edge import FlatNode, TankNode, DAY, HOUR  # noqa: E402
 from gateway import Gateway  # noqa: E402
+from offline_radio import exchange  # noqa: E402
 from packet import sim_key  # noqa: E402
 from water import Water  # noqa: E402
 
@@ -46,7 +47,7 @@ class SimHAL:
     def read(self):
         return self.readings[0][self.name]
 
-    def send(self, msg, at_s=None, cad=False):
+    def send(self, msg, cad=False):
         for n, box in self.inboxes.items():
             if n != self.name:
                 box.append(msg)
@@ -74,7 +75,7 @@ def run_wntr_scenario(hours=48, setup_fn=None, step_fn=None, seed=42):
         readings[0] = w.readings()
         for n in nodes:
             n.step()
-        gw.step()
+        exchange(nodes, gw, inboxes)
         w.step()
     return w, gw
 
@@ -131,7 +132,7 @@ def run_synthetic_supply(pump_off=False, tank_leak=False, low_level_normal_inflo
         readings[0] = r
         for n in nodes:
             n.step()
-        gw.step()
+        exchange(nodes, gw, inboxes)
     return gw
 
 

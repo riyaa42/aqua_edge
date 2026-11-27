@@ -24,6 +24,7 @@ sys.path[:0] = [
 
 from aqua_edge import TankNode, FlatNode, DAY  # noqa: E402
 from gateway import Gateway  # noqa: E402
+from offline_radio import exchange  # noqa: E402
 from packet import sim_key  # noqa: E402
 
 
@@ -41,7 +42,7 @@ class SimHAL:
     def read(self):
         return self.readings[0][self.name]
 
-    def send(self, msg, at_s=None, cad=False):
+    def send(self, msg, cad=False):
         for n, box in self.inboxes.items():
             if n != self.name:
                 box.append(msg)
@@ -79,7 +80,7 @@ def run_profile(hours, tank_fn):
         readings[0] = r
         for n in nodes:
             n.step()
-        gw.step()
+        exchange(nodes, gw, inboxes)
 
     assert not [m for m in gw.log if m["k"] == "ALERT" and m["a"].startswith("LEAK_")], "false flat leak"
     evs = [(round(e["t"] / 3600, 2), e["event"]) for e in gw.events if e["event"] in ("SUPPLY_EVENT", "SUPPLY_UNCERTAIN", "LEAK_TANK_DRAIN", "PIPE_LEAK")]

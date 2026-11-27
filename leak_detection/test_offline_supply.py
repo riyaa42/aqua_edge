@@ -30,6 +30,7 @@ sys.path[:0] = [
 
 from aqua_edge import FlatNode, TankNode, DAY  # noqa: E402
 from gateway import Gateway  # noqa: E402
+from offline_radio import exchange  # noqa: E402
 from packet import sim_key  # noqa: E402
 
 
@@ -56,7 +57,7 @@ class OutageRadioHAL:
         t = self.clock[0]
         return any(s <= t < e for s, e in self.outage_windows)
 
-    def send(self, msg, at_s=None, cad=False):
+    def send(self, msg, cad=False):
         if self._link_down():
             return  # silently dropped on air during LoRa outage
         for n, box in self.inboxes.items():
@@ -114,7 +115,7 @@ def run_scenario(name, outage_windows=(), supply_cut=False, tank_leak=False, fla
         readings[0] = r
         for n in nodes:
             n.step()
-        gw.step()
+        exchange(nodes, gw, inboxes)
 
     # Check queue drained after connectivity returns (all outages end before 36h)
     remaining_q = sum(len(n.store.queue) for n in nodes)

@@ -34,6 +34,7 @@ sys.path[:0] = [
 from water import Water, LEAK_SIZES_LPS  # noqa: E402
 from aqua_edge import FlatNode, TankNode, DAY  # noqa: E402
 from gateway import Gateway  # noqa: E402
+from offline_radio import exchange  # noqa: E402
 from packet import sim_key  # noqa: E402
 
 END_S = 2 * DAY + 6 * 3600
@@ -61,7 +62,7 @@ class HAL:
     def read(self):
         return self.readings[0][self.name]
 
-    def send(self, msg, at_s=None, cad=False):
+    def send(self, msg, cad=False):
         for n, box in self.inboxes.items():
             if n != self.name:
                 box.append(msg)
@@ -88,7 +89,7 @@ def run(job):
         readings[0] = w.readings()
         for n in nodes:
             n.step()
-        gw.step()
+        exchange(nodes, gw, inboxes)
         w.step()
     sig = [(m["t"], m["n"], m.get("a") or m.get("f")) for m in gw.log if m["k"] in ("ALERT", "FLAG")]
     sig += [(e["t"], "GATEWAY", e["event"], e.get("suspected_floor")) for e in gw.events if e["event"] in ("PIPE_LEAK", "SUPPLY_EVENT", "LEAK_TANK_DRAIN", "SUPPLY_UNCERTAIN")]

@@ -35,6 +35,7 @@ sys.path[:0] = [
 
 from aqua_edge import EdgeRuntime, FlatNode, TankNode, DAY  # noqa: E402
 from gateway import Gateway  # noqa: E402
+from offline_radio import exchange  # noqa: E402
 from packet import pack, sim_key  # noqa: E402
 import compare_leaks as CL  # noqa: E402
 import make_scenario as M  # noqa: E402
@@ -56,7 +57,7 @@ class ReplayHAL:
     def read(self):
         return self.readings[0][self.name]
 
-    def send(self, msg, at_s=None, cad=False):
+    def send(self, msg, cad=False):
         t = self.clock[0]
         if any(s <= t < e for s, e in self.outage_windows):
             return
@@ -131,7 +132,7 @@ def test_combined_replay_and_isolation(stream):
         clock[0] = row["t"]
         readings[0] = {"B-203": row}
         rt.step()
-        gw.step()
+        exchange([rt], gw, inboxes)
 
     alerts = {(m["a"], round(m["t"] / 3600, 2)) for m in gw.log if m["k"] == "ALERT"}
     alert_names = {a for a, _ in alerts}

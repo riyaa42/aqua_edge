@@ -29,6 +29,7 @@ sys.path[:0] = [
 
 from aqua_edge import FlatNode, TankNode, DAY, HOUR  # noqa: E402
 from gateway import Gateway  # noqa: E402
+from offline_radio import exchange  # noqa: E402
 from packet import sim_key  # noqa: E402
 
 DATA = os.path.join(ROOT, "simulation", "data", "swifeed")
@@ -50,7 +51,7 @@ class SimHAL:
     def read(self):
         return self.readings[0][self.name]
 
-    def send(self, msg, at_s=None, cad=False):
+    def send(self, msg, cad=False):
         for n, box in self.inboxes.items():
             if n != self.name:
                 box.append(msg)
@@ -189,7 +190,7 @@ def run_net6_case(monitored, leak_node, leak_lps, start_h=30, seed=7):
         readings[0] = r
         for n in nodes:
             n.step()
-        gw.step()
+        exchange(nodes, gw, inboxes)
 
     target_alerts = [
         (m["t"], m["a"], round((m["t"] - start_s) / 60, 1))
