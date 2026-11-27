@@ -219,11 +219,11 @@ This follows common practice for LoRa networks: track when each device was last 
 
 ## 7. How an alarm reaches the gateway
 
-1. **The node decides.** A check trips and the node turns its light red (a buzzer is planned but **not yet implemented**).
+1. **The node decides.** A check trips, and in the same step the node turns its light red and calls the buzzer (no hardware layer drives a real buzzer yet). No gateway is needed for this.
 2. **It saves the alarm to the SD card first,** so nothing is lost if the power or radio fails.
 3. **It sends the alarm straight away.** Alarms skip the queue. They listen first to check the radio channel is free (listen before talk), then send.
 4. **The gateway replies "got it"** (an ACK). The reply also carries the gateway's time for setting node clocks. The firmware does not set any clock itself; only the live simulation's hardware layer uses it.
-5. **No reply?** The node sends it again after about 2 minutes, then waits longer each time (4, 8, then every 15 minutes for alarms; up to 30 minutes for summaries; each wait varies by ±15%). During a radio outage, alarms wait on the SD card and go out once the link returns.
+5. **No reply?** While the gateway has been heard in the last 15 s, an alarm is sent again after 1-2 s, then 2-4 s, then every 4-8 s. Otherwise it waits on the SD card and is tried about every 30 s. The gateway sends a beacon every 5 s, and when it comes back, stored alarms go out at once. Problems only the gateway can find are sent back to the nodes concerned ([`../firmware/README.md`](../firmware/README.md#gateway-alerts-sent-to-nodes)).
 6. **The gateway labels it.** The first alarm of a type from a node is `NEW_ALERT`. If the same problem comes back later, it is `REPEAT_ALERT`, with a count and the minutes since last time.
 
 **One alarm per problem:** while a problem continues, the node does not repeat the alarm every minute. Once the condition has been normal for 10 minutes (`ALERT_CLEAR_S`), the alarm re-arms and can fire again if the problem returns.
@@ -249,7 +249,7 @@ This follows common practice for LoRa networks: track when each device was last 
 | Building check (gateway) | every 15 min | 2 blocks (30 min) |
 | Silent node (gateway) | 1 min | 45 min with nothing heard |
 
-**Alarms** are sent in the same minute they fire: listen before talk, then send. If the channel is busy, wait a random 0.1 to 1 s and listen again (up to 5 times). A 21-byte signed alert takes about 0.06 s on air at SF7, so the gateway should have it about 1 second after the decision. If it is lost (for example in a collision), the node re-sends after about 2 minutes, and with longer waits if that is lost too.
+**Alarms** are sent as soon as they fire: listen before talk, then send. A 21-byte signed alert takes about 0.06 s on air at SF7. If it is lost, it is sent again within seconds (section 7, step 5). These delivery times have not been measured with real radios or with airtime and collisions simulated.
 
 **Summaries** cover 15-minute blocks. Each is made at :00, :15, :30 and :45 for the block just ended, and sent in that same minute at the node's own slot second:
 
@@ -283,6 +283,8 @@ The whole system ran for 48 simulated hours: real firmware on 22 nodes, the real
 | Small leak in flat B-203 at 02:00 | Night check on B-203, 02:30 (30 min); continuous-flow check 05:00 (3 h) | 02:31 |
 | Medium leak in flat B-402 at 10:00 | Pressure-assisted check on B-402, 10:10; too-much check 11:00; continuous-flow check 13:00 | 10:11 |
 | Large burst on downtake B-D1 at 18:00 | Tank outflow check 18:14; gateway building check 18:31 (69.9% missing) | 18:15 / 18:31 |
+
+**These live-run results were measured before the instant-delivery change.** The live simulation has not been updated or rerun since, so its message counts and delivery times do not describe the current firmware.
 
 - 4,041 of 4,041 radio messages got through (signed binary packets): 2 collisions, both re-sent.
 - Recovery messages: the flat-leak problems of B-203 and B-402 and the tank outflow problem from the downtake burst stayed open, as those leaks are never fixed. B-203's night-use report was cleared at 03:54, when its flow fell back under that rule's limit, although the leak went on (the leak itself stayed open). Before the burst, the tank's `ABNORMAL_SUPPLY` cleared and returned several times (cleared 10:49, 13:29, 14:14, 15:39, 16:19) while the flat leaks continued. The tank reported low at 11:09 and recovered at 11:57.
@@ -354,7 +356,7 @@ For full benchmark numbers, confusion matrices, and multi-dataset results, see [
 | Clock skew | message time over 1 min in the future | Gateway |
 | Alarm re-arm | after 10 min back to normal | All flat and tank alarms |
 | Recovery message | after 10 min of readings in a row showing the problem is over | Flat leak, consumption, zero use, tank outflow |
-| Re-send if no reply | after about 2 min, doubling to 15 min (alarms) or 30 min (others), ±15% | All messages |
+| Re-send if no reply | alarms: 1-2 s rising to 4-8 s (about 30 s with the gateway away); summaries: 10-60 s (5 min away) | All messages |
 | Summary period | 15 min | Building check |
 
 ---
