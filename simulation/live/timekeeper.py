@@ -29,7 +29,7 @@ from radio import Radio, GATEWAY
 from node import RUN, ADDRESS, AUTHKEY, peek
 
 DAY = 86400
-WATCH_MAX_S = DAY              # until_alert gives up after this long
+WATCH_MAX_S = 2 * DAY          # until_alert gives up after this long (a pipe leak waits for the next night check)
 MAX_LEAK_LPS = 5.0
 
 
@@ -46,6 +46,15 @@ class Commands:
         now = [c for c in self.pending if c.get("at_s", t) <= t]
         self.pending = [c for c in self.pending if c.get("at_s", t) > t]
         return now
+
+
+def gateway_decided(event, since):
+    """The gateway's own decisions (PIPE_LEAK) are not radio packets, so read its log."""
+    try:
+        with open(os.path.join(RUN, "gateway_events.jsonl")) as f:
+            return any(e["event"] == event and e["t"] >= since for e in map(json.loads, f))
+    except (OSError, ValueError):
+        return False
 
 
 def apply(c, t, water, radio, applied):
@@ -127,6 +136,8 @@ def main(args):
         if watch:
             heard = any(h["k"] == "ALERT" and h["n"] == watch["node"] and h["t"] >= watch["from_s"]
                         for h in map(peek, inbox.get(GATEWAY, [])))
+            if watch["node"] == "B-TANK" and not heard:          # down pipe: the gateway's night check
+                heard = gateway_decided("PIPE_LEAK", watch["from_s"])
             if heard or t >= watch["from_s"] + WATCH_MAX_S:
                 pause_at, delay, watch = t + 60, watch["delay"], None    # the gateway logs it next minute
         if pause_at is not None and t >= pause_at:

@@ -7,10 +7,14 @@ Same hardware layer as the nodes (hal.now / send / receive). Jobs:
      inside the sender's own time slot, after its packets (borrowed from LoRaWAN Class A), so a
      reply never lands in another node's slot: our gateway is one radio and cannot hear while
      it sends. hal.slots = {node: (index, count)}, the same table the nodes got at installation.
-  2. Building check, the mass balance (Ali et al. [6], supply vs branch flows): water leaving
-     the tank minus water used by all flats, per 15-minute summary; above 10% for 2 blocks means
-     a leak in the pipes between the tank and the flats (a leak inside a flat is after its
-     meter, so the flat's own checks catch it). Re-arms after 2 normal blocks.
+  2. Down pipe check, once a night (the mass balance of Ali et al. [6], supply vs branch flows,
+     done at the quietest hours, like a water company's minimum night flow check): litres that
+     left the tank minus litres that reached all flats from 02:00 to 04:00. More than
+     NIGHT_MISSING_L missing means a leak in the pipes between the tank and the flats (a leak
+     inside a flat is after its meter, so the flat's own checks catch it). At night the flows
+     are smallest, so meter errors are a few litres and a small leak stands out; in the day the
+     same leak hides inside the meters' 2-5% error. Bursts are found sooner by the tank node.
+     Alerts once; re-arms after a night with nothing missing.
   3. Silent nodes: a node not heard for 45 min (3 missed summaries) gives NODE_SILENT, and
      NODE_BACK when it is heard again. While any node is silent the building check cannot be
      done honestly (its litres would look "missing"), so BALANCE_PAUSED says so; the late
@@ -29,13 +33,16 @@ How the leak checks fit together: leak_detection/README.md.
 import json
 import os
 
-from aqua_edge import save_atomic
+from aqua_edge import save_atomic, DAY, HOUR, SUMMARY_S
 from packet import pack, unpack
 
 SUPPLY_WINDOW_S = 900          # a SUPPLY_LOW flag from the tank counts for this long
-MASS_BALANCE_PCT = 10.0        # Ali et al. [6] threshold
-MASS_BALANCE_INTERVALS = 2     # blocks in a row above threshold before alerting, and normal before re-arming
-MIN_SUPPLY_L = 5.0             # ignore near-empty blocks (division by tiny numbers)
+NIGHT_HOURS = (2, 4)           # down pipe check window, local time: the quietest hours
+NIGHT_MISSING_L = 20.0         # litres missing over the window that meter error cannot explain
+# Measured with the simulation's realistic meters (live/water.py): clean nights -4 to +5 L; a 0.005 L/s
+# pipe leak 36-42 L, 0.01 L/s 72-81 L. So 20 L (4x the worst clean night) finds leaks from ~0.003 L/s.
+# ponytail: one fixed limit; on a real building measure a few clean nights first, since real night use
+# comes in bursts (a flush, a glass of water) and our simulated use is smooth
 SILENT_S = 2700                # nothing heard from a node for 3 summary periods = silent
 CLOCK_AHEAD_S = 60             # message time this far ahead of the gateway clock = bad node clock
 ACK_AT_S = 1.5                 # seconds into the sender's slot: its own packets start at 0.2 s
@@ -58,7 +65,7 @@ class Gateway:
         self.alert_history = {}     # (node, alert) -> (time of latest, how many so far)
         self.tank_low_t, self.supply_active_until = -1e9, -1
         self.sums = {}              # interval -> {node: volume}
-        self.balance_done, self.balance_run, self.balance_ok = set(), 0, 0
+        self.nights_done = set()    # nights (local day numbers) already checked
         self.pipe_alerted = self.balance_paused = False
         self.last_seen = None       # node -> time last heard (set on the first step)
         self.silent = {}            # node -> time last heard before it went silent
@@ -101,7 +108,7 @@ class Gateway:
             save_atomic(self.seen_path, json.dumps({n: sorted(v) for n, v in self.seen.items()}))
         self.check_silence(now)
         self.supply_rule(now)
-        self.mass_balance(now)
+        self.night_check(now)
 
     def decide(self, now, kind, **info):
         self.events.append({"t": now, "event": kind, **info})
@@ -139,27 +146,29 @@ class Gateway:
                 self.decide(now, "SUPPLY_EVENT", tank_low=True)
             self.supply_active_until = now + SUPPLY_WINDOW_S
 
-    def mass_balance(self, now):
+    def night_check(self, now):
         if self.silent and not self.balance_paused:
             self.balance_paused = True
             self.decide(now, "BALANCE_PAUSED", silent=sorted(self.silent))
         elif not self.silent:
             self.balance_paused = False
-        for i in sorted(self.sums):
-            got = self.sums[i]
-            if i in self.balance_done or self.tank not in got or not self.flats <= set(got):
-                continue                                    # wait until every node's summary for i arrived
-            self.balance_done.add(i)
-            supply = got[self.tank]
-            if supply < MIN_SUPPLY_L:
-                continue
-            err = 100 * (supply - sum(got[n] for n in self.flats)) / supply
-            leaking = err > MASS_BALANCE_PCT
-            self.balance_run, self.balance_ok = (self.balance_run + 1, 0) if leaking else (0, self.balance_ok + 1)
-            if self.balance_run >= MASS_BALANCE_INTERVALS and not self.pipe_alerted:
+        off, (h0, h1) = getattr(self.hal, "utc_offset_s", 0), NIGHT_HOURS
+        nights = {}
+        for i, got in self.sums.items():
+            local = i * SUMMARY_S + off
+            if h0 <= local % DAY // HOUR < h1:
+                nights.setdefault(local // DAY, []).append(got)
+        for d in sorted(nights):
+            blocks = nights[d]
+            if d in self.nights_done or len(blocks) < (h1 - h0) * HOUR // SUMMARY_S or \
+                    any(self.tank not in g or not self.flats <= set(g) for g in blocks):
+                continue                                    # wait until every node's summaries arrived
+            self.nights_done.add(d)
+            missing = sum(g[self.tank] - sum(g[n] for n in self.flats) for g in blocks)
+            if missing > NIGHT_MISSING_L and not self.pipe_alerted:
                 self.pipe_alerted = True
-                self.decide(now, "PIPE_LEAK", interval=i, error_pct=round(err, 1))
-            elif self.balance_ok >= MASS_BALANCE_INTERVALS:
+                self.decide(now, "PIPE_LEAK", missing_l=round(missing), lps=round(missing / ((h1 - h0) * HOUR), 3))
+            elif missing <= NIGHT_MISSING_L:
                 self.pipe_alerted = False                   # re-arm: a later leak alerts again
 
 
@@ -197,22 +206,28 @@ if __name__ == "__main__":
 
     events = lambda gw: [e["event"] for e in gw.events]
     F1, F2, T = "B-101", "B-102", "B-TANK"
+    night = lambda d: [(d * DAY + NIGHT_HOURS[0] * HOUR) // SUMMARY_S + k for k in range(8)]   # 02:00-04:00
     gw = Gateway(FakeHAL(), [F1, F2], T)
-    ok, leak = {T: 100, F1: 50, F2: 50}, {T: 100, F1: 40, F2: 40}
-    for i, v in enumerate([ok, leak, leak, ok, ok, leak, leak]):     # leak, fixed, second leak
-        block(gw, i, v)
+    ok, leak = {T: 20, F1: 10, F2: 10}, {T: 30, F1: 10, F2: 10}       # leak: 10 L x 8 blocks = 80 L missing
+    for i in range(60, 64):
+        block(gw, i, {T: 300, F1: 100, F2: 100})                     # 15:00: 100 L missing in the day, not checked
+    for d, v in enumerate([ok, leak, leak, ok, leak]):               # clean, leak (alert), still leaking, fixed, new leak
+        for i in night(d):
+            block(gw, i, v)
     assert events(gw) == ["PIPE_LEAK", "PIPE_LEAK"], events(gw)
-    # F2 goes silent for 4 blocks (60 min): alert and pause; it comes back with its stored
-    # summaries and the late blocks are checked
+    assert gw.events[0]["missing_l"] == 80 and gw.nights_done == {0, 1, 2, 3, 4}
+    # F2 goes silent for 4 blocks (60 min) of the night: alert and pause; it comes back with its
+    # stored summaries and the night is checked then
     gw = Gateway(FakeHAL(), [F1, F2], T)
-    for i in range(4):
-        block(gw, i, {T: 100, F1: 10})
+    for i in night(0)[:4]:
+        block(gw, i, {T: 20, F1: 10})
     assert events(gw) == ["NODE_SILENT", "BALANCE_PAUSED"], events(gw)
-    assert all(i not in gw.balance_done for i in range(4))
-    block(gw, 4, {F2: 90, **{k: v for k, v in ok.items() if k != F2}})
-    for i in range(4):
-        block(gw, i, {F2: 90})
-    assert "NODE_BACK" in events(gw) and all(i in gw.balance_done for i in range(5)), events(gw)
+    for i in night(0)[4:]:
+        block(gw, i, ok)
+    assert 0 not in gw.nights_done
+    for i in night(0)[:4]:
+        block(gw, i, {F2: 10})
+    assert "NODE_BACK" in events(gw) and gw.nights_done == {0}, events(gw)
     assert "PIPE_LEAK" not in events(gw)
     # a message stamped 5 minutes in the future: bad node clock
     gw.hal.box.append(pack({"k": "ALERT", "n": F1, "s": 999, "t": gw.hal.t + 300, "a": "LEAK_NIGHT_FLOW"}, sim_key(F1)))

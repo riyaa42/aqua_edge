@@ -19,12 +19,14 @@ import statistics
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 RUN = os.environ.get("AQUA_RUN", os.path.join(HERE, "run"))
 DEMO = ["sh", "live/run_local.sh", "--scenario", "live/scenarios/demo.jsonl", "--hours", "336"]
+PROC, START_LOCK = None, threading.Lock()   # the run this dashboard started
 ALIVE_S = 5                     # clock.json touched this recently = a simulation is running
 SIZES = ("small", "medium", "large")
 STATIC = {"/": ("dashboard.html", "text/html; charset=utf-8"),
@@ -66,24 +68,31 @@ def state(run=RUN, radio=False):
 
     # Status per node: "alert" if the gateway got an alert from it since the problem was last
     # fixed (for the tank: since its water was reported clean again), "silent" if not heard.
+    # Kept per kind of problem: fixing a leak does not clear the tank's water quality alarm.
+    kind = lambda a: "quality" if a.startswith("QUALITY") else "flow"
     calm_since = {}
     for e in applied:
         if e["do"] == "fix":
-            calm_since[node_of(e["where"])] = e["t"]
+            calm_since[node_of(e["where"]), "flow"] = e["t"]
     alerts = [m for m in log if m["k"] == "ALERT"]
     for m in alerts:
         if m["a"] == "QUALITY_CLEARED":
-            calm_since[m["n"]] = m["rx"]
+            calm_since[m["n"], "quality"] = m["rx"]
     alerts = [m for m in alerts if m["a"] != "QUALITY_CLEARED"]
     status, latest = {n: "ok" for n in nodes}, {}
     for e in gw:
         if e["event"] in ("NODE_SILENT", "NODE_BACK") and e["node"] in status:
             status[e["node"]] = "silent" if e["event"] == "NODE_SILENT" else "ok"
     for m in alerts:
-        if m["rx"] > calm_since.get(m["n"], -1):
-            status[m["n"]], latest[m["n"]] = "alert", m
+        if m["rx"] > calm_since.get((m["n"], kind(m["a"])), -1):
+            status[m["n"]], latest[m["n"], kind(m["a"])] = "alert", m
+    # The gateway's own night check of the down pipe (no node sends this one)
+    pipe = [{"n": "PIPE", "a": "PIPE_LEAK", "t": e["t"], "rx": e["t"], "missing_l": e.get("missing_l")}
+            for e in gw if e["event"] == "PIPE_LEAK"]
+    pipe_fixed = max((e["t"] for e in applied if e["do"] == "fix" and e["where"].startswith("B-D")), default=-1)
     # Problems the gateway knows about and nobody has fixed yet, newest first (the alarm banner)
-    active = sorted(({k: m[k] for k in ("n", "a", "t", "rx")} for m in latest.values()), key=lambda m: -m["rx"])
+    active = [{k: m[k] for k in ("n", "a", "t", "rx")} for m in latest.values()] + [m for m in pipe[-1:] if m["rx"] > pipe_fixed]
+    active.sort(key=lambda m: -m["rx"])
     led = {e["n"]: e["led"] for e in jsonl(run, "leds.jsonl")}   # each node's own LED (red = buzzer on)
 
     # Every leak in this run, newest first: when it started, which check caught it, when the
@@ -95,7 +104,11 @@ def state(run=RUN, radio=False):
         node = node_of(e["where"])
         end = next((f for f in applied[i + 1:] if f["do"] in ("leak", "fix") and f["where"] == e["where"]), None)
         until = end["t"] if end else float("inf")
-        hit = next((m for m in alerts if m["n"] == node and e["t"] <= m["t"] <= until), None)
+        if e["where"].startswith("B-D"):   # down pipe: the tank node finds bursts, the night check smaller leaks
+            found_by = [m for m in alerts if m["n"] == node and m["a"] == "ABNORMAL_SUPPLY"] + pipe
+        else:
+            found_by = [m for m in alerts if m["n"] == node]
+        hit = min((m for m in found_by if e["t"] <= m["t"] <= until), key=lambda m: m["t"], default=None)
         leaks.append({"where": e["where"], "node": node, "size": e["size"], "start": e["t"],
                       "fixed": end["t"] if end and end["do"] == "fix" else None,
                       "replaced": end["t"] if end and end["do"] == "leak" else None,
@@ -174,8 +187,16 @@ class Handler(BaseHTTPRequestHandler):
         self.reply(404, {"error": "not found"})
 
     def start(self):
-        subprocess.Popen(DEMO, cwd=os.path.dirname(HERE), stdout=subprocess.DEVNULL,
-                         stderr=subprocess.DEVNULL, start_new_session=True)
+        """Start a run unless the one we started is still alive. clock.json only appears a few
+        seconds into a run, so without this a double click started two runs, and the second wiped
+        the first one's files while it kept writing to them."""
+        global PROC
+        with START_LOCK:
+            if PROC and PROC.poll() is None:
+                return False
+            PROC = subprocess.Popen(DEMO, cwd=os.path.dirname(HERE), stdout=subprocess.DEVNULL,
+                                    stderr=subprocess.DEVNULL, start_new_session=True)
+            return True
 
     def do_POST(self):
         try:
@@ -186,7 +207,8 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/api/start":
             if s["running"]:
                 return self.reply(409, {"error": "a simulation is already running"})
-            self.start()
+            if not self.start():
+                return self.reply(409, {"error": "a simulation is already starting"})
             return self.reply(200, {"started": True})
         if self.path == "/api/reset":
             if s["running"]:
@@ -198,7 +220,13 @@ class Handler(BaseHTTPRequestHandler):
                 if state()["running"]:
                     return self.reply(500, {"error": "the old run did not stop; stop it in its terminal"})
                 time.sleep(1)                    # nodes exit just after the timekeeper
-            self.start()
+            if PROC and PROC.poll() is None:
+                try:
+                    PROC.wait(20)                # the run we started: wait for all of it to end
+                except subprocess.TimeoutExpired:
+                    return self.reply(500, {"error": "the old run did not stop"})
+            if not self.start():
+                return self.reply(409, {"error": "a simulation is already starting"})
             return self.reply(200, {"started": True})
         if self.path == "/api/command":
             if not s["running"]:
@@ -246,6 +274,20 @@ def check():
     s = state(run)
     assert [(x["where"], x["size"], x["replaced"]) for x in s["leaks"]] == [("B-204", 0.8, None), ("B-204", "small", 97150), ("B-203", 0.05, None)], s["leaks"]
     assert s["leaks"][2]["alert"]["a"] == "LEAK_NIGHT_FLOW" and [c["at_s"] for c in s["later"]] == [99000]
+    # A small leak on the down pipe: a tank quality alert does not count, the gateway's night check does
+    with open(os.path.join(run, "events_applied.jsonl"), "a") as f:
+        f.write(json.dumps({"t": 97200, "do": "leak", "where": "B-D1", "size": "small"}) + "\n")
+    with open(os.path.join(run, "gateway_log.jsonl"), "a") as f:
+        f.write(json.dumps({"k": "ALERT", "n": "B-TANK", "s": 9, "t": 98000, "a": "QUALITY_RUNOFF", "rx": 98060}) + "\n")
+    with open(os.path.join(run, "gateway_events.jsonl"), "a") as f:
+        f.write(json.dumps({"t": 100860, "event": "PIPE_LEAK", "missing_l": 360, "lps": 0.05}) + "\n")
+    s = state(run)
+    assert s["leaks"][0]["where"] == "B-D1" and s["leaks"][0]["alert"] == {"a": "PIPE_LEAK", "t": 100860, "rx": 100860}, s["leaks"][0]
+    assert s["active"][0] == {"n": "PIPE", "a": "PIPE_LEAK", "t": 100860, "rx": 100860, "missing_l": 360}, s["active"]
+    with open(os.path.join(run, "events_applied.jsonl"), "a") as f:
+        f.write(json.dumps({"t": 101000, "do": "fix", "where": "B-D1"}) + "\n")
+    s = state(run)
+    assert [m["a"] for m in s["active"] if m["n"] in ("PIPE", "B-TANK")] == ["QUALITY_RUNOFF"], s["active"]
     # Only sensible commands get through
     sites, nodes = s["sites"], s["nodes"]
     good = [{"do": "leak", "where": "B-203", "size": 0.3, "at_s": 100000}, {"do": "leak", "where": "B-D1", "size": "large"},

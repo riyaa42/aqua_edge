@@ -113,8 +113,9 @@ def main():
             node, kinds, label = "B-TANK", {"ABNORMAL_SUPPLY"}, f"{ev['size']} leak on downtake {ev['where']}"
         else:
             node, kinds, label = ev["where"], FLAT_LEAK_ALERTS, f"{ev['size']} leak in flat {ev['where']}"
-        a = next((m for m in alerts if m["n"] == node and m["a"] in kinds and m["t"] >= ev["t"]), None)
-        pipe = next((g for g in gw_events if g["event"] == "PIPE_LEAK" and g["t"] >= ev["t"]), None) \
+        end = next((f["t"] for f in events if f["do"] == "fix" and f["where"] == ev.get("where") and f["t"] > ev["t"]), 1e12)
+        a = next((m for m in alerts if m["n"] == node and m["a"] in kinds and ev["t"] <= m["t"] <= end), None)
+        pipe = next((g for g in gw_events if g["event"] == "PIPE_LEAK" and ev["t"] <= g["t"] <= end), None) \
             if ev["do"] == "leak" and ev["where"].startswith("B-D") else None
         if a is None and pipe is None:
             mark(False, f"{label} at {hhmm(ev['t'])}: NOT DETECTED")
@@ -123,7 +124,7 @@ def main():
         if a:
             parts.append(f"{node} {a['a']} after {(a['t'] - ev['t']) / 60:.0f} min, at gateway +{(a['rx'] - a['t']) / 60:.0f} min")
         if pipe:
-            parts.append(f"gateway mass balance after {(pipe['t'] - ev['t']) / 60:.0f} min")
+            parts.append(f"gateway night check after {(pipe['t'] - ev['t']) / 60:.0f} min ({pipe['missing_l']} L missing)")
         held_ok = a is None or cut_at(a["n"], a["t"]) or (a["rx"] - a["t"]) / 60 <= MAX_ALERT_DELAY_MIN
         mark(held_ok, f"{label} at {hhmm(ev['t'])}: " + "; ".join(parts))
     for g in (g for g in gw_events if g["event"] in ("NEW_ALERT", "REPEAT_ALERT")):

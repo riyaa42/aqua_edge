@@ -48,7 +48,8 @@ The timekeeper waits for every node before moving on (this is called *lockstep*)
 
 - Flat nodes detect leaks with flow only: continuous night flow and abnormal consumption (the pressure rule was removed; see `../leak_detection/README.md` section 6).
 - The tank node detects abnormal supply and water-quality events.
-- The gateway runs a mass balance (supply flow against the sum of flat flows) to spot pipe leaks [Ali et al. [6], for comparing the tank supply against the flats to find pipe leaks].
+- The gateway runs a mass balance once a night, 02:00 to 04:00 (litres out of the tank against the litres used by all flats), to spot pipe leaks: more than 20 L missing gives `PIPE_LEAK` [Ali et al. [6], for comparing the tank supply against the flats to find pipe leaks]. Bursts are caught sooner by the tank node.
+- Flow meters behave like real ones (`live/water.py`, ISO 4064 accuracy zones): nothing counted below the starting flow (flat meter about 2 L/hour, tank meters about 18 L/hour), up to 5% off at low flows, 2% above.
 - **Alerts re-arm.** Once a problem has been quiet for 10 minutes (`ALERT_CLEAR_S`), the alert can fire again if the problem comes back.
 - **The gateway marks repeats.** Each alert is logged as `NEW_ALERT` or `REPEAT_ALERT` (with a count and the minutes since the last one), so the laptop can decide whether a problem is new or ongoing.
 

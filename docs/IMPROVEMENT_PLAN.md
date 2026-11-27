@@ -164,6 +164,8 @@ Defaults chosen when building: **4-byte tag** (`TAG_BYTES`, the same size LoRaWA
 
 ### 4.4 Calibration offset in the building check (fix 6)
 
+- **Overtaken (2026-11-27).** The building check is now a night check in litres (02:00 to 04:00, more than 20 L missing), which is far less sensitive to a meter's percentage error. Kept below for the record.
+
 - **Problem.** Two real flow meters never agree exactly. A meter that reads 3% high makes the building look like it has a 3% leak, or hides a real one.
 - **Fix.** Add one constant, `METER_OFFSET_PCT`, measured during a quiet period with no leaks and subtracted before the 10% rule. It is a calibration knob, because real meters drift.
 - **Self-check.** A planted 3% offset no longer causes PIPE_LEAK.
@@ -201,7 +203,7 @@ Set `RuntimeWatchdogSec=15` in systemd. If the node software freezes, the Pi reb
 
 ## 7. Parked notes (not doing now, and why)
 
-- **Real flow sensor limits.** A common hobby sensor (YF-S201) only counts flow above about 1 L/min (0.017 L/s), with about 10% error. Our night threshold is 0.02 L/s, right at that limit. Ultrasonic meters start at about 1 L/hour (look for an ISO 4064 rating of R400 or higher). This does not matter while sensors are simulated and ideal. Revisit it if real sensors are ever used.
+- **Real flow sensor limits.** A common hobby sensor (YF-S201) only counts flow above about 1 L/min (0.017 L/s), with about 10% error. Our night threshold is 0.02 L/s, right at that limit. Ultrasonic meters start at about 1 L/hour (look for an ISO 4064 rating of R400 or higher). Since 2026-11-27 the simulated meters have a starting flow and a low-flow error (`simulation/live/water.py`).
 - **Full LoRaWAN with ChirpStack.** Not chosen: a proper LoRaWAN gateway needs an 8-channel radio, and our ESP32 with one LoRa module is not one. We borrow its ideas instead (Phase 2).
 - **Mesh radio (Meshtastic, Reticulum) and Wi-Fi HaLow.** Not needed unless some flats cannot reach the gateway directly.
 - **Pressure-hold leak tests (as in Moen Flo).** These need a shutoff valve. No valves in this project, so they are ruled out.

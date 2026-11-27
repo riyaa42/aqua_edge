@@ -19,6 +19,18 @@ STEP_S = 60
 LEAK_SIZES_LPS = {"small": 0.05, "medium": 0.5, "large": 1.5}   # running toilet / pipe crack / burst
 LEAK_CD = 0.75                                                  # orifice discharge coefficient
 G = 9.81
+# Flow meters as sold (ISO 4064 accuracy zones): nothing counted below the starting flow, up to +-5% off
+# between there and Q2, +-2% above Q2 (M.FLOW_GAIN_ERR). Typical class R160 meters, calibration knobs:
+METERS = {"flat": (0.0005, 0.007),    # 15 mm home meter: starts at ~2 L/hour, Q2 ~25 L/hour
+          "pipe": (0.005, 0.045)}     # 50 mm meter on the tank's down pipe and rising pipe
+LOW_FLOW_ERR = 0.05
+
+
+def read_meter(lps, start, q2, gain_low, gain_high, noise):
+    """What a real meter shows for a true flow of lps."""
+    if lps < start:
+        return 0.0
+    return max(lps * (gain_high if lps >= q2 else gain_low) + noise, 0.0)
 
 
 class Water:
@@ -30,7 +42,8 @@ class Water:
         self.flats = [n for n in self.wn.junction_name_list if n[-1].isdigit() and n[-2] == "0"]
         self.leak_sites = self.flats + [n for n in self.wn.junction_name_list if n.startswith("B-D")]
         meters = [f"{f}-P" for f in self.flats] + ["B-DT4", "B-RISE"]
-        self.gain = {m: 1 + self.rng.uniform(-M.FLOW_GAIN_ERR, M.FLOW_GAIN_ERR) for m in meters}
+        self.gain = {m: (1 + self.rng.uniform(-LOW_FLOW_ERR, LOW_FLOW_ERR), 1 + self.rng.uniform(-M.FLOW_GAIN_ERR, M.FLOW_GAIN_ERR))
+                     for m in meters}                    # each meter's own (low flow, normal flow) error
         self.water_quality, self.quality_until = "normal", -1
         self.leaks = {}                                  # junction -> requested L/s
         self.res = self.sim.run_sim()
@@ -80,7 +93,8 @@ class Water:
     # --- what each node's sensors read right now ---
     def _meter(self, link):
         lps = 1000 * self._last("link", "flowrate", link)
-        return max(lps * self.gain[link] + self.rng.normal(0, M.FLOW_NOISE_LPS), 0.0)
+        start, q2 = METERS["flat" if link.endswith("-P") else "pipe"]
+        return read_meter(lps, start, q2, *self.gain[link], self.rng.normal(0, M.FLOW_NOISE_LPS))
 
     def readings(self):
         r = {f: {"flow_lps": self._meter(f"{f}-P"),
@@ -126,7 +140,11 @@ if __name__ == "__main__":
     w.step(); w.step()
     assert abs(w.leak_lps("B-203") - 0.2) < 0.02, w.leak_lps("B-203")
     w.fix_leak("B-203")
-    # 3. Quality event switches on and back off
+    # 3. Meters: a trickle below the starting flow is not counted; low flows use the low-flow error
+    assert read_meter(0.0004, *METERS["flat"], 0.95, 1.01, 0) == 0
+    assert read_meter(0.005, *METERS["flat"], 0.95, 1.01, 0) == 0.005 * 0.95
+    assert read_meter(0.1, *METERS["flat"], 0.95, 1.01, 0) == 0.1 * 1.01
+    # 4. Quality event switches on and back off
     w.set_quality("chemical", 2)
     assert w.readings()["B-TANK"]["tds_ppm"] > 600
     w.step(); w.step()

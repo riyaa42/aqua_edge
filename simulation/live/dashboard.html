@@ -315,7 +315,7 @@ input[type=range]::-moz-range-thumb { width: 30px; height: 30px; border: 0; bord
           <ul>
             <li><b>Flat node<small>20, one per flat</small></b><p>Water flow meter and pressure sensor. <span>Raises: water running at night, water never stopped for 8 hours, much more water than usual.</span></p></li>
             <li><b>Tank node<small>1, on the roof tank</small></b><p>Inflow and outflow meters, water level, pH, TDS (dissolved salts), turbidity (cloudiness) and temperature. <span>Raises: water leaving the tank much faster than usual, runoff or chemical in the water (small model on the node), supply running low.</span></p></li>
-            <li><b>Gateway<small>1, outside</small></b><p>No sensors. <span>Receives every message, compares the tank's outflow with all the flats' use to spot pipe leaks, and notices nodes that go quiet.</span></p></li>
+            <li><b>Gateway<small>1, outside</small></b><p>No sensors. <span>Receives every message, notices nodes that go quiet, and every night from 2 to 4 am compares the water that left the tank with what all the flats used: anything missing is leaking from the pipes.</span></p></li>
           </ul>
         </article>
       </section>
@@ -413,11 +413,12 @@ const $ = s => document.querySelector(s);
 const pad = n => String(n).padStart(2, "0");
 const when = t => `Day ${Math.floor(t / 86400) + 1}, ${pad(Math.floor(t % 86400 / 3600))}:${pad(Math.floor(t % 3600 / 60))}`;
 const mins = s => s < 90 * 60 ? `${Math.round(s / 60)} min` : `${(s / 3600).toFixed(1)} h`;
-const flatName = n => n === "B-TANK" ? "Tank" : n.startsWith("B-D") ? `Down pipe, ${n[3] === "0" ? "ground floor" : "floor " + n[3]}` : "Flat " + n.slice(2);
+const flatName = n => n === "B-TANK" ? "Tank" : n === "PIPE" ? "Down pipe" : n.startsWith("B-D") ? `Down pipe, ${n[3] === "0" ? "ground floor" : "floor " + n[3]}` : "Flat " + n.slice(2);
 const nodeOf = n => n.startsWith("B-D") ? "B-TANK" : n;     // the down pipe is watched by the tank node
 const ALERTS = {
   LEAK_NIGHT_FLOW: "Water running at night", LEAK_CONTINUOUS_FLOW: "Water never stopped for 8 hours",
   ABNORMAL_CONSUMPTION: "Much more water than usual", ABNORMAL_SUPPLY: "Water leaving the tank much faster than usual",
+  PIPE_LEAK: "Water went missing between the tank and the flats overnight",
   QUALITY_RUNOFF: "Runoff in the tank water", QUALITY_CHEMICAL: "Chemical in the tank water", QUALITY_CLEARED: "Tank water clean again"};
 const QUALITY = {QUALITY_CLEARED: "Clean", QUALITY_RUNOFF: "Runoff in the water", QUALITY_CHEMICAL: "Chemical in the water"};
 const SIZES = {small: 0.05, medium: 0.5, large: 1.5};
@@ -425,6 +426,7 @@ const ADVICE = {
   LEAK_NIGHT_FLOW: "Check the flat's taps, toilet and pipes.", LEAK_CONTINUOUS_FLOW: "Check the flat's taps, toilet and pipes.",
   ABNORMAL_CONSUMPTION: "Check the flat's taps, toilet and pipes.",
   ABNORMAL_SUPPLY: "Look for a burst on the main down pipe or in a flat.",
+  PIPE_LEAK: "Check the down pipe and its joints on every floor, and the branch pipes before each flat's meter.",
   QUALITY_RUNOFF: "Tell residents not to drink or cook with tap water. Check the tank lid and overflow for rainwater getting in.",
   QUALITY_CHEMICAL: "Tell residents not to drink or cook with tap water until the tank node reports it clean. Find what got into the tank."};
 const LEARN_S = 86400;
@@ -548,11 +550,12 @@ function buildDiagram(flats) {
 function renderDiagram() {
   if (!dg) return;
   const c = S.clock, live = S.running && c, leaks = live && c.leaks || {};
+  const found = new Set(S.leaks.filter(l => l.alert && l.fixed == null && l.replaced == null).map(l => l.where));
   document.querySelectorAll("#dg [data-node]").forEach(el => {
     const n = el.dataset.node, st = live ? S.status[n] || "ok" : "off";
     if (el.classList.contains("dg-room")) { el.setAttribute("class", `dg-room ${st}${n === picked ? " sel" : ""}`); return; }
     if (n.startsWith("B-D")) {
-      el.querySelector(".dg-site").setAttribute("class", `dg-site${n in leaks ? " leak" : ""}${n === picked ? " sel" : ""}`);
+      el.querySelector(".dg-site").setAttribute("class", `dg-site${n in leaks && found.has(n) ? " leak" : ""}${n === picked ? " sel" : ""}`);
       el.querySelector(".dg-drip").toggleAttribute("hidden", !(n in leaks)); return;
     }
     const led = live ? S.led[n] || "green" : "off";
@@ -577,7 +580,7 @@ function pick(n) {
   $("#picked").textContent = flatName(n);
   const pipe = n.startsWith("B-D");
   $("#picked-floor").textContent = pipe ? "" : n[2] === "G" ? "ground floor" : `floor ${n[2]}`;
-  $("#picked-info").textContent = pipe ? "No node on the pipe itself: the tank node's outflow meter and the gateway's water balance have to catch it."
+  $("#picked-info").textContent = pipe ? "No node on the pipe itself. The tank node catches a big burst in about 15 minutes; a smaller leak is found by the gateway's night check (2 to 4 am), so it can take until the next morning."
     : `This flat's node has a ${SENSORS.flat}.`;
   if (S) renderDiagram();
   renderControls();
@@ -604,7 +607,7 @@ function renderAlarm() {
   box.hidden = !list.length;
   $("#alarm-title").textContent = list.length === 1 ? "Needs attention" : `${list.length} problems need attention`;
   $("#alarm-list").innerHTML = list.map(m => `<li><b>${flatName(m.n)}: ${ALERTS[m.a] || m.a}</b>` +
-    `<p>${ADVICE[m.a] || ""}${S.led[m.n] === "red" ? " The node's buzzer is beeping." : ""}</p>` +
+    `<p>${m.missing_l ? `${m.missing_l} litres did not reach any flat between 2 and 4 am. ` : ""}${ADVICE[m.a] || ""}${S.led[m.n] === "red" ? " The node's buzzer is beeping." : ""}</p>` +
     `<time>Gateway heard it<br>${when(m.rx)}</time></li>`).join("");
   const keys = list.map(m => m.n + m.a + m.rx), fresh = heard && keys.some(k => !heard.has(k));
   if (fresh) { beep(); box.classList.remove("fresh"); void box.offsetWidth; box.classList.add("fresh"); }
@@ -682,10 +685,11 @@ function renderResult() {
     const racing = c && c.watching && c.watching.node === x.node && !a && end == null;
     const status = x.fixed != null ? `<span class="chip">Fixed ${when(x.fixed)}</span>` : x.replaced != null ? `<span class="chip">Size changed ${when(x.replaced)}</span>`
       : `<span class="chip on">Leaking</span><button class="btn" data-fix="${x.where}">Fix</button>`;
-    const notYet = racing ? "Fast-forwarding" : end != null ? "Not noticed before it ended" : upTo - x.start >= LEARN_S ? "Not noticed in 24 hours" : `Not yet, ${mins(upTo - x.start)} so far`;
+    const notYet = racing ? "Fast-forwarding" : end != null ? "Not noticed before it ended" : upTo - x.start >= LEARN_S && x.node === x.where ? "Not noticed in 24 hours"
+      : `Not yet, ${mins(upTo - x.start)} so far${x.node === x.where ? "" : ". Small pipe leaks wait for the night check, 2 to 4 am"}`;
     return `<li class="leak"><div class="leak-head"><span class="what">${flatName(x.where)}<small>${amount(lpsOf(x.size))}</small></span><span class="leak-status">${status}</span></div><ol class="moments">` +
       moment(1, "done", "Started", x.start, when(x.start).split(", ")[0]) +
-      (a ? moment(2, "hit", "Noticed", a.t, `${ALERTS[a.a]}, ${mins(a.t - x.start)} after it started${x.node === x.where ? "" : " (seen by the tank)"}`) : moment(2, "wait", "Noticed", null, notYet)) +
+      (a ? moment(2, "hit", "Noticed", a.t, `${ALERTS[a.a]}, ${mins(a.t - x.start)} after it started${a.a === "PIPE_LEAK" ? " (gateway's night check)" : x.node === x.where ? "" : " (seen by the tank)"}`) : moment(2, "wait", "Noticed", null, notYet)) +
       (a ? moment(3, "done", "Gateway knew", a.rx, `${mins(a.rx - a.t)} after that`) : moment(3, "wait", "Gateway knew", null, "Not yet")) + "</ol></li>";
   });
   box.innerHTML = waiting.join("") + done.join("");
@@ -697,7 +701,7 @@ function feedText(e) {
   switch (e.event) {
     case "NEW_ALERT": return [e.alert === "QUALITY_CLEARED" ? "ok" : "alert", `${flatName(e.node)}: ${ALERTS[e.alert] || e.alert}`];
     case "REPEAT_ALERT": return ["alert", `${flatName(e.node)}: ${ALERTS[e.alert] || e.alert}, again (${ord(e.count)} time)`];
-    case "PIPE_LEAK": return ["alert", `Pipe leak between the tank and the flats (${e.error_pct}% of the water missing)`];
+    case "PIPE_LEAK": return ["alert", `Night check: ${e.missing_l} L went missing between the tank and the flats (a leak of about ${e.lps} L/s)`];
     case "NODE_SILENT": return ["silent", `${flatName(e.node)} not heard for ${e.last_heard_min} min`];
     case "NODE_BACK": return ["ok", `${flatName(e.node)} heard again after ${e.silent_min} min`];
     case "SUPPLY_EVENT": return ["silent", "Water supply problem: the tank is running low"];

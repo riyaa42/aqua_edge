@@ -9,7 +9,7 @@ on to 06:00 on day 3 so every leak sees one night (needed by the night-flow rule
 Signals compared:
   flat leak      flow:     LEAK_NIGHT_FLOW / LEAK_CONTINUOUS_FLOW / ABNORMAL_CONSUMPTION from that flat
                  pressure: PRESSURE_LOW flag from that flat (pressure alone, no flow condition)
-  downtake leak  flow:     gateway mass balance PIPE_LEAK or tank ABNORMAL_SUPPLY
+  downtake leak  flow:     gateway night check PIPE_LEAK or tank ABNORMAL_SUPPLY
                  pressure: PRESSURE_LOW flag from any flat
 A signal from the wrong flat, before the leak, or in a no-leak run is a false alarm.
 

@@ -142,23 +142,24 @@ limit = the bigger of (3 x average flow for this hour) and 0.05 L/s
 - **Idea:** a big leak anywhere in the building makes the tank empty faster than usual.
 - **Why "4 x spread":** normal wobble almost never goes 4 spreads above average by chance (about 3 times in 100,000). Crossing it means something real is happening.
 - **What it cannot tell you:** where the leak is. It is a fast "something big is happening" signal.
+- **Weak spot (found in testing, 2026-11-27):** the alert is sent once and stays on while outflow stays high. If a medium flat leak (0.5 L/s) nobody fixed has already switched it on, a burst later that day raises no new alert. The flat's own alert still names the flat, and the next night check shows the missing litres, but the burst itself waits for that night.
 
 ### 5.4 Building check (gateway)
 
-This is the mass balance idea from Ali et al. [6, for comparing the tank supply against the flats to find pipe leaks].
+This is the mass balance idea from Ali et al. [6, for comparing the tank supply against the flats to find pipe leaks], done once a night at the quietest hours, the way water companies check for leaks with the "minimum night flow".
 
-> **Rule:** every 15 minutes, compare water leaving the tank with water arriving at all flats. If more than **10%** goes missing for **2 blocks in a row** (30 minutes), raise `PIPE_LEAK`.
+> **Rule:** add up the water that left the tank and the water that reached all flats from **02:00 to 04:00**. If more than **20 litres** went missing, raise `PIPE_LEAK`.
 
 ```
-missing % = (tank out - (flat 1 + flat 2 + ... + flat 20)) / tank out x 100
+missing litres = tank out - (flat 1 + flat 2 + ... + flat 20), over 02:00-04:00
 ```
 
 - **Idea:** water cannot vanish. Like sending 100 rupees and only 85 arriving: someone along the way took 15.
 - **How it gets the numbers:** every 15 minutes, each node sends a short summary ("I used X litres"). The gateway waits for all of them, then does the subtraction.
-- **Example from testing:** a large burst on downtake B-D1. The tank sent out water, but 67% of it never reached any flat, so the gateway raised `PIPE_LEAK`.
-- **Why 10%:** cheap meters are never perfect. Each can be up to 2% off. Worst case, the tank reads 2% high and all flats read 2% low: (1.02 - 0.98) / 1.02 = 3.9%. So 10% leaves a safe gap.
-- **Why 2 blocks in a row:** one odd block (a glitch) is not enough.
-- **Blocks under 5 litres are skipped:** at night the tank might send out half a litre. A tiny meter error would then look like a huge percentage.
+- **Why at night:** meters are 2 to 5% off. In the day, with hundreds of litres flowing, that error is as big as a small leak. At night only a few litres flow, so the error is a few litres and a leak stands out.
+- **Why 20 litres:** measured with the simulation's realistic meters. Clean nights were off by -4 to +5 L; a 0.005 L/s pipe leak (18 L an hour) gave about 40 L, 0.01 L/s about 75 L. 20 L is four times the worst clean night, so leaks from about 0.003 L/s are found.
+- **The price:** a small pipe leak is found at the next night, up to a day late. A big burst is the tank node's job (5.3, about 15 minutes).
+- **What it replaced:** a 10% check every 15 minutes. The same 0.05 L/s leak looked like 80% missing at 2 am but only 12% at the 7 am peak (nearly missed), and at night 4 L of meter error on 14 L read as 24% (a false alarm waiting to happen).
 - **What it cannot see:** a leak inside a flat. That water passes through the flat's meter first, so it counts as "used". The flat's own checks (5.1, 5.2 and 5.5) catch those.
 
 ---
@@ -303,8 +304,8 @@ See section 2. Flow caught every leak with no false alarms. Its detection times 
 | Continuous flow limit | above 0.005 L/s for 8 h, any time of day | Continuous-flow check |
 | Too-much limit | max(3 x hourly average, 0.05 L/s) for 60 min | Too-much check |
 | Tank outflow limit | average + max(4 x spread, 0.5 L/s) for 15 min | Tank outflow check |
-| Missing water limit | 10% for 2 blocks of 15 min, blocks under 5 L skipped | Building check |
-| Meter error allowed for | up to 2% per meter | Building check |
+| Missing water limit | more than 20 L missing from 02:00 to 04:00 | Building check (night) |
+| Meter error | nothing below the starting flow (flat 0.0005 L/s, tank 0.005 L/s), 5% at low flow, 2% above | Water model |
 | Tank level low | average - max(4 x spread, 0.3 m) for 10 min | Supply event |
 | Silent node | nothing heard for 45 min | Gateway |
 | Building check re-arm | 2 normal blocks in a row | Gateway |

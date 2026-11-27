@@ -114,7 +114,12 @@ def score(gw, nodes):
 
     checks["E1"] = report("flat leak B-203 (night flow)", "E1", first("B-203", {"LEAK_NIGHT_FLOW"}, events["E1"][1]))
     checks["E3a"] = report("pipe burst (tank node, abnormal supply)", "E3", first("B-TANK", {"ABNORMAL_SUPPLY"}, events["E3"][1]))
-    checks["E3b"] = report("pipe burst (gateway mass balance, Ali [6])", "E3", gw_first("PIPE_LEAK", events["E3"][1]))
+    # The gateway's down pipe check runs 02:00-04:00; this burst ran 18:00-24:00, so the night check
+    # must stay quiet here (the burst is the tank node's job, E3a): a test for false pipe alarms
+    false_pipe = gw_first("PIPE_LEAK", 0)
+    lines.append("E3b gateway night check: " + (f"FALSE PIPE ALARM {hhmm(false_pipe['t'])}" if false_pipe else
+                                                "quiet, as it should be (no pipe leak during any night)"))
+    checks["E3b"] = false_pipe is None
     checks["E4"] = report("rainwater-like water", "E4", first("B-TANK", {"QUALITY_RUNOFF"}, events["E4"][1]))
     checks["E5"] = report("chemical contamination", "E5", first("B-TANK", {"QUALITY_CHEMICAL"}, events["E5"][1]))
     _, cut_start, cut_end, _ = events["E2"]
