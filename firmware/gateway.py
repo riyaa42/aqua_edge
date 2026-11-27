@@ -26,7 +26,7 @@ How the leak checks fit together: leak_detection/README.md.
 import json
 import os
 
-from aqua_edge import save_atomic
+from aqua_edge import iso_utc, save_atomic
 from packet import pack, unpack
 
 SUPPLY_WINDOW_S = 900          # a SUPPLY_LOW flag from the tank counts for this long
@@ -35,8 +35,6 @@ MASS_BALANCE_INTERVALS = 2     # blocks in a row above threshold before alerting
 MIN_SUPPLY_L = 5.0             # ignore near-empty blocks (division by tiny numbers)
 SILENT_S = 2700                # nothing heard from a node for 3 summary periods = silent
 CLOCK_AHEAD_S = 60             # message time this far ahead of the gateway clock = bad node clock
-SEEN_WINDOW = 1000             # counters this far below a node's newest are refused as too old
-# ponytail: 1000 is about 10 days of one node's messages; a longer outage loses its oldest backlog
 
 
 class Gateway:
@@ -44,10 +42,19 @@ class Gateway:
         self.hal, self.flats, self.tank = hal, set(flat_ids), tank_id
         path = getattr(hal, "storage_path", None)
         self.seen_path = path and os.path.splitext(path)[0] + "_seen.json"
-        self.seen = {}              # node -> counters already received
+        self.seen_floor = {}        # node -> highest contiguous seq received (1..floor)
+        self.seen_above = {}        # node -> set of out-of-order seq > floor
         if self.seen_path and os.path.exists(self.seen_path):
             with open(self.seen_path) as f:
-                self.seen = {n: set(v) for n, v in json.load(f).items()}
+                data = json.load(f)
+                for n, v in data.items():
+                    if isinstance(v, dict):
+                        self.seen_floor[n] = int(v.get("floor", 0))
+                        self.seen_above[n] = set(v.get("above", []))
+                    else:
+                        # legacy list format compatibility
+                        self.seen_floor[n] = 0
+                        self.seen_above[n] = set(v)
         self.log = []               # every unique message received, with receive time
         self.events = []            # gateway's own decisions
         self.alert_history = {}     # (node, alert) -> (time of latest, how many so far)
@@ -59,11 +66,34 @@ class Gateway:
         self.silent = {}            # node -> time last heard before it went silent
         self.skewed = set()
 
+    def _is_seen_and_record(self, node, seq):
+        """Return True if seq was already seen; otherwise record it (advancing contiguous floor)."""
+        fl = self.seen_floor.get(node, 0)
+        ab = self.seen_above.setdefault(node, set())
+        if seq <= fl or seq in ab:
+            return True
+        ab.add(seq)
+        while (fl + 1) in ab:
+            fl += 1
+            ab.remove(fl)
+        self.seen_floor[node] = fl
+        return False
+
+    def _save_seen(self):
+        if self.seen_path:
+            payload = {
+                n: {"floor": self.seen_floor.get(n, 0), "above": sorted(self.seen_above.get(n, set()))}
+                for n in set(self.seen_floor) | set(self.seen_above)
+            }
+            save_atomic(self.seen_path, json.dumps(payload))
+
     def step(self):
         now = self.hal.now()
+        utc_fn = getattr(self.hal, "utc_now", None)
+        utc_s = utc_fn()[0] if utc_fn else now
         if self.last_seen is None:
             self.last_seen = {n: now for n in self.flats | {self.tank}}
-        bad, new = 0, False
+        bad = 0
         for raw in self.hal.receive():
             m = unpack(raw, self.hal.key)
             if m is None:
@@ -71,28 +101,23 @@ class Gateway:
                 continue
             if m["k"] not in ("ALERT", "FLAG", "SUM"):
                 continue
+            self.last_seen[m["n"]] = now
+            is_dup = self._is_seen_and_record(m["n"], m["s"])
+            if not is_dup:
+                # Persist seen state BEFORE sending ACK so a node never deletes unpersisted data
+                self._save_seen()
+                self.log.append({**m, "rx": now, "rx_utc": round(utc_s), "rx_iso": iso_utc(utc_s)})
+                self.check_clock(now, m)
+                if m["k"] == "ALERT" and not m["a"].endswith("_CLEARED"):
+                    self.check_repeat(m)
+                elif m["k"] == "FLAG" and m["n"] == self.tank:
+                    self.tank_low_t = m["t"]
+                elif m["k"] == "SUM":
+                    self.sums.setdefault(m["i"], {})[m["n"]] = m["vol_l"]
             ack = {"k": "ACK", "n": m["n"], "s": m["s"], "gt": now}       # gt: nodes sync their clock
             self.hal.send(pack(ack, self.hal.key(m["n"])))
-            self.last_seen[m["n"]] = now
-            seen = self.seen.setdefault(m["n"], set())
-            if m["s"] in seen or m["s"] <= max(seen, default=0) - SEEN_WINDOW:
-                continue                                    # duplicate (our ACK was lost) or replay
-            seen.add(m["s"])
-            if len(seen) > 2 * SEEN_WINDOW:
-                self.seen[m["n"]] = {x for x in seen if x > max(seen) - SEEN_WINDOW}
-            new = True
-            self.log.append({**m, "rx": now})
-            self.check_clock(now, m)
-            if m["k"] == "ALERT" and not m["a"].endswith("_CLEARED"):     # all-clear is not a problem
-                self.check_repeat(m)
-            elif m["k"] == "FLAG" and m["n"] == self.tank:
-                self.tank_low_t = m["t"]
-            elif m["k"] == "SUM":
-                self.sums.setdefault(m["i"], {})[m["n"]] = m["vol_l"]
         if bad:
             self.decide(now, "BAD_PACKET", count=bad)
-        if new and self.seen_path:
-            save_atomic(self.seen_path, json.dumps({n: sorted(v) for n, v in self.seen.items()}))
         self.check_silence(now)
         self.supply_rule(now)
         self.mass_balance(now)
@@ -226,4 +251,14 @@ if __name__ == "__main__":
     hal.box = [real]                                                     # someone replays the alert
     gw.step()
     assert gw.log == [] and "NEW_ALERT" not in events(gw), "replay after restart must be ignored"
+
+    # Out-of-order backlog after >1000-message gap: s=1500 arrives first, then old buffered s=2 arrives
+    hal2 = FakeHAL()
+    hal2.storage_path = os.path.join(tempfile.mkdtemp(), "GW2.jsonl")
+    gw2 = Gateway(hal2, [F1], T)
+    hal2.box = [pack({"k": "ALERT", "n": F1, "s": 1500, "t": 9000, "a": "LEAK_NIGHT_FLOW"}, sim_key(F1))]
+    gw2.step()
+    hal2.box = [pack({"k": "SUM", "n": F1, "s": 2, "t": 900, "i": 1, "vol_l": 12.0, "p_min": 10.0}, sim_key(F1))]
+    gw2.step()
+    assert [m["s"] for m in gw2.log] == [1500, 2], "old out-of-order summary after >1000 gap must NOT be dropped"
     print("gateway self-check passed")

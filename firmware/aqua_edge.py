@@ -30,8 +30,10 @@ Detection rules (all thresholds are calibration knobs at the top):
 Store-and-forward: every message is timestamped, kept until the gateway acknowledges it,
 alerts sent first (Mariadhason et al. [4], timestamped store-and-forward to SD card).
 """
+from datetime import datetime, timezone
 import json
 import os
+import random
 
 from packet import pack, unpack
 from quality_model import QualityModel, QualityMonitor, TemporalModel
@@ -42,8 +44,15 @@ EWMA_A = 1 / 14               # after day 1, each clean hour moves the baseline 
                               # today's value: remembers about 2 weeks (Phyn learns in 21 days, Moen 7)
 SUMMARY_S = 900               # send a summary every 15 minutes
 MAX_SENDS_PER_STEP = 4        # radio duty-cycle budget per minute
-RETRY_S = 120                 # resend if no acknowledgement after 2 minutes
+RETRY_S = 120                 # initial retry wait (2 minutes)
+BACKOFF_ALERT_S = (120, 240, 480, 900)        # alerts: 2 -> 4 -> 8 -> 15 min cap
+BACKOFF_ROUTINE_S = (120, 240, 480, 960, 1800)  # summaries/flags: 2 -> 4 -> 8 -> 16 -> 30 min cap
+JITTER_FRAC = 0.15            # +/- 15% jitter to prevent synchronized retry storms
 SLOT_GUARD_S = 0.2            # start this far into our time slot, margin for clock error
+
+
+def iso_utc(utc_s):
+    return datetime.fromtimestamp(utc_s, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 NIGHT_START_H, NIGHT_END_H = 1, 5
 NIGHT_FLOW_LPS = 0.02         # flow above this at night counts as "someone or something using water"
@@ -85,8 +94,10 @@ class Store:
     even after a power cut with an empty queue. The gateway drops a repeated number as a
     duplicate or replay, so a counter starting again from 1 would silence the node."""
 
-    def __init__(self, path):
-        self.path, self.queue, self.last_sent, self.seq = path, [], {}, 0
+    def __init__(self, path, seed=0):
+        self.path, self.queue, self.next_try, self.retries, self.seq = path, [], {}, {}, 0
+        self.total_resends = 0
+        self.rng = random.Random(seed)
         if path and os.path.exists(path):
             with open(path) as f:
                 for line in f:
@@ -113,15 +124,24 @@ class Store:
     def ack(self, seq):
         before = len(self.queue)
         self.queue = [m for m in self.queue if m["s"] != seq]
-        self.last_sent.pop(seq, None)
+        self.next_try.pop(seq, None)
+        self.retries.pop(seq, None)
         if len(self.queue) != before:
             self._save()
 
     def due(self, now, budget):
-        ready = [m for m in self.queue if now - self.last_sent.get(m["s"], -1e9) >= RETRY_S]
+        ready = [m for m in self.queue if now >= self.next_try.get(m["s"], -1e9)]
         ready.sort(key=lambda m: (PRIORITY[m["k"]], m["t"]))      # alerts first, then oldest
         for m in ready[:budget]:
-            self.last_sent[m["s"]] = now
+            s = m["s"]
+            n_try = self.retries.get(s, 0)
+            if n_try > 0:
+                self.total_resends += 1
+            sched = BACKOFF_ALERT_S if m["k"] == "ALERT" else BACKOFF_ROUTINE_S
+            base = sched[min(n_try, len(sched) - 1)]
+            wait = base * self.rng.uniform(1.0 - JITTER_FRAC, 1.0 + JITTER_FRAC)
+            self.next_try[s] = now + wait
+            self.retries[s] = n_try + 1
         return ready[:budget]
 
 
@@ -163,7 +183,7 @@ class Node:
 
     def __init__(self, node_id, hal):
         self.id, self.hal = node_id, hal
-        self.store = Store(hal.storage_path)
+        self.store = Store(hal.storage_path, seed=sum(ord(c) for c in node_id))
         self.key = hal.key(node_id)
         self.base = {k: Baseline() for k in self.sensors}
         self.base_path = hal.storage_path and os.path.splitext(hal.storage_path)[0] + "_baseline.json"
@@ -178,7 +198,12 @@ class Node:
 
     # --- messaging ---
     def emit(self, kind, **payload):
-        self.store.add({"n": self.id, "t": self.hal.now(), "k": kind, **payload})
+        sim_t = self.hal.now()
+        utc_fn = getattr(self.hal, "utc_now", None)
+        utc_s, rtc_ok = utc_fn() if utc_fn else (sim_t, True)
+        self.store.add(
+            {"n": self.id, "t": sim_t, "ts_utc": round(utc_s), "ts_iso": iso_utc(utc_s), "rtc_ok": bool(rtc_ok), "k": kind, **payload}
+        )
 
     def alert(self, kind, **payload):
         """Called every minute the condition holds; sends once per episode."""
@@ -215,7 +240,8 @@ class Node:
         # this node's own time slot (TDMA), kept in step by the gateway time in every ACK
         slot = getattr(self.hal, "slot", None)
         for m in self.store.due(now, MAX_SENDS_PER_STEP):
-            raw = pack(m, self.key)
+            wire = {k: v for k, v in m.items() if k not in ("ts_utc", "ts_iso", "rtc_ok")}
+            raw = pack(wire, self.key)
             if m["k"] == "ALERT":
                 self.hal.send(raw, cad=True)
             elif slot:
@@ -414,4 +440,15 @@ if __name__ == "__main__":
     hal.receive = lambda: [pack(ack, sim_key("B-104"))]
     n.step()
     assert all(m["s"] != 1 for m in n.store.queue), "real ACK deletes it"
+
+    # Exponential backoff + priority: during 3.5h outage, total_resends is far lower than 105/item
+    st_bo = Store(None, seed=42)
+    st_bo.add({"k": "SUM", "t": 0})
+    st_bo.add({"k": "ALERT", "t": 0})
+    sends_by_kind = {"SUM": 0, "ALERT": 0}
+    for t_s in range(0, 210 * 60, 60):
+        for m in st_bo.due(t_s, 4):
+            sends_by_kind[m["k"]] += 1
+    assert sends_by_kind["SUM"] <= 12 and sends_by_kind["ALERT"] <= 18, sends_by_kind
+    assert sends_by_kind["ALERT"] >= sends_by_kind["SUM"], "alerts should retry at least as often as summaries"
     print("node self-check passed")
