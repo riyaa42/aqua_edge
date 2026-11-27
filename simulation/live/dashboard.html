@@ -113,11 +113,10 @@ select { border: 0; border-radius: 16px; padding: 10px 14px; background: var(--s
 .dg-wall.back { fill-opacity: .38; }
 .dg-wall.inner { fill-opacity: .1; stroke: rgba(33, 59, 79, .16); }
 .dg-slab { fill: #e6eef3; fill-opacity: .75; stroke: rgba(33, 59, 79, .35); stroke-width: .08; stroke-linejoin: round; pointer-events: none; }
-.dg-room { fill: var(--calm); fill-opacity: .5; cursor: pointer; transition: fill .4s, fill-opacity .2s; }
-.dg-room:hover { fill-opacity: .72; }
+.dg-room { fill: var(--calm); fill-opacity: .5; pointer-events: none; transition: fill .4s; }   /* pick with the node label, not the floor */
 .dg-room.alert { fill: var(--alert); fill-opacity: .7; }
 .dg-room.silent { fill: var(--watch); fill-opacity: .7; }
-.dg-room.off { fill: #cfd9e0; cursor: default; }
+.dg-room.off { fill: #cfd9e0; }
 .dg-room.sel { stroke: var(--action); stroke-width: .3; stroke-linejoin: round; }
 .dg-pipe { fill: none; stroke: #79b4d8; stroke-width: .34; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
 .dg-pipe.rise { stroke: #3a76a8; }
@@ -125,6 +124,10 @@ select { border: 0; border-radius: 16px; padding: 10px 14px; background: var(--s
 .dg-pipe.buried { stroke-dasharray: .6 .45; }
 .dg-buried { fill: #b8cbd8; fill-opacity: .35; stroke: #6c8799; stroke-width: .08; stroke-dasharray: .5 .4; }
 .dg-node { cursor: pointer; }
+/* The page's focus outline is in pixels, and the drawing is scaled up ~20x, so it came out huge */
+#dg :focus { outline: none; }
+.dg-node:hover rect, .dg-node:focus-visible rect { stroke: var(--action); stroke-width: .2; }
+[data-node]:focus-visible .dg-site, .dg-site:hover { stroke: var(--action); stroke-width: .3; }
 .dg-node rect { fill: var(--clay); stroke: rgba(33, 59, 79, .4); stroke-width: .08; }
 .dg-node.sel rect { stroke: var(--action); stroke-width: .3; }
 .dg-node text, .dg-label { font-family: var(--display); font-weight: 600; fill: var(--ink); }
@@ -136,6 +139,7 @@ select { border: 0; border-radius: 16px; padding: 10px 14px; background: var(--s
 @keyframes buzz { 50% { opacity: .15; } }
 .dg-site { fill: #fff; stroke: #3a76a8; stroke-width: .16; cursor: pointer; }
 .dg-site:hover { fill: #dce9ff; }
+[data-node^="B-D"] { cursor: pointer; }
 .dg-site.sel { stroke: var(--action); stroke-width: .3; }
 .dg-site.leak { fill: var(--alert); }
 .dg-drip path { fill: #3f86c4; }
@@ -534,7 +538,7 @@ function buildDiagram(flats) {
   const bb = svg.getBBox();
   if (!bb.width) return;                   // hidden (phone layout): measure once it is shown
   svg.setAttribute("viewBox", `${(bb.x - 1).toFixed(1)} ${(bb.y - 1).toFixed(1)} ${(bb.width + 2).toFixed(1)} ${(bb.height + 2).toFixed(1)}`);
-  svg.querySelectorAll("[data-node]").forEach(el => {
+  svg.querySelectorAll("g[data-node]").forEach(el => {
     if (el.dataset.node === "B-TANK") return;
     el.addEventListener("click", () => pick(el.dataset.node));
     el.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(el.dataset.node); } });
