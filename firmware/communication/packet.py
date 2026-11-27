@@ -11,7 +11,10 @@ section 3): a short signature (tag) on every packet, and a counter that never re
 - ACK: node = the node being answered, counter = the sequence number it acknowledges,
   time = gateway clock ("gt"). Signed with that node's key, so nobody else can fake it.
 - Signed only, not encrypted: anyone can read a packet, nobody can forge or change one.
-- Each node shares one secret 16-byte key with the gateway: hal.key(name).
+- Each node shares one secret 16-byte key with the gateway: hal.key(name). The gateway's
+  BEACON goes to everyone, so it is signed with a building-wide beacon key, hal.key("GATEWAY").
+  A beacon only makes nodes send (it never deletes anything), so a leaked beacon key could
+  cause extra transmissions, no more.
 
     python3 packet.py      # self-check
 """
@@ -21,20 +24,25 @@ import struct
 
 TAG_BYTES = 4                                   # LoRaWAN also uses a 4-byte check
 HEADER = struct.Struct(">BBII")
-KINDS = ["", "ALERT", "FLAG", "SUM", "ACK"]
+KINDS = ["", "ALERT", "FLAG", "SUM", "ACK",                # up: ALERT FLAG SUM GOT; down: ACK
+         "BEACON", "CMD", "GOT"]                                    # down: BEACON CMD (append only)
+GATEWAY_CLOCK = ("ACK", "BEACON")           # kinds whose time field is the gateway's clock, "gt"
 # ponytail: node table for building B; at installation it comes from the same file as the keys
 NAMES = ["GATEWAY", "B-TANK"] + [f"B-{floor}{flat:02d}" for floor in "G1234" for flat in range(1, 5)]
 ALERTS = ["LEAK_NIGHT_FLOW", "LEAK_CONTINUOUS_FLOW", "LEAK_PRESSURE_DROP", "ABNORMAL_CONSUMPTION", "ABNORMAL_SUPPLY",
           "QUALITY_RUNOFF", "QUALITY_CHEMICAL", "QUALITY_LIMIT_VIOLATION", "QUALITY_CLEARED",
           "QUALITY_TEMPORAL_ANOMALY", "QUALITY_TEMPORAL_CLEARED",
           "UNUSUAL_NIGHT_CONSUMPTION", "PROLONGED_ZERO_FLOW", "SUDDEN_CONSUMPTION_CHANGE",
-          "FLAT_LEAK_CLEARED", "CONSUMPTION_CLEARED", "ZERO_FLOW_CLEARED", "SUPPLY_FLOW_CLEARED"]   # append only
+          "FLAT_LEAK_CLEARED", "CONSUMPTION_CLEARED", "ZERO_FLOW_CLEARED", "SUPPLY_FLOW_CLEARED",
+          # gateway -> node (CMD): what only the gateway can know, from several nodes together
+          "PIPE_LEAK", "PIPE_LEAK_CLEARED", "PIPE_LEAK_CAUSE", "PIPE_LEAK_CAUSE_CLEARED",
+          "SUPPLY_EVENT", "LEAK_TANK_DRAIN", "SUPPLY_UNCERTAIN", "SUPPLY_CLEARED"]          # append only
 FLAGS = ["SUPPLY_LOW", "SUPPLY_RECOVERED"]                      # append only
 VIOLATIONS = ["pH", "TDS", "TURBIDITY"]     # "viol" is a bit mask of broken limits
 # field name -> how its value is packed; its number on air is its position here; "B" = index into ALERTS/FLAGS
 FIELDS = {"a": "B", "f": "B", "i": ">I", "vol_l": ">f", "p_min": ">f", "in_l": ">f", "level_m": ">f",
           "flow": ">f", "ph": ">f", "tds": ">f", "level": ">f", "inflow": ">f", "score": ">f", "p_mean": ">f",
-          "turb": ">f", "viol": ">B"}      # append only: a field's position is its number on air
+          "turb": ">f", "viol": ">B", "over": ">B"}      # append only: a field's position is its number on air
 FIELD_NAMES = list(FIELDS)
 CODES = {"a": ALERTS, "f": FLAGS}
 HEADER_KEYS = {"k", "n", "s", "t", "gt"}
@@ -55,7 +63,7 @@ def _tag(key, data):
 
 def pack(m, key):
     """Message dict -> signed bytes. Unknown fields or alert names fail loudly."""
-    t = m["gt"] if m["k"] == "ACK" else m["t"]
+    t = m["gt"] if m["k"] in GATEWAY_CLOCK else m["t"]
     data = HEADER.pack(KINDS.index(m["k"]), NAMES.index(m["n"]), m["s"], round(t))
     for name in FIELD_NAMES:
         if name in m:
@@ -71,7 +79,7 @@ def peek(raw):
     """Read the header without checking the tag: who, what, which number. Only for routing
     and logs; never act on it."""
     kind, node, counter, t = HEADER.unpack_from(raw)
-    return {"k": KINDS[kind], "n": NAMES[node], "s": counter, ("gt" if KINDS[kind] == "ACK" else "t"): t}
+    return {"k": KINDS[kind], "n": NAMES[node], "s": counter, ("gt" if KINDS[kind] in GATEWAY_CLOCK else "t"): t}
 
 
 def unpack(raw, key_for):
@@ -108,6 +116,9 @@ if __name__ == "__main__":
             {"k": "ACK", "n": "B-203", "s": 8, "gt": 93720}]
     msgs[-1:-1] = [{"n": "B-203", "s": 10, "t": 300, "k": "ALERT", "a": "FLAT_LEAK_CLEARED"},
                    {"n": "B-TANK", "s": 11, "t": 360, "k": "FLAG", "f": "SUPPLY_RECOVERED", "level": 1.5}]
+    msgs[-1:-1] = [{"n": "GATEWAY", "s": 1700, "k": "BEACON", "gt": 93720},
+                   {"n": "B-203", "s": 1701, "t": 93000, "k": "CMD", "a": "PIPE_LEAK", "over": 1},
+                   {"n": "B-203", "s": 1701, "t": 93721, "k": "GOT"}]
     for m in msgs:
         raw = pack(m, keys(m["n"]))
         assert unpack(raw, keys) == m, (unpack(raw, keys), m)          # same message back
