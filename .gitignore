@@ -9,9 +9,11 @@ presentation/**/Papers/
 # Downloaded or regenerated simulation files (see simulation/README.md)
 simulation/data/swifeed/*
 !simulation/data/swifeed/.gitkeep
+simulation/data/cache_county/
 simulation/results/
 simulation/webots/results/
 simulation/temp.*
+temp.*
 
 # Webots per-user window layout
 *.wbproj

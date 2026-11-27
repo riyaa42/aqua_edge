@@ -59,10 +59,11 @@ NIGHT_FLOW_LPS = 0.02         # flow above this at night counts as "someone or s
 NIGHT_FLOW_MIN = 30           # minutes in a row before a leak alert
 HIGH_USE_FACTOR, HIGH_USE_MIN_LPS, HIGH_USE_MIN = 3.0, 0.05, 60
 CONT_FLOW_LPS = 0.005         # below this the flat's water counts as "off"
-CONT_FLOW_MIN = 480           # water never off for 8 h in a row: leak alert, day or night
-# ponytail: 8 h because simulated demand is smooth (normal flats run up to 6 h 1 min nonstop);
-# real use comes in bursts with zero flow between, so retune (likely shorter) on Cache County data
+CONT_FLOW_MIN = 180           # water never off for 3 h in a row: leak alert, day or night
+# Retuned from 480 min (smooth-demand legacy) using bursty Building B (max 15 min over 280 flat-days)
+# and Cache County Sites 006/010/020 (max 91 min over 739 real house-days).
 PRESSURE_SIGMAS, PRESSURE_MARGIN_M, PRESSURE_MIN = 4.0, 0.3, 10   # tank level check
+PRESSURE_DROP_SIGMAS, PRESSURE_DROP_MIN_M, PRESSURE_LEAK_MIN = 3.0, 0.35, 10  # pressure+flow flat leak check
 ALERT_CLEAR_S = 600           # an alert re-arms after its condition has been normal this long;
                               # the gateway decides whether a new alert is a repeat
 QUALITY_MIN, QUALITY_CLEAR_MIN = 3, 10
@@ -275,10 +276,10 @@ class FlatNode(Node):
 
     def __init__(self, node_id, hal):
         super().__init__(node_id, hal)
-        self.night_run = self.high_run = self.cont_run = 0
+        self.night_run = self.high_run = self.cont_run = self.p_leak_run = 0
 
     def check(self, now, hour, r):
-        """Leak checks, flow only (leak_detection/README.md section 5). Runs once a minute."""
+        """Leak & consumption checks. Runs once a minute."""
         flow = r["flow_lps"]
         # Continuous night flow: nobody should be using water at 1-5 am
         at_night = NIGHT_START_H <= hour < NIGHT_END_H
@@ -295,10 +296,33 @@ class FlatNode(Node):
         self.high_run = self.high_run + 1 if flow > limit else 0
         if self.high_run >= HIGH_USE_MIN:
             self.alert("ABNORMAL_CONSUMPTION", flow=round(flow, 4))
+        # Pressure-assisted flat leak (Paper [2] + flow confirmation):
+        # Never triggers on pressure alone; requires BOTH pressure drop vs own baseline AND
+        # abnormally high flow for this flat (above normal burst showers).
+        p_base = self.base["pressure_m"]
+        f_base = self.base["flow_lps"]
+        p_drop = p_base.mean(hour) - r["pressure_m"]
+        p_low = p_drop > max(PRESSURE_DROP_SIGMAS * p_base.std(hour), PRESSURE_DROP_MIN_M)
+        f_high = flow > max(HIGH_USE_FACTOR * f_base.mean(hour), f_base.mean(hour) + 3.0 * f_base.std(hour), 0.20)
+        self.p_leak_run = self.p_leak_run + 1 if (p_low and f_high) else 0
+        if self.p_leak_run >= PRESSURE_LEAK_MIN:
+            self.alert("LEAK_PRESSURE_DROP", flow=round(flow, 4), p_min=round(r["pressure_m"], 2))
 
     def accumulate(self, r):
         self.acc["vol_l"] = self.acc.get("vol_l", 0.0) + r["flow_lps"] * 60
         self.acc["p_min"] = min(self.acc.get("p_min", 1e9), r["pressure_m"])
+        self._p_sum = getattr(self, "_p_sum", 0.0) + r["pressure_m"]
+        self._p_cnt = getattr(self, "_p_cnt", 0) + 1
+        self.acc["p_mean"] = self._p_sum / self._p_cnt
+
+    def summarise(self, now, r):
+        i = int(now // SUMMARY_S)
+        if self.interval is not None and i != self.interval:
+            self.emit("SUM", i=self.interval, **{k: round(v, 4) for k, v in self.acc.items()})
+            self.acc = {}
+            self._p_sum, self._p_cnt = 0.0, 0
+        self.interval = i
+        self.accumulate(r)
 
 
 QUALITY_MODEL = QualityModel()    # Module 3: 8-bit 3-class classifier, Sharma et al. [1]
@@ -315,6 +339,9 @@ class TankNode(Node):
         )
         self.supply_run = self.low_run = self.ok_run = 0
         self.bad_class, self.low_flagged = None, False
+        self.min_level = None
+        self._day1_levels = []
+        self.prev_level = None
 
     def check(self, now, hour, r):
         _, _, _, q_ev, t_ev = self.qmon.update(
@@ -342,9 +369,14 @@ class TankNode(Node):
         self.supply_run = self.supply_run + 1 if high else 0
         if self.supply_run >= SUPPLY_MIN:
             self.alert("ABNORMAL_SUPPLY", flow=round(r["outflow_lps"], 3))
-        # Tank level far below normal for this hour: every flat's pressure will sag (supply side)
+        # Tank level below learned normal operating floor (e.g. below pump-on threshold):
+        # avoids both false alarms from normal tank cycling (high hourly std) and missed
+        # pump failures when hourly std is wide.
         lb = self.base["level_m"]
-        low = r["level_m"] < lb.mean(hour) - max(PRESSURE_SIGMAS * lb.std(hour), PRESSURE_MARGIN_M)
+        floor_m = (self.min_level - 0.03) if self.min_level is not None else (
+            lb.mean(hour) - max(PRESSURE_SIGMAS * lb.std(hour), PRESSURE_MARGIN_M)
+        )
+        low = r["level_m"] < min(floor_m, lb.mean(hour) - PRESSURE_MARGIN_M)
         self.low_run, self.ok_run = (self.low_run + 1, 0) if low else (0, self.ok_run + 1)
         if self.low_run >= PRESSURE_MIN and not self.low_flagged:
             self.low_flagged = True
@@ -353,6 +385,15 @@ class TankNode(Node):
             self.low_flagged = False
 
     def accumulate(self, r):
+        now = self.hal.now()
+        if 1800 <= now < LEARN_S:
+            self._day1_levels.append(r["level_m"])
+        elif now >= LEARN_S and self.min_level is None and self._day1_levels:
+            s = sorted(self._day1_levels)
+            # 10th percentile rejects startup transients and brief (<2.4h) Day-1 outages
+            self.min_level = s[int(0.10 * (len(s) - 1))]
+            self._day1_levels.clear()
+        self.prev_level = r["level_m"]
         self.acc["vol_l"] = self.acc.get("vol_l", 0.0) + r["outflow_lps"] * 60
         self.acc["in_l"] = self.acc.get("in_l", 0.0) + r["inflow_lps"] * 60
         self.acc["level_m"] = r["level_m"]
@@ -394,7 +435,7 @@ if __name__ == "__main__":
             node.step()
             node.hal.t += 60
 
-    use = lambda t: 0.012 if t % DAY // HOUR in (7, 8, 9, 18, 19, 20) else 0.0    # mornings, evenings
+    use = lambda t: 0.024 if (t % DAY // HOUR in (7, 8, 9, 18, 19, 20) and (t // 60) % 20 < 10) else 0.0    # bursty mornings, evenings (mean 0.012)
     tmp = tempfile.mkdtemp()
 
     # The baseline survives a power cut in the middle of learning
@@ -414,8 +455,7 @@ if __name__ == "__main__":
     alerts["normal"], alerts["leak"] = alerts.pop("B-102"), alerts.pop("B-103")
     assert alerts["normal"] == [], alerts["normal"]
     assert [a for a, _ in alerts["leak"]] == ["LEAK_CONTINUOUS_FLOW"], alerts["leak"]
-    # morning use (from 07:00) runs straight into the leak, so the water has not stopped since 07:00
-    assert alerts["leak"][0][1] == DAY + 7 * HOUR + (CONT_FLOW_MIN - 1) * 60      # 14:59, day 2
+    assert alerts["leak"][0][1] == DAY + 10 * HOUR + (CONT_FLOW_MIN - 1) * 60      # 3 h after leak starts at 10:00, day 2
 
     # EWMA: habits that change are learned (about 2 weeks), a leak while alerting is not
     more = lambda t: use(t) * (2 if t >= DAY else 1)                  # mornings and evenings double

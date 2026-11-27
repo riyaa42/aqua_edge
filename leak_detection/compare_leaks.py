@@ -34,7 +34,10 @@ END_S = 2 * DAY + 6 * 3600
 FLATS = ["B-401", "B-302", "B-203", "B-104", "B-G01"]       # one per floor, different corners
 DOWNTAKES = ["B-D4", "B-D3", "B-D2", "B-D1", "B-D0"]
 NO_LEAK_RUNS = 5
-FLOW_ALERTS = {"LEAK_NIGHT_FLOW", "LEAK_CONTINUOUS_FLOW", "ABNORMAL_CONSUMPTION"}
+FLOW_ALERTS = {"LEAK_NIGHT_FLOW", "LEAK_CONTINUOUS_FLOW"}
+PRESSURE_ALERTS = {"LEAK_PRESSURE_DROP", "PRESSURE_LOW"}
+CONSUMPTION_ALERTS = {"ABNORMAL_CONSUMPTION"}
+SUPPLY_EVENTS = {"SUPPLY_EVENT", "LEAK_TANK_DRAIN", "SUPPLY_UNCERTAIN"}
 
 
 class HAL:
@@ -82,16 +85,20 @@ def run(job):
         gw.step()
         w.step()
     sig = [(m["t"], m["n"], m.get("a") or m.get("f")) for m in gw.log if m["k"] in ("ALERT", "FLAG")]
-    sig += [(e["t"], "GATEWAY", e["event"]) for e in gw.events if e["event"] in ("PIPE_LEAK", "SUPPLY_EVENT")]
+    sig += [(e["t"], "GATEWAY", e["event"], e.get("suspected_floor")) for e in gw.events if e["event"] in ("PIPE_LEAK", "SUPPLY_EVENT", "LEAK_TANK_DRAIN", "SUPPLY_UNCERTAIN")]
     return job, sig
 
 
 def method_of(signal):
     if signal in FLOW_ALERTS or signal in ("PIPE_LEAK", "ABNORMAL_SUPPLY"):
         return "flow"
-    if signal == "PRESSURE_LOW":
+    if signal in PRESSURE_ALERTS:
         return "pressure"
-    return None                       # quality, supply events, the mixed pressure+flow alert
+    if signal in CONSUMPTION_ALERTS:
+        return "consumption"
+    if signal in SUPPLY_EVENTS:
+        return "supply"
+    return None
 
 
 def score(job, sig):
@@ -100,12 +107,13 @@ def score(job, sig):
     out = {}
     for method in ("flow", "pressure"):
         hit, false = None, 0
-        for t, node, s in sorted(sig):
+        for item in sorted(sig, key=lambda x: x[0]):
+            t, node, s = item[0], item[1], item[2]
             if method_of(s) != method:
                 continue
             if site and not site.startswith("B-D") and s == "ABNORMAL_SUPPLY" and t >= start:
-                continue              # flat leak: the tank sees the extra outflow; true, just not located
-            downtake_hit = site and site.startswith("B-D") and (node in ("GATEWAY", "B-TANK") or method == "pressure")
+                continue
+            downtake_hit = site and site.startswith("B-D") and (node in ("GATEWAY", "B-TANK") or s == "PRESSURE_LOW")
             right_place = site and (node == site or downtake_hit)
             if right_place and t >= start:
                 hit = t - start if hit is None else hit
@@ -167,7 +175,8 @@ if __name__ == "__main__":
         sc = score(("B-D2", "large", 100, 0), [(160, "B-G01", "PRESSURE_LOW"), (50, "GATEWAY", "PIPE_LEAK")])
         assert sc == {"flow": (None, 1), "pressure": (60, 0)}, sc
         # no-leak run: everything is false
-        assert score((None, None, 100, 0), [(500, "B-203", "ABNORMAL_CONSUMPTION")])["flow"] == (None, 1)
+        assert score((None, None, 100, 0), [(500, "B-203", "ABNORMAL_CONSUMPTION")])["flow"] == (None, 0)
+        assert score((None, None, 100, 0), [(500, "B-203", "LEAK_PRESSURE_DROP")])["pressure"] == (None, 1)
         print("scoring self-check passed")
     else:
         main()

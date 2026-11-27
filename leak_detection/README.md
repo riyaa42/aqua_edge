@@ -10,8 +10,8 @@ All numbers below come from the code in `../firmware/aqua_edge.py` (the node fir
 |---|---|---|
 | Learning "normal" (hourly average and spread) | `../firmware/aqua_edge.py` | `class Baseline` |
 | All settings (limits, waits) | `../firmware/aqua_edge.py`, `../firmware/gateway.py` | Constants at the top of each file |
-| Night check, continuous-flow check, too-much check (every flat node, flow only) | `../firmware/aqua_edge.py` | `FlatNode.check` |
-| Litres per 15 minutes sent to the gateway (flat node) | `../firmware/aqua_edge.py` | `FlatNode.accumulate` |
+| Night check, continuous-flow check, pressure-assisted leak check, too-much check (every flat node) | `../firmware/aqua_edge.py` | `FlatNode.check` |
+| Litres, `p_min`, and `p_mean` per 15 minutes sent to the gateway (flat node) | `../firmware/aqua_edge.py` | `FlatNode.accumulate` |
 | Tank outflow check, tank level flag (tank node) | `../firmware/aqua_edge.py` | `TankNode.check` |
 | Building check (water in = water out) | `../firmware/gateway.py` | `Gateway.mass_balance` |
 | Supply-event rule | `../firmware/gateway.py` | `Gateway.supply_rule` |
@@ -69,7 +69,7 @@ We tested both methods on 35 simulated runs (`compare_leaks.py`). Leaks were pla
 - **Flow is measured on each flat's own pipe.** Water only goes into a flat if someone uses it or it leaks out. A leak in B-203 adds water only to B-203's meter. So a flow alarm always points to the right flat.
 - **Pressure is shared.** All flats hang off the same downtake. A hole anywhere lowers the pressure for everyone on that pipe, like one person turning on a hose and every tap in the house getting weaker. So pressure can say "there is a leak somewhere" but not "where". A small leak barely changes pressure at all, so it hides inside normal sensor noise.
 
-**Decision:** flow is the only leak detector. The pressure rule has been removed from the firmware (see section 6).
+**Update (current `edge-simulation` firmware):** Pressure-assisted flat leak detection (`LEAK_PRESSURE_DROP`) has been **restored** by requiring **both** a pressure drop from the flat's learned hourly baseline (`p_drop > max(3.0 * p_std, 0.35 m)`) **and** abnormally elevated flow on that same flat (`flow > max(3.0 * f_mean, f_mean + 3.0 * f_std, 0.20 L/s)`) for `10 min`. This eliminates all `748` neighbor false alarms (`0` false alarms across all 35 runs in `compare_leaks.py` and `0` across 14 normal days) while retaining **`10 min`** detection on medium (`0.5 L/s`) and large (`1.5 L/s`) flat leaks. See `validation_results.md` for full multi-dataset results.
 
 ---
 
@@ -163,21 +163,25 @@ missing % = (tank out - (flat 1 + flat 2 + ... + flat 20)) / tank out x 100
 
 ---
 
-## 6. Pressure: removed from leak detection
+## 6. Pressure-assisted flat leaks, supply disambiguation & cross-floor localisation
 
-Earlier firmware had a rule from Alghamdi et al. [2, for the pressure-drop leak rule]: if a flat's pressure stayed low for 10 minutes and its flow was also high, raise `LEAK_PRESSURE_DROP`. Pressure worked like a smoke alarm saying "look now", and flow confirmed it. It caught a medium leak about 40 minutes sooner than the too-much check.
+Earlier firmware had a pressure-drop rule (`PRESSURE_LOW`) that triggered without a flat-level flow confirmation, causing `748` neighbor false alarms. In the current firmware, `LEAK_PRESSURE_DROP` is restored **only with flat-level flow confirmation**:
 
-**It has been removed.** Flat nodes now detect leaks with **flow only**:
-
-- Pressure points at the wrong flat (it drops along the whole shared pipe) and misses small leaks (section 2).
-- Flow already catches every leak; the only gain from pressure was speed on big leaks, and that can be had by shortening the too-much check's 60-minute wait if needed.
-- Fewer rules means fewer things to tune and explain.
-
-Pressure is **still read, learned and sent in every summary** (lowest pressure in the block), so the laptop can show it and we can bring a pressure rule back later if real data says so.
+- `p_drop > max(3.0 * p_std, 0.35 m)` **and** `flow > max(3.0 * f_mean, f_mean + 3.0 * f_std, 0.20 L/s)` for `10 min`.
+- Never triggers on pressure alone; catches medium (`0.5 L/s`) and large (`1.5 L/s`) flat leaks in `9–10 min` with `0` neighbor false alarms.
+- `FlatNode` also sends `p_min` and `p_mean` in each 15-minute `SUM` packet so the gateway can localize riser leaks and separate supply interruptions from leaks.
 
 ### The supply-event rule (gateway)
 
-When the pump stops or the tank runs low, it is a supply problem, not a leak. The gateway calls a `SUPPLY_EVENT` when the tank node reports its level is far below normal (level < this hour's average - the bigger of (4 x spread) and 0.3 m, for 10 minutes). Before, it also counted flats' low-pressure flags; those are gone with the pressure rule. This rule is our own addition, not from a paper.
+When the pump stops or the tank runs low, `TankNode` checks `level_m` against its learned normal operating floor (`min_level - 0.03 m`, avoiding false alarms from normal `0.5–1.9 m` tank cycling) and emits `SUPPLY_LOW` after `10 min`. The gateway (`Gateway.supply_rule`) combines `SUPPLY_LOW` with tank inflow, cross-floor pressure drops, and `PIPE_LEAK`/`ABNORMAL_SUPPLY`/flat-leak evidence to emit:
+
+- `SUPPLY_EVENT` — low tank with low inflow (`< 0.1 L/s`) and no leak evidence (including buffered `SUPPLY_LOW` delivered after a LoRa outage).
+- `LEAK_TANK_DRAIN` — low tank with active leak evidence (`PIPE_LEAK`, `ABNORMAL_SUPPLY`, or flat leak).
+- `SUPPLY_UNCERTAIN` — low tank while inflow is active (`>= 0.1 L/s`) and no leak is confirmed.
+
+### Cross-floor riser localisation (gateway)
+
+When `PIPE_LEAK` triggers, `Gateway._localize_floor` uses the 15-minute `p_mean` drops relative to clean per-flat baselines and computes the downward riser headloss gradient (`step[f] = drop[f] - drop[f_above]`). It reports `suspected_floor`, `suspected_range`, and `localization_confidence` (`"high"`, `"medium"`, or `"unlocalised"` when medium-leak gradients are smaller than 15-minute burst noise).
 
 ### Silent nodes (gateway)
 
@@ -206,14 +210,13 @@ This follows common practice for LoRa networks: track when each device was last 
 
 ### 5.5 Continuous-flow check (flat node)
 
-> **Rule:** if flow stays above **0.005 L/s** for **8 hours in a row**, at any time of day, raise `LEAK_CONTINUOUS_FLOW`.
+> **Rule:** if flow stays above **0.005 L/s** for **3 hours (180 min) in a row**, at any time of day, raise `LEAK_CONTINUOUS_FLOW`.
 
 - **Idea:** in a normal home the water is off now and then (nobody runs a tap all day). A leak never stops. Commercial ultrasonic meters use the same idea (Ultrimis: steady low flow for 720 minutes).
 - **What it adds:**
   - a small leak that starts in the daytime is caught hours before the night check sees it
   - leaks between 0.005 and 0.02 L/s, which the night check never sees, are caught
-- **Example (self-check in `aqua_edge.py`):** a 0.01 L/s leak starts at 10:00, right after morning use (07:00 to 10:00). The water has not stopped since 07:00, so the alarm goes off at 14:59. The night check never fires because 0.01 is below its 0.02 limit.
-- **Why 8 hours:** in our simulation, normal flats keep a trickle running for up to **6 h 1 min** in a row, because the simulated use is smooth. 8 hours leaves a safe gap. Real use comes in bursts with zero flow in between, so this can probably be shorter; retune it on real household data.
+- **Why 3 hours (retuned from 8 hours):** earlier smooth-demand simulations ran up to 6 h 1 min nonstop, requiring 8 h (`480 min`). With bursty residential demand (Building B max 15 min over 280 flat-days) and real indoor-focused Cache County homes (Sites `006`, `010`, `020`: max 91 min over 739 house-days), `180 min` cuts small-leak latency by 2.67× with `0` false alarms on indoor residential demand.
 - **Good to know:** like the night check, it uses fixed numbers, not the learned baseline. A leak that was already there on day 1 is still caught.
 
 ---
@@ -225,7 +228,8 @@ This follows common practice for LoRa networks: track when each device was last 
 | Check | Runs every | Fires after |
 |---|---|---|
 | Night check (flat) | 1 min | 30 min |
-| Continuous-flow check (flat) | 1 min | 8 h |
+| Continuous-flow check (flat) | 1 min | 3 h (180 min) |
+| Pressure-assisted leak check (flat) | 1 min | 10 min |
 | Too-much check (flat) | 1 min | 60 min |
 | Tank outflow (tank) | 1 min | 15 min |
 | Water quality (tank) | 1 min | 3 min |
@@ -284,12 +288,34 @@ See section 2. Flow caught every leak with no false alarms. Its detection times 
 | **One silent node blocked the building check** | The gateway waited for all 21 summaries with no warning. | **Fixed:** `NODE_SILENT`, `BALANCE_PAUSED`, `NODE_BACK` (section 6). |
 | **Building check fired only once** | A second pipe leak later got no alarm. | **Fixed:** re-arms after 2 normal blocks. |
 | **Whole-network outage gives 21 silent alarms** | During a radio cut every node goes silent at once, so the gateway raises one `NODE_SILENT` per node. | To improve: report "all nodes silent: radio or gateway problem" once. |
-| **Wrong supply-event call** | A medium flat leak drained the tank faster than normal; the tank reported "level low" and the gateway called a supply problem. | To look into. |
+| **Wrong supply-event call** | A medium flat leak drained the tank faster than normal; the tank reported "level low" and the gateway called a supply problem. | **Fixed:** multi-signal `SUPPLY_EVENT` / `LEAK_TANK_DRAIN` / `SUPPLY_UNCERTAIN` + learned tank floor (section 6). |
 | **Timestamps** | Simulation uses seconds since start. | Next, after discussion: UTC Unix seconds from the DS3231, ISO 8601 in log files. |
 | **Simulated water use is too smooth** | Each simulated flat uses a steady trickle (about 0.015 L/s at the 7 am peak). Real use comes in bursts (a shower is 0.1 to 0.15 L/s for 10 minutes). So "0 false alarms" is weak evidence. | Test the too-much check on real home data (Cache County, readings every 4 seconds). |
 | **Volume from one reading per minute** | The code works out litres as flow x 60 from a single reading. A 20-second flush between readings is missed. | On real hardware, count the flow sensor's pulses instead. Each pulse is a fixed amount of water. |
 | **Very small leaks** | Below the 0.02 L/s night limit. | **Improved:** the continuous-flow check (5.5) catches anything above 0.005 L/s. Sensors are simulated and ideal; real sensor limits are a parked note in `../docs/IMPROVEMENT_PLAN.md` section 7. |
-| **No location on the downtake** | The building check says "pipe leak", not which floor. | Accepted for now. |
+| **No location on the downtake** | The building check says "pipe leak", not which floor. | **Improved:** confidence-aware `p_mean` downward-gradient localization (`suspected_floor`, `suspected_range`, `localization_confidence`). |
+
+### Detailed System, Dataset & Validation Limitations
+
+For full benchmark numbers, confusion matrices, and multi-dataset results, see [`validation_results.md`](validation_results.md).
+
+#### Performance Limitations
+1. **Small flat leaks take ~3 hours to detect (`0.05 L/s`):** Caught by `LEAK_CONTINUOUS_FLOW` (`179–180 min` median vs. `9 min` for `0.5`/`1.5 L/s` via `LEAK_PRESSURE_DROP`), because `0.05 L/s` produces insufficient flow (`~0.055 L/s < 0.20 L/s`) and pressure drop (`~0.064 m < 0.35 m`) to trigger `LEAK_PRESSURE_DROP`. Substantially faster than the prior `480 min` rule, but still relatively slow.
+2. **Medium downtake leaks (`0.5 L/s`) cannot be reliably localised:** `PIPE_LEAK` detection is `10/10` for both `0.5` and `1.5 L/s`, and `1.5 L/s` achieves `10/10` Top-1 localisation, but `0.5 L/s` only achieves `1/10` Top-1 (`7/10` Top-2, `8/10` `unlocalised`). Inter-floor pressure steps for `0.5 L/s` are smaller than 15-minute burst-induced pressure variation, so the gateway reports uncertainty (`unlocalised`) rather than inventing a floor.
+3. **Small/medium leaks in SWI-FEED `NET_6` are difficult to localise:** `LEAK_PRESSURE_DROP` detects `12/12` in `9 min`, with `6/8` Top-1 localisation on the 8 base runs using hour-matched baselines, but `6/12` overall when 4 held-out junctions are included (only `10` junctions monitored out of `4,419` junctions / `5,066` pipes).
+
+#### Dataset Limitations
+4. **Cache County contains no actual pipe-leak labels:** Real 4-second household flow measurements with no pressure readings and end-use labels only (`faucet`, `toilet`, `shower`, `clotheswasher`, `irrigation`). The `6/6` leak detections (`179 min`) used artificially injected flow leaks; Cache County validates normal bursty demand and controlled anomaly detection, not real-world pipe-leak accuracy.
+5. **Outdoor irrigation causes false continuous-flow alerts:** Cache County `Site 031` (`SprinklerSystem`, longest run `406 min`) produced `5` `LEAK_CONTINUOUS_FLOW` false alerts over `29` test days (`0.1724/day`). Sites `003, 006, 010, 020` had `0` false leak alerts over `116` test days. Prolonged outdoor irrigation can be mistaken for a leak if deployed on properties with gardens/sprinklers.
+6. **Cache County evaluation covers 5 of 31 homes:** Only Sites `003, 006, 010, 020, 031` were downloaded and evaluated, so normal-demand generalisation across all 31 homes is not established.
+7. **SWI-FEED `NET_6` is unsuitable for single-flat zero-flow rules:** `NET_6` models aggregate municipal DMA demand (never zero-flow), causing `LEAK_NIGHT_FLOW` and `LEAK_CONTINUOUS_FLOW` to fire `20` false alerts per no-leak run (`0` false alarms from `LEAK_PRESSURE_DROP`).
+
+#### Validation & Robustness Limitations
+8. **Limited WNTR supply-interruption scenario count:** The corrected detector achieved `2/2` genuine WNTR supply interruptions detected and `0` false `SUPPLY_EVENT`s over `14` normal days, but only 2 genuine WNTR interruption scenarios were tested; broader pump curves, supply schedules, and tank sizes remain untested.
+9. **Day-1 supply baseline dependence:** `TankNode` learns `min_level` from Day 1 (`1800 s .. LEARN_S`) using the 10th percentile (`min_level - 0.03 m`), which rejects startup transients and brief (`< 2.4 h`) Day-1 outages, but a multi-hour (`> 2.4 h`) Day-1 outage or shallow Day-1 cycling can still skew the learned floor (see `test_supply_robustness.py`).
+10. **Inflow suppression threshold (`inflow_lps >= 0.1`):** `Gateway.supply_rule` suppresses `SUPPLY_EVENT` (emitting `SUPPLY_UNCERTAIN` instead) whenever residual tank inflow remains `>= 0.1 L/s`, even if inflow is below building demand (`test_supply_robustness.py` case `2c`).
+11. **Simulated hydraulics rather than physical deployment:** Building B and `NET_6` use EPANET/WNTR simulations, and Cache County has no pipe-leak labels or pressure data; there is no physical building deployment with real sensors yet.
+12. **Sparse sensor coverage in `NET_6`:** Monitoring only `10` of `4,419` junctions limits spatial localisation at unseen nodes; denser sensor placement would raise hardware/deployment cost.
 
 ---
 
@@ -300,7 +326,8 @@ See section 2. Flow caught every leak with no false alarms. Its detection times 
 | Learning period | 24 h | All checks |
 | Night window | 1 am to 5 am | Night check |
 | Night flow limit | 0.02 L/s for 30 min | Night check |
-| Continuous flow limit | above 0.005 L/s for 8 h, any time of day | Continuous-flow check |
+| Continuous flow limit | above 0.005 L/s for 3 h (180 min), any time of day | Continuous-flow check |
+| Pressure-assisted leak limit | `p_drop > max(3*std, 0.35 m)` & `flow > max(3*mean, mean+3*std, 0.20 L/s)` for 10 min | `LEAK_PRESSURE_DROP` |
 | Too-much limit | max(3 x hourly average, 0.05 L/s) for 60 min | Too-much check |
 | Tank outflow limit | average + max(4 x spread, 0.5 L/s) for 15 min | Tank outflow check |
 | Missing water limit | 10% for 2 blocks of 15 min, blocks under 5 L skipped | Building check |

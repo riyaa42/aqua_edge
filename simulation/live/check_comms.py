@@ -27,7 +27,8 @@ EXPECTED = {                 # event -> (node that should alert, alert kinds); d
     "runoff": ("B-TANK", {"QUALITY_RUNOFF"}),
     "chemical": ("B-TANK", {"QUALITY_CHEMICAL"}),
 }
-FLAT_LEAK_ALERTS = {"LEAK_NIGHT_FLOW", "LEAK_CONTINUOUS_FLOW", "ABNORMAL_CONSUMPTION"}   # flow only (leak_detection/README.md)
+FLAT_LEAK_ALERTS = {"LEAK_NIGHT_FLOW", "LEAK_CONTINUOUS_FLOW", "LEAK_PRESSURE_DROP"}
+CONSUMPTION_ALERTS = {"ABNORMAL_CONSUMPTION"}
 
 
 def jsonl(name):

@@ -58,8 +58,16 @@ class Gateway:
         self.log = []               # every unique message received, with receive time
         self.events = []            # gateway's own decisions
         self.alert_history = {}     # (node, alert) -> (time of latest, how many so far)
-        self.tank_low_t, self.supply_active_until = -1e9, -1
+        self.tank_low_t, self.tank_low_recv_t, self.supply_active_until = -1e9, -1e9, -1
+        self.tank_drain_reported = False
+        self.tank_abnormal_supply_recv_t, self.flat_leak_recv_t = -1e9, -1e9
+        self.tank_abnormal_supply_t, self.flat_leak_t = -1e9, -1
+        self.last_tank_inflow = None
         self.sums = {}              # interval -> {node: volume}
+        self.p_sums = {}            # interval -> {flat: p_min}
+        self.p_base = {}            # flat -> clean baseline p_min (EWMA)
+        self.p_mean_sums = {}       # interval -> {flat: p_mean}
+        self.p_mean_base = {}       # flat -> clean baseline p_mean (EWMA)
         self.balance_done, self.balance_run, self.balance_ok = set(), 0, 0
         self.pipe_alerted = self.balance_paused = False
         self.last_seen = None       # node -> time last heard (set on the first step)
@@ -110,10 +118,25 @@ class Gateway:
                 self.check_clock(now, m)
                 if m["k"] == "ALERT" and not m["a"].endswith("_CLEARED"):
                     self.check_repeat(m)
+                    if m["a"] == "ABNORMAL_SUPPLY":
+                        self.tank_abnormal_supply_t = m["t"]
+                        self.tank_abnormal_supply_recv_t = now
+                    elif m["a"] in ("LEAK_NIGHT_FLOW", "LEAK_CONTINUOUS_FLOW", "LEAK_PRESSURE_DROP"):
+                        self.flat_leak_t = m["t"]
+                        self.flat_leak_recv_t = now
                 elif m["k"] == "FLAG" and m["n"] == self.tank:
                     self.tank_low_t = m["t"]
+                    self.tank_low_recv_t = now
+                    if "inflow" in m:
+                        self.last_tank_inflow = m["inflow"]
                 elif m["k"] == "SUM":
                     self.sums.setdefault(m["i"], {})[m["n"]] = m["vol_l"]
+                    if m["n"] == self.tank and "in_l" in m:
+                        self.last_tank_inflow = m["in_l"] / 900.0
+                    elif m["n"] in self.flats and "p_min" in m:
+                        self.p_sums.setdefault(m["i"], {})[m["n"]] = m["p_min"]
+                        if "p_mean" in m:
+                            self.p_mean_sums.setdefault(m["i"], {})[m["n"]] = m["p_mean"]
             ack = {"k": "ACK", "n": m["n"], "s": m["s"], "gt": now}       # gt: nodes sync their clock
             self.hal.send(pack(ack, self.hal.key(m["n"])))
         if bad:
@@ -152,11 +175,83 @@ class Gateway:
             elif now - t < SILENT_S and n in self.silent:
                 self.decide(now, "NODE_BACK", node=n, silent_min=round((now - self.silent.pop(n)) / 60))
 
+    def _floor_of(self, flat):
+        # e.g. "B-203" -> "2", "B-G01" -> "G"
+        part = flat.split("-")[1]
+        return "G" if part.startswith("G") else part[0]
+
+    def _cross_floor_drops(self, interval=None):
+        """Compute per-floor pressure drop (m) relative to clean baseline (prefers p_mean over p_min)."""
+        use_mean = bool(self.p_mean_sums and self.p_mean_base)
+        sums = self.p_mean_sums if use_mean else self.p_sums
+        base = self.p_mean_base if use_mean else self.p_base
+        if not sums or not base:
+            return {}
+        i = interval if interval is not None else max(sums)
+        cur = sums.get(i, {})
+        by_floor = {}
+        for f, p_now in cur.items():
+            if f in base:
+                by_floor.setdefault(self._floor_of(f), []).append(base[f] - p_now)
+        return {fl: round(sum(vs) / len(vs), 3) for fl, vs in by_floor.items() if vs}
+
+    def _localize_floor(self, drops):
+        """Confidence-aware floor localization using downward riser headloss gradient.
+
+        A leak on floor k increases flow (and thus headloss) in all riser segments
+        above k (4 -> ... -> k), creating positive downward pressure-drop steps
+        step[f] = drop[f] - drop[f_above] down to k, and ~0 step below k.
+        """
+        if not drops:
+            return None, [], "unlocalised"
+        order = [f for f in ("4", "3", "2", "1", "G") if f in drops]
+        if not order or max(drops.values()) < 0.05:
+            return None, [], "unlocalised"
+        if len(order) == 1:
+            return order[0], [order[0]], "medium"
+
+        steps = {order[idx]: round(drops[order[idx]] - drops[order[idx - 1]], 4) for idx in range(1, len(order))}
+        sig_floors = [f for f in order[1:] if steps[f] >= 0.022]
+        if sig_floors:
+            suspected = sig_floors[-1]  # lowest floor with significant downward headloss step
+            idx = order.index(suspected)
+            rng = [suspected] if idx == len(order) - 1 else [suspected, order[idx + 1]]
+            return suspected, rng, "high"
+        # No significant inter-floor step: either top-floor large burst (drop[4] > 0.45 m)
+        # or a medium/small leak whose inter-floor gradient is below 15-min burst noise.
+        if order[0] == "4" and drops["4"] >= 0.45:
+            return "4", ["4", "3"] if "3" in drops else ["4"], "high"
+        ranked = sorted(drops.items(), key=lambda kv: -kv[1])
+        return None, [f for f, _ in ranked[:2]], "unlocalised"
+
     def supply_rule(self, now):
-        if now - self.tank_low_t <= SUPPLY_WINDOW_S:
+        """Multi-signal supply classification: distinguishes supply interruption from leak-induced tank drain."""
+        if now - self.tank_low_recv_t <= SUPPLY_WINDOW_S:
+            leak_ev = (
+                self.pipe_alerted
+                or (now - self.tank_abnormal_supply_recv_t <= SUPPLY_WINDOW_S)
+                or (abs(self.tank_abnormal_supply_t - self.tank_low_t) <= SUPPLY_WINDOW_S)
+                or (now - self.flat_leak_recv_t <= SUPPLY_WINDOW_S)
+                or (abs(self.flat_leak_t - self.tank_low_t) <= SUPPLY_WINDOW_S)
+            )
+            if leak_ev and not self.tank_drain_reported:
+                self.tank_drain_reported = True
+                self.decide(now, "LEAK_TANK_DRAIN", tank_low=True, inflow_lps=self.last_tank_inflow, event_t=self.tank_low_t)
+                self.supply_active_until = now + SUPPLY_WINDOW_S
+                return
             if now > self.supply_active_until:
-                self.decide(now, "SUPPLY_EVENT", tank_low=True)
-            self.supply_active_until = now + SUPPLY_WINDOW_S
+                inflow_low = self.last_tank_inflow is not None and self.last_tank_inflow < 0.1
+                inflow_active = self.last_tank_inflow is not None and self.last_tank_inflow >= 0.1
+                drops = self._cross_floor_drops()
+                uniform_drop = len(drops) >= 2 and sum(1 for d in drops.values() if d > 0.2) >= max(len(drops) - 1, 1)
+                if inflow_low or (not inflow_active and uniform_drop):
+                    self.decide(now, "SUPPLY_EVENT", tank_low=True, inflow_lps=self.last_tank_inflow, floor_drops=drops, event_t=self.tank_low_t)
+                else:
+                    self.decide(now, "SUPPLY_UNCERTAIN", tank_low=True, inflow_lps=self.last_tank_inflow, event_t=self.tank_low_t)
+                self.supply_active_until = now + SUPPLY_WINDOW_S
+        else:
+            self.tank_drain_reported = False
+        self.tank_abnormal_supply_recv_t, self.flat_leak_recv_t = -1e9, -1e9
 
     def mass_balance(self, now):
         if self.silent and not self.balance_paused:
@@ -174,10 +269,19 @@ class Gateway:
                 continue
             err = 100 * (supply - sum(got[n] for n in self.flats)) / supply
             leaking = err > MASS_BALANCE_PCT
+            if not leaking and not self.pipe_alerted and i in self.p_sums:
+                for f, p_v in self.p_sums[i].items():
+                    self.p_base[f] = p_v if f not in self.p_base else 0.9 * self.p_base[f] + 0.1 * p_v
+                for f, p_v in self.p_mean_sums.get(i, {}).items():
+                    self.p_mean_base[f] = p_v if f not in self.p_mean_base else 0.9 * self.p_mean_base[f] + 0.1 * p_v
             self.balance_run, self.balance_ok = (self.balance_run + 1, 0) if leaking else (0, self.balance_ok + 1)
             if self.balance_run >= MASS_BALANCE_INTERVALS and not self.pipe_alerted:
                 self.pipe_alerted = True
-                self.decide(now, "PIPE_LEAK", interval=i, error_pct=round(err, 1))
+                drops = self._cross_floor_drops(i)
+                suspected, floor_range, conf = self._localize_floor(drops)
+                self.decide(now, "PIPE_LEAK", interval=i, error_pct=round(err, 1),
+                            suspected_floor=suspected, suspected_range=floor_range,
+                            localization_confidence=conf, floor_drops=drops)
             elif self.balance_ok >= MASS_BALANCE_INTERVALS:
                 self.pipe_alerted = False                   # re-arm: a later leak alerts again
 
