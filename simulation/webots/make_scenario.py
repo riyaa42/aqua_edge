@@ -34,7 +34,7 @@ LEVEL_NOISE_M = 0.01        # tank level sensor noise
 
 EVENTS = [  # name, kind, start (s), end (s), where, which detector should catch it
     ("E1", "flat_leak", DAY + 2 * H, 2 * DAY, "B-203", "night flow at flat node"),
-    ("E2", "power_cut", DAY + 9 * H, DAY + 17 * H, "B-PUMP", "gateway: supply event, no valve closures"),
+    ("E2", "power_cut", DAY + 9 * H, DAY + 17 * H, "B-PUMP", "gateway: supply event, no false alerts"),
     ("E3", "pipe_burst", DAY + 18 * H, 2 * DAY, "B-D1", "tank node supply anomaly + gateway mass balance"),
     ("E4", "quality_runoff", DAY + 6 * H, DAY + 7 * H, "B-TANK", "tank node quality check"),
     ("E5", "quality_chemical", DAY + 20 * H, DAY + 20 * H + 45 * 60, "B-TANK", "tank node quality check"),
@@ -42,7 +42,8 @@ EVENTS = [  # name, kind, start (s), end (s), where, which detector should catch
 OUTAGES = [("O1", "all", DAY + 1.5 * H, DAY + 5 * H)]
 
 
-def build_network():
+def base_network():
+    """Building B with one-minute steps and pump rules, no planted events (also used by live/)."""
     S.BUILDINGS = ["B"]
     wn = S.build(leak=False)
     wn.options.time.duration = 2 * DAY - 60
@@ -55,6 +56,12 @@ def build_network():
                                 [ControlAction(pump, "status", 1)], priority=1, name="B-ON"))
     wn.add_control("B-OFF", Rule(ValueCondition(tank, "level", ">", S.PUMP_OFF_ABOVE_M),
                                  [ControlAction(pump, "status", 0)], priority=1, name="B-OFF"))
+    return wn
+
+
+def build_network():
+    wn = base_network()
+    pump = wn.get_link("B-PUMP")
     _, _, cut_start, cut_end, _, _ = EVENTS[1]
     wn.add_control("POWER-CUT", Rule(AndCondition(SimTimeCondition(wn, ">=", cut_start),
                                                   SimTimeCondition(wn, "<", cut_end)),
@@ -73,20 +80,28 @@ def build_network():
     return wn
 
 
+# Made-up water quality: (mean, noise std) per value; an event replaces the normal values it lists
+QUALITY = {
+    "normal": {"ph": (7.2, 0.05), "tds": (250, 5), "turb": (0.5, 0.1)},    # turbidity in NTU; IS 10500 limit 1 (5 at most)
+    "runoff": {"ph": (6.4, 0.05), "tds": (60, 5), "turb": (25, 0)},        # rainwater-like: acidic, few dissolved salts, muddy
+    "chemical": {"ph": (8.8, 0.05), "tds": (900, 20)},                     # bleach-like: alkaline, many dissolved solids
+}
+
+
 def quality(t, rng):
     """Made-up tank water quality with planted events E4 (runoff) and E5 (chemical)."""
     n = len(t)
     tod = (t % DAY) / H
-    ph = 7.2 + rng.normal(0, 0.05, n)
-    tds = 250 + rng.normal(0, 5, n)
-    turb = 95 + rng.normal(0, 1, n)                       # clarity %, as in Sharma et al. [1]
+    ph, tds, turb = (QUALITY["normal"][k][0] + rng.normal(0, QUALITY["normal"][k][1], n) for k in ("ph", "tds", "turb"))
     temp = 26 + 2 * np.sin((tod - 9) / 24 * 2 * np.pi) + rng.normal(0, 0.1, n)
     for _, kind, start, end, _, _ in EVENTS:
         m = (t >= start) & (t < end)
         if kind == "quality_runoff":
-            ph[m], tds[m], turb[m] = 6.4 + rng.normal(0, 0.05, m.sum()), 60 + rng.normal(0, 5, m.sum()), 88
+            q = QUALITY["runoff"]
+            ph[m], tds[m], turb[m] = q["ph"][0] + rng.normal(0, q["ph"][1], m.sum()), q["tds"][0] + rng.normal(0, q["tds"][1], m.sum()), q["turb"][0]
         if kind == "quality_chemical":
-            ph[m], tds[m] = 8.8 + rng.normal(0, 0.05, m.sum()), 900 + rng.normal(0, 20, m.sum())
+            q = QUALITY["chemical"]
+            ph[m], tds[m] = q["ph"][0] + rng.normal(0, q["ph"][1], m.sum()), q["tds"][0] + rng.normal(0, q["tds"][1], m.sum())
     return ph, tds, turb, temp
 
 
@@ -114,7 +129,7 @@ if __name__ == "__main__":
     cols["B-TANK:inflow_lps"] = meter(1000 * r.link["flowrate"]["B-RISE"].values)
     cols["B-TANK:level_m"] = level + rng.normal(0, LEVEL_NOISE_M, len(t))
     ph, tds, turb, temp = quality(t, rng)
-    cols.update({"B-TANK:ph": ph, "B-TANK:tds_ppm": tds, "B-TANK:turbidity_pct": turb, "B-TANK:temp_c": temp})
+    cols.update({"B-TANK:ph": ph, "B-TANK:tds_ppm": tds, "B-TANK:turbidity_ntu": turb, "B-TANK:temp_c": temp})
 
     pd.DataFrame(cols).round(5).to_csv(os.path.join(HERE, "data", "sensors.csv"), index=False)
     pd.DataFrame(EVENTS, columns=["event", "kind", "start_s", "end_s", "where", "expected_detector"]).to_csv(

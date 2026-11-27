@@ -1,13 +1,15 @@
 [project]
 name = "aqua-edge"
 version = "0.1.0"
-description = "Aqua Edge simulations and edge-water-quality prototype"
+description = "Aqua Edge simulations, firmware, and edge water-quality prototype"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "matplotlib>=3.8",
-    "numpy>=2.4.6",
+    "numpy>=2.0",
     "pandas>=2.0",
+    "scikit-learn>=1.9.1",
+    "streamlit>=1.66.1",
     "wntr>=1.5",
 ]
 

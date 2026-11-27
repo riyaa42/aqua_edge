@@ -3,8 +3,9 @@
 Sensors come from the EPANET scenario (simlink.SensorFeed), the radio is a Webots
 Emitter/Receiver pair, the status light is a Webots LED, and the SD card is a file.
 """
-import json
+import glob
 import os
+from packet import sim_key
 from simlink import SensorFeed, load_outages, link_up
 
 TIME_STEP_MS = 128            # Webots time per firmware step; one step = one minute of water time
@@ -14,6 +15,8 @@ LED_INDEX = {"green": 1, "yellow": 2, "red": 3}
 
 
 class WebotsHAL:
+    key = staticmethod(sim_key)
+
     def __init__(self, robot):
         os.makedirs(RUN_DIR, exist_ok=True)
         self.name = robot.getName()
@@ -24,10 +27,8 @@ class WebotsHAL:
         self.led_dev = robot.getDevice("led")
         self.t = 0.0
         self.storage_path = os.path.join(RUN_DIR, f"{self.name}_sd.jsonl")
-        self.valve_path = os.path.join(RUN_DIR, f"{self.name}_valve.jsonl")
-        for p in (self.storage_path, self.valve_path):      # every simulation run starts clean
-            if os.path.exists(p):
-                os.remove(p)
+        for p in glob.glob(self.storage_path.replace(".jsonl", "*")):   # queue, baseline, seen: start clean
+            os.remove(p)
 
     def now(self):
         return self.t
@@ -38,22 +39,18 @@ class WebotsHAL:
     def read(self):
         return self.feed.read(self.name, self.t)
 
-    def send(self, msg):
+    def send(self, msg, at_s=None, cad=False):      # timing ignored: Webots radio has no airtime
         if self.link_ok():
-            self.emitter.send(json.dumps(msg, separators=(",", ":")))
+            self.emitter.send(msg)                  # signed binary packet (firmware/packet.py)
 
     def receive(self):
         msgs = []
         while self.receiver.getQueueLength() > 0:
-            data = self.receiver.getString() if hasattr(self.receiver, "getString") else self.receiver.getData().decode()
+            data = self.receiver.getBytes()         # ponytail: untested since Webots is parked
             self.receiver.nextPacket()
             if self.link_ok():
-                msgs.append(json.loads(data))
+                msgs.append(bytes(data))
         return msgs
-
-    def set_valve(self, closed, reason):
-        with open(self.valve_path, "a") as f:
-            f.write(json.dumps({"t": self.t, "node": self.name, "closed": closed, "reason": reason}) + "\n")
 
     def led(self, colour):
         self.led_dev.set(LED_INDEX[colour])

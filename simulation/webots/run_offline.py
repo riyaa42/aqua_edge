@@ -12,10 +12,11 @@ import shutil
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path[:0] = [HERE, os.path.join(HERE, "firmware")]
+sys.path[:0] = [HERE, os.path.join(HERE, "..", "..", "firmware")]
 from aqua_edge import FlatNode, TankNode, DAY  # noqa: E402
 from gateway import Gateway  # noqa: E402
 from simlink import SensorFeed, load_outages, link_up, STEP_S  # noqa: E402
+from packet import sim_key  # noqa: E402
 
 GATEWAY = "GATEWAY"
 
@@ -31,12 +32,14 @@ class Radio:
             return
         for dst in self.inbox:
             if dst != src and link_up(dst, t, self.outages):
-                self.inbox[dst].append(dict(msg))
+                self.inbox[dst].append(msg)
 
 
 class OfflineHAL:
-    def __init__(self, name, clock, feed, radio, valve_log, storage_dir):
-        self.name, self.clock, self.feed, self.radio, self.valve_log = name, clock, feed, radio, valve_log
+    key = staticmethod(sim_key)
+
+    def __init__(self, name, clock, feed, radio, storage_dir):
+        self.name, self.clock, self.feed, self.radio = name, clock, feed, radio
         self.storage_path = os.path.join(storage_dir, f"{name}_sd.jsonl")
         radio.inbox[name] = []
         self.colour = "green"
@@ -47,15 +50,12 @@ class OfflineHAL:
     def read(self):
         return self.feed.read(self.name, self.now())
 
-    def send(self, msg):
+    def send(self, msg, at_s=None, cad=False):      # timing ignored: this radio has no airtime
         self.radio.send(self.name, msg, self.now())
 
     def receive(self):
         msgs, self.radio.inbox[self.name] = self.radio.inbox[self.name], []
         return msgs
-
-    def set_valve(self, closed, reason):
-        self.valve_log.append({"t": self.now(), "node": self.name, "closed": closed, "reason": reason})
 
     def led(self, colour):
         self.colour = colour
@@ -64,11 +64,11 @@ class OfflineHAL:
 def run(outages, out_dir):
     shutil.rmtree(out_dir, ignore_errors=True)
     os.makedirs(out_dir)
-    feed, clock, valve_log = SensorFeed(), [0.0], []
+    feed, clock = SensorFeed(), [0.0]
     radio = Radio(outages)
     names = feed.nodes()
     flats = [n for n in names if n != "B-TANK"]
-    hal = lambda n: OfflineHAL(n, clock, feed, radio, valve_log, out_dir)
+    hal = lambda n: OfflineHAL(n, clock, feed, radio, out_dir)
     nodes = [TankNode(n, hal(n)) if n == "B-TANK" else FlatNode(n, hal(n)) for n in names]
     gw = Gateway(hal(GATEWAY), flats, "B-TANK")
     while clock[0] < feed.duration_s:
@@ -76,7 +76,7 @@ def run(outages, out_dir):
             node.step()
         gw.step()
         clock[0] += STEP_S
-    return nodes, gw, valve_log
+    return nodes, gw
 
 
 def write_csv(path, rows):
@@ -92,7 +92,7 @@ def hhmm(t):
     return f"day{d + 1} {s // 3600:02d}:{s % 3600 // 60:02d}"
 
 
-def score(gw, valve_log, nodes):
+def score(gw, nodes):
     with open(os.path.join(HERE, "data", "events.csv")) as f:
         events = {r["event"]: (r["kind"], float(r["start_s"]), float(r["end_s"]), r["where"]) for r in csv.DictReader(f)}
     alerts = [m for m in gw.log if m["k"] == "ALERT"]
@@ -120,35 +120,29 @@ def score(gw, valve_log, nodes):
     _, cut_start, cut_end, _ = events["E2"]
     sup = gw_first("SUPPLY_EVENT", cut_start)
     lines.append(f"E2 power cut: gateway supply event {'at ' + hhmm(sup['t']) if sup else 'NOT raised'}")
-    planned = {("B-203", "continuous night flow"), ("B-203", "pressure drop with high flow"), ("B-TANK", "water quality runoff"),
-               ("B-TANK", "water quality chemical"), ("B-TANK", "water quality back to normal")}
-    false_closures = [v for v in valve_log if v["closed"] and (v["node"], v["reason"]) not in planned]
-    lines.append(f"Valve actions: {len(valve_log)}; closures not explained by a planted event: {len(false_closures)}")
-    for v in false_closures:
-        lines.append(f"   false closure: {v['node']} at {hhmm(v['t'])} ({v['reason']})")
     unexplained = [m for m in alerts if (m["n"], m["a"]) not in {
-        ("B-203", "LEAK_NIGHT_FLOW"), ("B-203", "ABNORMAL_CONSUMPTION"), ("B-203", "LEAK_PRESSURE_DROP"), ("B-TANK", "ABNORMAL_SUPPLY"),
-        ("B-TANK", "QUALITY_RUNOFF"), ("B-TANK", "QUALITY_CHEMICAL"), ("B-TANK", "QUALITY_CLEARED")}]
+        ("B-203", "LEAK_NIGHT_FLOW"), ("B-203", "LEAK_CONTINUOUS_FLOW"), ("B-203", "ABNORMAL_CONSUMPTION"), ("B-TANK", "ABNORMAL_SUPPLY"),
+        ("B-TANK", "QUALITY_RUNOFF"), ("B-TANK", "QUALITY_CHEMICAL"), ("B-TANK", "QUALITY_CLEARED"),
+        ("B-TANK", "QUALITY_LIMIT_VIOLATION")}]    # planted E4/E5 water also breaks the limits
     lines.append(f"Alerts not explained by a planted event: {len(unexplained)}")
     for m in unexplained:
         lines.append(f"   {m['n']} {m['a']} at {hhmm(m['t'])}")
     lines.append(f"Messages received by gateway: {len(gw.log)}"
                  + (f"; still waiting in node SD queues at the end: {sum(len(n.store.queue) for n in nodes)}" if nodes else ""))
-    return lines, checks, false_closures
+    return lines, checks, unexplained
 
 
 if __name__ == "__main__":
     no_outage = "--no-outage" in sys.argv
     out_dir = os.path.join(HERE, "results", "offline_no_outage" if no_outage else "offline")
-    nodes, gw, valve_log = run([] if no_outage else load_outages(), out_dir)
+    nodes, gw = run([] if no_outage else load_outages(), out_dir)
     write_csv(os.path.join(out_dir, "gateway_log.csv"), gw.log)
     write_csv(os.path.join(out_dir, "gateway_events.csv"), gw.events or [{"t": "", "event": ""}])
-    write_csv(os.path.join(out_dir, "valve_log.csv"), valve_log or [{"t": "", "node": ""}])
-    lines, checks, false_closures = score(gw, valve_log, nodes)
+    lines, checks, unexplained = score(gw, nodes)
     lines.insert(0, f"Network outage: {'none' if no_outage else 'day2 01:30-05:00, all nodes'}")
     print("\n".join(lines))
     with open(os.path.join(out_dir, "summary.txt"), "w") as f:
         f.write("\n".join(lines) + "\n")
-    # Self-check: every planted leak and quality event must be caught, with no false valve closures
+    # Self-check: every planted leak and quality event must be caught, with no false alerts
     assert all(checks.values()), f"missed: {[k for k, v in checks.items() if not v]}"
-    assert not false_closures, "false valve closures"
+    assert not unexplained, "alerts not explained by a planted event"
