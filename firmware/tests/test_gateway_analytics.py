@@ -16,10 +16,12 @@ for _sub in ("edge_node", "gateway", "communication"):
 from aqua_edge import SUMMARY_S
 from gateway import Gateway, SILENT_S
 from packet import pack, sim_key, unpack
+from topology import Topology
 
 
 FLATS = ["B-401", "B-402", "B-301", "B-201", "B-101", "B-G01"]
 TANK = "B-TANK"
+HOUSE = Topology.load().only(FLATS)
 
 
 class TestHAL:
@@ -49,7 +51,7 @@ class TestHAL:
 def _make_gw():
     td = tempfile.mkdtemp(prefix="gw_analytics_")
     hal = TestHAL(os.path.join(td, "seen.json"))
-    gw = Gateway(hal, FLATS, TANK)
+    gw = Gateway(hal, HOUSE)
     return gw, hal, td
 
 
@@ -405,13 +407,13 @@ def test_possible_cause_follows_newest_alert():
 def test_restart_restores_state():
     gw, hal, td = _make_gw()
     hal.storage_path = os.path.join(td, "GATEWAY.jsonl")
-    gw = Gateway(hal, FLATS, TANK)
+    gw = Gateway(hal, HOUSE)
     send = _Node(gw, hal)
     send.block(1, LEAK)
     leak = send("B-401", 2 * SUMMARY_S + 20, a="LEAK_NIGHT_FLOW", flow=0.1)
     queue = gw.snapshot(now=3000)["maintenance_queue"]
     hal.t = 20000                                           # gateway was off for hours
-    send.gw = gw = Gateway(hal, FLATS, TANK)
+    send.gw = gw = Gateway(hal, HOUSE)
     assert gw.snapshot(now=3000)["maintenance_queue"] == queue
     gw.step()
     assert gw.silent == {} and gw.events == [], "its own downtime must not make nodes silent"
@@ -419,7 +421,7 @@ def test_restart_restores_state():
     assert gw.log == [] and gw.events == []
     send.block(2, LEAK, rx=20001)                           # the leaking pair spans the restart
     assert _pipe_events(gw) == [("PIPE_LEAK", 2)]
-    send.gw = gw = Gateway(hal, FLATS, TANK)
+    send.gw = gw = Gateway(hal, HOUSE)
     assert gw.pipe_alerted and gw.pipe_since == SUMMARY_S
     send("B-401", 20100, a="LEAK_NIGHT_FLOW")
     assert gw.events[-1]["event"] == "REPEAT_ALERT" and gw.events[-1]["count"] == 2
@@ -445,7 +447,7 @@ def test_restart_restores_state():
     finally:
         os.replace = real_replace
     assert acks() == acked
-    gw = Gateway(hal, FLATS, TANK)
+    gw = Gateway(hal, HOUSE)
     _send(gw, hal, msg, rx=20400)                           # the node sends it again
     assert ("B-301", "FLAT_LEAK") in _open(gw) and acks() == acked + 1
 
@@ -455,7 +457,7 @@ def test_old_seen_file_is_still_read():
     with open(os.path.join(td, "GATEWAY_seen.json"), "w") as f:
         json.dump({"B-401": {"floor": 5, "above": [8]}}, f)
     hal.storage_path = os.path.join(td, "GATEWAY.jsonl")
-    gw = Gateway(hal, FLATS, TANK)
+    gw = Gateway(hal, HOUSE)
     assert gw._is_seen_and_record("B-401", 8) and not gw._is_seen_and_record("B-401", 6)
 
 
@@ -463,7 +465,7 @@ def test_state_versioning_and_commands_disabled():
     td = tempfile.mkdtemp(prefix="gw_ver_")
     hal = TestHAL(os.path.join(td, "seen.json"))
     hal.storage_path = os.path.join(td, "gw.jsonl")
-    gw = Gateway(hal, FLATS, TANK, enable_commands=False)
+    gw = Gateway(hal, HOUSE, enable_commands=False)
     gw.decide(1000, "PIPE_LEAK", suspected_floor="3", error_pct=20.0)
     gw.decide(1010, "SUPPLY_EVENT", inflow_lps=0.0)
     # Switched off, nothing is queued for the nodes
@@ -474,10 +476,10 @@ def test_state_versioning_and_commands_disabled():
     assert saved["version"] == 1
     assert "analytics" in saved
 
-    # By default the affected nodes are told: the tank and the flats on the suspected floor
-    on = Gateway(TestHAL(os.path.join(td, "on_seen.json")), FLATS, TANK)
+    # By default the affected nodes are told: the tank and the flats on and below the suspected floor
+    on = Gateway(TestHAL(os.path.join(td, "on_seen.json")), HOUSE)
     on.decide(1000, "PIPE_LEAK", suspected_floor="3", suspected_range=["3"], localization_confidence="high")
-    assert sorted(c["n"] for c in on.outbox.values()) == sorted([TANK] + [f for f in FLATS if f.startswith("B-3")])
+    assert sorted(c["n"] for c in on.outbox.values()) == sorted([TANK, "B-301", "B-201", "B-101", "B-G01"])
 
     # Older unversioned state file lacking analytics / BY_BLOCK still loads cleanly
     legacy_path = os.path.join(td, "legacy.jsonl")
@@ -486,7 +488,7 @@ def test_state_versioning_and_commands_disabled():
         json.dump({"seen_floor": {"B-401": 3}, "seen_above": {"B-401": [5]}}, f)
     hal2 = TestHAL(os.path.join(td, "legacy_seen.json"))
     hal2.storage_path = legacy_path
-    gw2 = Gateway(hal2, FLATS, TANK)
+    gw2 = Gateway(hal2, HOUSE)
     assert gw2.resumed is True
     assert gw2.seen_floor["B-401"] == 3
     assert gw2._is_seen_and_record("B-401", 5) is True

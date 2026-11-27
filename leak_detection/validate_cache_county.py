@@ -33,7 +33,7 @@ sys.path[:0] = [
 ]
 
 from aqua_edge import FlatNode, DAY, CONT_FLOW_LPS, CONT_FLOW_MIN  # noqa: E402
-from gateway import Gateway  # noqa: E402
+from gateway import Gateway, Topology  # noqa: E402
 from offline_radio import exchange  # noqa: E402
 from packet import sim_key  # noqa: E402
 
@@ -74,7 +74,7 @@ def run_flow_series(flow_lps_arr, inject_lps=0.0, inject_start_min=None):
     clock, readings, inboxes = [0.0], [None], {}
     hal = lambda n: SimHAL(n, clock, readings, inboxes)
     node = FlatNode("B-101", hal("B-101"))
-    gw = Gateway(hal("GATEWAY"), ["B-101"], "B-TANK")
+    gw = Gateway(hal("GATEWAY"), Topology.load().only(["B-101"]))
 
     for m, base_f in enumerate(flow_lps_arr):
         t = m * 60.0

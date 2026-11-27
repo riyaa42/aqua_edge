@@ -23,7 +23,7 @@ sys.path[:0] = [
 ]
 
 from aqua_edge import TankNode, FlatNode, DAY  # noqa: E402
-from gateway import Gateway  # noqa: E402
+from gateway import Gateway, Topology  # noqa: E402
 from offline_radio import exchange  # noqa: E402
 from packet import sim_key  # noqa: E402
 
@@ -61,7 +61,7 @@ def run_profile(hours, tank_fn):
     hal = lambda n: SimHAL(n, clock, readings, inboxes)
     tank = TankNode("B-TANK", hal("B-TANK"))
     nodes = [FlatNode(f, hal(f)) for f in flats] + [tank]
-    gw = Gateway(hal("GATEWAY"), flats, "B-TANK")
+    gw = Gateway(hal("GATEWAY"), Topology.load().only(flats))
 
     for m in range(hours * 60):
         t = m * 60.0

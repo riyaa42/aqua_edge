@@ -15,7 +15,7 @@ sys.path[:0] = [
 ]
 
 from controller import Supervisor  # noqa: E402
-from gateway import Gateway  # noqa: E402
+from gateway import Gateway, Topology  # noqa: E402
 from simlink import STEP_S  # noqa: E402
 from webots_hal import WebotsHAL, TIME_STEP_MS, RUN_DIR  # noqa: E402
 from run_offline import score, write_csv, hhmm  # noqa: E402
@@ -27,7 +27,7 @@ SNAPSHOTS = {DAY + 3 * HOUR: "leak_during_outage", DAY + 18.5 * HOUR: "pipe_burs
 sup = Supervisor()
 hal = WebotsHAL(sup)
 flats = [n for n in hal.feed.nodes() if n != "B-TANK"]
-gw = Gateway(hal, flats, "B-TANK")
+gw = Gateway(hal, Topology.load().only(flats))
 
 
 def overlay():

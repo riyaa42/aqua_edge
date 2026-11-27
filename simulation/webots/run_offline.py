@@ -19,7 +19,7 @@ sys.path[:0] = [
     os.path.join(HERE, "..", "..", "firmware", "communication"),
 ]
 from aqua_edge import FlatNode, TankNode, DAY  # noqa: E402
-from gateway import Gateway  # noqa: E402
+from gateway import Gateway, Topology  # noqa: E402
 from simlink import SensorFeed, load_outages, link_up, STEP_S  # noqa: E402
 from packet import sim_key  # noqa: E402
 
@@ -75,7 +75,7 @@ def run(outages, out_dir):
     flats = [n for n in names if n != "B-TANK"]
     hal = lambda n: OfflineHAL(n, clock, feed, radio, out_dir)
     nodes = [TankNode(n, hal(n)) if n == "B-TANK" else FlatNode(n, hal(n)) for n in names]
-    gw = Gateway(hal(GATEWAY), flats, "B-TANK")
+    gw = Gateway(hal(GATEWAY), Topology.load().only(flats))
     while clock[0] < feed.duration_s:
         for node in nodes:
             node.step()

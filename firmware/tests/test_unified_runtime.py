@@ -34,7 +34,7 @@ sys.path[:0] = [
 ]
 
 from aqua_edge import EdgeRuntime, FlatNode, TankNode, DAY  # noqa: E402
-from gateway import Gateway  # noqa: E402
+from gateway import Gateway, Topology  # noqa: E402
 from offline_radio import exchange  # noqa: E402
 from packet import pack, sim_key  # noqa: E402
 import compare_leaks as CL  # noqa: E402
@@ -126,7 +126,7 @@ def test_combined_replay_and_isolation(stream):
         storage_path=os.path.join(td, "B-203_q.jsonl"),
     )
     rt = EdgeRuntime("B-203", hal_rt, mode="combined")
-    gw = Gateway(ReplayHAL("GATEWAY", clock, readings, inboxes), ["B-203"], "B-TANK")
+    gw = Gateway(ReplayHAL("GATEWAY", clock, readings, inboxes), Topology.load().only(["B-203"]))
 
     for row in stream:
         clock[0] = row["t"]

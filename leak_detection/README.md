@@ -15,6 +15,8 @@ All numbers below come from the code in `../firmware/edge_node/aqua_edge.py` (th
 | Tank outflow check, tank level flag (tank node) | `../firmware/edge_node/aqua_edge.py` | `TankNode.check` |
 | Building check (water in = water out) | `../firmware/gateway/gateway.py` | `Gateway.mass_balance` |
 | Supply-event rule | `../firmware/gateway/gateway.py` | `Gateway.supply_rule` |
+| Building layout: junctions, what is upstream, valves | `../firmware/gateway/building_B.json`, `../firmware/gateway/topology.py` | `class Topology` |
+| Locating a pipe leak and choosing who is alerted | `../firmware/gateway/gateway.py` | `Gateway._localize_floor`, `Gateway.pipe_leak_nodes` |
 | Silent nodes, clock check | `../firmware/gateway/gateway.py` | `Gateway.check_silence`, `Gateway.check_clock` |
 | New vs repeat alert | `../firmware/gateway/gateway.py` | `Gateway.check_repeat` |
 | Flow vs pressure comparison | `compare_leaks.py` (this folder) | |
@@ -201,7 +203,9 @@ Earlier firmware had a pressure-drop rule (`PRESSURE_LOW`) that triggered withou
 
 ### Cross-floor riser localisation (gateway)
 
-When `PIPE_LEAK` triggers, `Gateway._localize_floor` uses the 15-minute `p_mean` drops relative to clean per-flat baselines and computes the downward riser headloss gradient (`step[f] = drop[f] - drop[f_above]`). It reports `suspected_floor`, `suspected_range`, and `localization_confidence` (`"high"`, `"medium"`, or `"unlocalised"` when medium-leak gradients are smaller than 15-minute burst noise).
+When `PIPE_LEAK` triggers, `Gateway._localize_floor` uses the 15-minute `p_mean` drops relative to clean per-flat baselines and computes the downward riser headloss gradient (`step[s] = drop[s] - drop[junction above s]`). Which flats share a junction, and which junction is above which, come from the [building tree](../firmware/README.md#building-tree), not from flat names. The suspected junction is the furthest one down with a significant step; if two separate branches have one, the leak is `unlocalised`. It reports `suspected_floor` (the junction's label), `suspected_node` (its id), `suspected_range` (the suspect and the junctions directly below it), `isolation_valve` (nearest valve at or above it, recorded only) and `localization_confidence` (`"high"`, `"medium"`, or `"unlocalised"` when medium-leak gradients are smaller than 15-minute burst noise).
+
+**Who is alerted:** the tank and every flat fed through the suspected junction, so a leak located at floor 1 alerts floors 1 and G. If the leak is `unlocalised`, only the tank is alerted. For building B the new tree-based code gave the same localisation as the earlier name-based code on 200,000 random pressure-drop patterns.
 
 ### Silent nodes (gateway)
 
@@ -317,7 +321,7 @@ For full benchmark numbers, confusion matrices, and multi-dataset results, see [
 
 #### Performance Limitations
 1. **Small flat leaks take ~3 hours to detect (`0.05 L/s`):** Caught by `LEAK_CONTINUOUS_FLOW` (`179–180 min` median vs. `9 min` for `0.5`/`1.5 L/s` via `LEAK_PRESSURE_DROP`), because `0.05 L/s` produces insufficient flow (`~0.055 L/s < 0.20 L/s`) and pressure drop (`~0.067 m < 0.35 m`) to trigger `LEAK_PRESSURE_DROP`. Substantially faster than the prior `480 min` rule, but still relatively slow.
-2. **Medium downtake leaks (`0.5 L/s`) cannot be reliably localised:** `PIPE_LEAK` detection is `10/10` for both `0.5` and `1.5 L/s`, and `1.5 L/s` achieves `10/10` Top-1 localisation, but `0.5 L/s` only achieves `1/10` Top-1 (`7/10` Top-2, `8/10` `unlocalised`). Inter-floor pressure steps for `0.5 L/s` are smaller than 15-minute burst-induced pressure variation, so the gateway reports uncertainty (`unlocalised`) rather than inventing a floor.
+2. **Medium downtake leaks (`0.5 L/s`) cannot be reliably localised:** `PIPE_LEAK` detection is `10/10` for both `0.5` and `1.5 L/s`, and `1.5 L/s` achieves `10/10` Top-1 localisation, but `0.5 L/s` only achieves `1/10` Top-1 (`7/10` Top-2, `8/10` `unlocalised`). Inter-floor pressure steps for `0.5 L/s` are smaller than 15-minute burst-induced pressure variation, so the gateway reports uncertainty (`unlocalised`) rather than inventing a floor, and then alerts only the tank, not the flats.
 3. **Small/medium leaks in SWI-FEED `NET_6` are difficult to localise:** `LEAK_PRESSURE_DROP` detects `12/12` in `9 min`, with `6/8` Top-1 localisation on the 8 base runs using hour-matched baselines, but `6/12` overall when 4 held-out junctions are included (only `10` junctions monitored out of `4,419` junctions / `5,066` pipes). This localisation is computed inside `validate_swifeed.py` from noise-free simulated pressures; the gateway firmware does not do it.
 
 #### Dataset Limitations

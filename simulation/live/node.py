@@ -18,7 +18,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 for _sub in ("edge_node", "communication"):
     sys.path.insert(0, os.path.join(HERE, "..", "..", "firmware", _sub))
 from aqua_edge import FlatNode, TankNode  # noqa: E402
-from gateway import Gateway  # noqa: E402
+from gateway import Gateway, Topology  # noqa: E402
 from packet import peek, sim_key  # noqa: E402
 
 RUN = os.environ.get("AQUA_RUN", os.path.join(HERE, "run"))
@@ -81,7 +81,7 @@ def main(name):
     setup = conn.recv()                      # {"flats": [...], "tank": "B-TANK"}
     hal = NetHAL(name, setup["slots"].get(name))
     if name == "GATEWAY":
-        fw = Gateway(hal, setup["flats"], setup["tank"])
+        fw = Gateway(hal, Topology.load().only(setup["flats"]))
     else:
         fw = TankNode(name, hal) if name == setup["tank"] else FlatNode(name, hal)
     logged = events_logged = 0

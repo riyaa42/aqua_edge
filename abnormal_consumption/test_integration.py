@@ -26,7 +26,7 @@ sys.path[:0] = [
 ]
 
 from aqua_edge import FlatNode, TankNode, DAY  # noqa: E402
-from gateway import Gateway  # noqa: E402
+from gateway import Gateway, Topology  # noqa: E402
 from offline_radio import exchange  # noqa: E402
 from packet import sim_key  # noqa: E402
 import compare_leaks as CL  # noqa: E402
@@ -72,7 +72,7 @@ def run_case(hours, flow_fn, outage_windows=(), missing_fn=None):
         storage_path=os.path.join(td, f"{n}_q.jsonl") if n != "GATEWAY" else None,
     )
     nodes = [FlatNode(f, hal(f)) for f in flats] + [TankNode("B-TANK", hal("B-TANK"))]
-    gw = Gateway(hal("GATEWAY"), flats, "B-TANK")
+    gw = Gateway(hal("GATEWAY"), Topology.load().only(flats))
 
     for m in range(hours * 60):
         t = m * 60.0

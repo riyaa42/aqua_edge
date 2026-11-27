@@ -104,9 +104,10 @@ def _popcount(mask):
 class GatewayAnalytics:
     """Maintains active incidents, root-cause groups, risk rankings, and latency stats."""
 
-    def __init__(self, flats, tank):
-        self.flats = set(flats)
-        self.tank = tank
+    def __init__(self, topology):
+        self.tree = topology
+        self.flats = set(topology.flats)
+        self.tank = topology.tank
         self.total_flats = max(len(self.flats), 1)
         self.incidents = {}        # (target, category) -> dict
         self.resolved_history = [] # list of resolved incident dicts (bounded by MAX_HISTORY)
@@ -154,20 +155,12 @@ class GatewayAnalytics:
         if key in self.incidents and self.incidents[key]["t_last"] <= t_clear:
             self._resolve(target, category, t_resolved=t_clear, reason=reason)
 
-    def _floor_of(self, flat):
-        part = flat.split("-")[1]
-        return "G" if part.startswith("G") else part[0]
-
     def _affected_flats_for_floor(self, floor):
-        if floor is None:
+        """How many flats are fed through the suspected junction (all of them if unknown)."""
+        junction = self.tree.labels.get(floor)
+        if junction is None:
             return self.total_flats
-        # Water flows top-down (4 -> 3 -> 2 -> 1 -> G): a riser issue on floor k affects k and below
-        order = ["4", "3", "2", "1", "G"]
-        if floor not in order:
-            return self.total_flats
-        below_or_at = set(order[order.index(floor):])
-        cnt = sum(1 for f in self.flats if self._floor_of(f) in below_or_at)
-        return max(cnt, 1)
+        return max(len(self.tree.flats_below(junction)), 1)
 
     def _upsert(self, target, category, t_event, rx, **evidence):
         if self.is_stale(target, category, t_event):
@@ -300,10 +293,12 @@ class GatewayAnalytics:
             self.last_supply.update({"state": "NORMAL", "t": ev["event_t"]})
         elif kind == "PIPE_LEAK":
             fl = ev.get("suspected_floor")
-            tgt = f"B-D{'0' if fl == 'G' else fl}" if fl else "B-RISER"
+            tgt = self.tree.labels.get(fl) or "B-RISER"
             self.pipe_leak_info = {
                 "target": tgt,
                 "suspected_floor": fl,
+                "suspected_node": ev.get("suspected_node"),
+                "isolation_valve": ev.get("isolation_valve"),
                 "suspected_range": ev.get("suspected_range", []),
                 "localization_confidence": ev.get("localization_confidence", "unlocalised"),
                 "error_pct": ev.get("error_pct"),
@@ -312,6 +307,8 @@ class GatewayAnalytics:
             self._upsert(
                 tgt, "PIPE_LEAK", t_ev, rx,
                 suspected_floor=fl,
+                suspected_node=self.pipe_leak_info["suspected_node"],
+                isolation_valve=self.pipe_leak_info["isolation_valve"],
                 suspected_range=self.pipe_leak_info["suspected_range"],
                 localization_confidence=self.pipe_leak_info["localization_confidence"],
                 error_pct=self.pipe_leak_info["error_pct"],

@@ -27,7 +27,7 @@ sys.path[:0] = [
 ]
 
 from aqua_edge import FlatNode, TankNode, DAY, HOUR  # noqa: E402
-from gateway import Gateway  # noqa: E402
+from gateway import Gateway, Topology  # noqa: E402
 from offline_radio import exchange  # noqa: E402
 from packet import sim_key  # noqa: E402
 from water import Water  # noqa: E402
@@ -65,7 +65,7 @@ def run_wntr_scenario(hours=48, setup_fn=None, step_fn=None, seed=42):
     clock, readings, inboxes = [0.0], [None], {}
     hal = lambda n: SimHAL(n, clock, readings, inboxes)
     nodes = [FlatNode(f, hal(f)) for f in w.flats] + [TankNode("B-TANK", hal("B-TANK"))]
-    gw = Gateway(hal("GATEWAY"), w.flats, "B-TANK")
+    gw = Gateway(hal("GATEWAY"), Topology.load().only(w.flats))
     if setup_fn:
         setup_fn(w)
     while w.t < hours * 3600:
@@ -86,7 +86,7 @@ def run_synthetic_supply(pump_off=False, tank_leak=False, low_level_normal_inflo
     clock, readings, inboxes = [0.0], [{}], {}
     hal = lambda n: SimHAL(n, clock, readings, inboxes)
     nodes = [FlatNode(f, hal(f)) for f in flats] + [TankNode("B-TANK", hal("B-TANK"))]
-    gw = Gateway(hal("GATEWAY"), flats, "B-TANK")
+    gw = Gateway(hal("GATEWAY"), Topology.load().only(flats))
 
     for m in range(36 * 60):
         t = m * 60

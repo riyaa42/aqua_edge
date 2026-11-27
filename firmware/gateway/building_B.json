@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "building": "B",
+  "root": {"id": "B-TANK", "type": "tank", "valve": true, "children": [
+    {"id": "B-D4", "type": "junction", "label": "4", "valve": false, "children": [
+      {"id": "B-401", "type": "flat", "valve": true},
+      {"id": "B-402", "type": "flat", "valve": true},
+      {"id": "B-403", "type": "flat", "valve": true},
+      {"id": "B-404", "type": "flat", "valve": true},
+      {"id": "B-D3", "type": "junction", "label": "3", "valve": false, "children": [
+        {"id": "B-301", "type": "flat", "valve": true},
+        {"id": "B-302", "type": "flat", "valve": true},
+        {"id": "B-303", "type": "flat", "valve": true},
+        {"id": "B-304", "type": "flat", "valve": true},
+        {"id": "B-D2", "type": "junction", "label": "2", "valve": false, "children": [
+          {"id": "B-201", "type": "flat", "valve": true},
+          {"id": "B-202", "type": "flat", "valve": true},
+          {"id": "B-203", "type": "flat", "valve": true},
+          {"id": "B-204", "type": "flat", "valve": true},
+          {"id": "B-D1", "type": "junction", "label": "1", "valve": false, "children": [
+            {"id": "B-101", "type": "flat", "valve": true},
+            {"id": "B-102", "type": "flat", "valve": true},
+            {"id": "B-103", "type": "flat", "valve": true},
+            {"id": "B-104", "type": "flat", "valve": true},
+            {"id": "B-D0", "type": "junction", "label": "G", "valve": false, "children": [
+              {"id": "B-G01", "type": "flat", "valve": true},
+              {"id": "B-G02", "type": "flat", "valve": true},
+              {"id": "B-G03", "type": "flat", "valve": true},
+              {"id": "B-G04", "type": "flat", "valve": true}
+            ]}
+          ]}
+        ]}
+      ]}
+    ]}
+  ]}
+}

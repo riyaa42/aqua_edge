@@ -33,7 +33,7 @@ sys.path[:0] = [
 ]
 from water import Water, LEAK_SIZES_LPS  # noqa: E402
 from aqua_edge import FlatNode, TankNode, DAY  # noqa: E402
-from gateway import Gateway  # noqa: E402
+from gateway import Gateway, Topology  # noqa: E402
 from offline_radio import exchange  # noqa: E402
 from packet import sim_key  # noqa: E402
 
@@ -81,7 +81,7 @@ def run(job):
     w, clock, readings, inboxes = Water(seed=seed), [0.0], [None], {}
     hal = lambda n: HAL(n, clock, readings, inboxes)
     nodes = [FlatNode(f, hal(f)) for f in w.flats] + [TankNode("B-TANK", hal("B-TANK"))]
-    gw = Gateway(hal("GATEWAY"), w.flats, "B-TANK")
+    gw = Gateway(hal("GATEWAY"), Topology.load().only(w.flats))
     while w.t < END_S:
         clock[0] = w.t
         if site and w.t == start:

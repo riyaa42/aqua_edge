@@ -6,6 +6,9 @@ Call step() whenever a packet arrives and at the time it returns (at least every
 Nodes decide on their own what they can see. The gateway combines the data of many nodes, which
 some detections need (a pipe leak shows only when every flat's litres are set against the tank's).
 
+The building comes in as a tree (topology.py, building_B.json): which nodes exist, which junction
+of the pipes feeds each flat, what is upstream of what, and where the valves are.
+
 Same hardware layer as the nodes (hal.now / send / receive). Jobs:
   1. Acknowledge every node message (so nodes can delete it from their SD queue) and log it.
      Every ACK carries the gateway time ("gt") for setting node clocks (a job for the hardware
@@ -40,8 +43,10 @@ Same hardware layer as the nodes (hal.now / send / receive). Jobs:
  10. Beacon every 5 s (and at startup), so nodes know when to send what they stored.
  11. Dispatch: what only the gateway can know is sent back at once to the nodes concerned, as a
      signed CMD, repeated every few seconds until the node confirms it (GOT):
-       pipe leak (and its end)  -> the tank and the flats on the suspected floors;
-                                   every node if the floor cannot be told
+       pipe leak (and its end)  -> the tank and every flat fed through the suspected junction
+                                   (the suspected floor and all below it); only the tank if
+                                   the spot cannot be told. The event also records the valve
+                                   that would isolate it (isolation_valve); nothing closes.
        supply event / drain / uncertain (and recovery) -> the tank
        a flat's pressure alert during a pipe leak -> that flat (PIPE_LEAK_CAUSE: its own leak
                                    alert may not be its own leak)
@@ -67,6 +72,7 @@ from aqua_edge import SUMMARY_S, iso_utc, save_atomic
 from gateway_analytics import FLAT_LEAK_ALERTS, GatewayAnalytics, category_of
 from lora433 import BEACON_S, AirtimeBudget, airtime_s, retry_wait
 from packet import pack, unpack
+from topology import Topology  # noqa: F401  (callers build one for Gateway)
 
 SUPPLY_WINDOW_S = 900          # a SUPPLY_LOW flag from the tank counts for this long
 MASS_BALANCE_PCT = 10.0        # Ali et al. [6] threshold
@@ -87,8 +93,9 @@ BY_BLOCK = ("sums", "p_sums", "p_mean_sums", "verdicts")     # {block number: va
 
 
 class Gateway:
-    def __init__(self, hal, flat_ids, tank_id, enable_commands=True):
-        self.hal, self.flats, self.tank = hal, set(flat_ids), tank_id
+    def __init__(self, hal, topology, enable_commands=True):
+        self.hal, self.tree = hal, topology
+        self.flats, self.tank = set(topology.flats), topology.tank
         self.enable_commands = enable_commands
         self.seen_floor = {}        # node -> highest contiguous seq received (1..floor)
         self.seen_above = {}        # node -> set of out-of-order seq > floor
@@ -116,7 +123,7 @@ class Gateway:
         self.last_seen = None       # node -> time last heard (set on the first step)
         self.silent = {}            # node -> time last heard before it went silent
         self.skewed = set()
-        self.analytics = GatewayAnalytics(self.flats, self.tank)
+        self.analytics = GatewayAnalytics(topology)
         self.outbox = {}            # command number (as text) -> command not yet confirmed by its node
         self.command_number = 0     # never repeats: a node acts on each number once
         self.told = {}              # node -> {alert code: its time}: sent as still going on
@@ -181,7 +188,22 @@ class Gateway:
         self.skewed = set(state.get("skewed", []))
         if "analytics" in state:
             self.analytics.load_state(state["analytics"])
+        self._forget_removed_nodes()
         self.resumed = True
+
+    def _forget_removed_nodes(self):
+        """Saved state may name nodes that are no longer in the tree. Left in, one would count
+        as silent for ever (pausing the building check) and its commands would never end."""
+        members = self.flats | {self.tank}
+        for node in set(self.silent) - members:
+            self.analytics._resolve(node, "NODE_SILENT", reason="removed_from_topology")
+            del self.silent[node]
+        if self.last_seen is not None:
+            self.last_seen = {n: t for n, t in self.last_seen.items() if n in members}
+        self.outbox = {num: c for num, c in self.outbox.items() if c["n"] in members}
+        self.told = {n: v for n, v in self.told.items() if n in members}
+        self.told_pipe = [n for n in self.told_pipe if n in members]
+        self.told_cause = [n for n in self.told_cause if n in members]
 
     def _is_seen_and_record(self, node, seq):
         """Return True if seq was already seen; otherwise record it (advancing contiguous floor)."""
@@ -344,21 +366,22 @@ class Gateway:
             self._mark_over(node, codes, t_end)
             self.command(now, node, clear_code, t_end)
 
-    def pipe_leak_nodes(self, floor_range, confidence):
-        if confidence == "unlocalised" or not floor_range:
-            return sorted(self.flats | {self.tank})
-        return sorted({f for f in self.flats if self._floor_of(f) in floor_range} | {self.tank})
+    def pipe_leak_nodes(self, suspected):
+        """The tank, and every flat the leak could cut off: those fed through the suspected
+        junction. If the spot is unknown (None), the tank only."""
+        junction = self.tree.labels.get(suspected)
+        return sorted((self.tree.flats_below(junction) if junction else set()) | {self.tank})
 
     def dispatch(self, now, ev):
         if not self.enable_commands:
             return
         kind = ev["event"]
         if kind == "PIPE_LEAK":
-            self.told_pipe = self.pipe_leak_nodes(ev.get("suspected_range"), ev.get("localization_confidence"))
+            self.told_pipe = self.pipe_leak_nodes(ev.get("suspected_floor"))
             for node in self.told_pipe:
                 self.tell(now, node, "PIPE_LEAK", self.pipe_since if self.pipe_since is not None else ev["t"])
         elif kind == "PIPE_LEAK_PAST":                      # found only now, and already history
-            for node in self.pipe_leak_nodes(ev["suspected_range"], ev["localization_confidence"]):
+            for node in self.pipe_leak_nodes(ev.get("suspected_floor")):
                 self.command(now, node, "PIPE_LEAK", ev["began_t"], over=1)
         elif kind in SUPPLY_CODES:
             self.tell(now, self.tank, kind, ev.get("event_t", ev["t"]))
@@ -385,6 +408,10 @@ class Gateway:
         self.decide(now, "SUPPLY_RECOVERED", event_t=m["t"])
 
     def decide(self, now, kind, **info):
+        if kind in ("PIPE_LEAK", "PIPE_LEAK_PAST"):
+            junction = self.tree.labels.get(info.get("suspected_floor"))
+            info.update(suspected_node=junction,        # recorded for future valve control only
+                        isolation_valve=self.tree.valve_for(junction) if junction else None)
         ev = {"t": now, "event": kind, **info}
         self.events.append(ev)
         self.analytics.on_event(now, ev)
@@ -428,11 +455,6 @@ class Gateway:
             elif now - t < SILENT_S and n in self.silent:
                 self.decide(now, "NODE_BACK", node=n, silent_min=round((now - self.silent.pop(n)) / 60))
 
-    def _floor_of(self, flat):
-        # e.g. "B-203" -> "2", "B-G01" -> "G"
-        part = flat.split("-")[1]
-        return "G" if part.startswith("G") else part[0]
-
     def _cross_floor_drops(self, interval=None):
         """Compute per-floor pressure drop (m) relative to clean baseline (prefers p_mean over p_min)."""
         use_mean = bool(self.p_mean_sums and self.p_mean_base)
@@ -444,38 +466,43 @@ class Gateway:
         cur = sums.get(i, {})
         by_floor = {}
         for f, p_now in cur.items():
-            if f in base:
-                by_floor.setdefault(self._floor_of(f), []).append(base[f] - p_now)
+            section = self.tree.section_of(f)       # the junction feeding the flat ("floor")
+            if f in base and section is not None:
+                by_floor.setdefault(section, []).append(base[f] - p_now)
         return {fl: round(sum(vs) / len(vs), 3) for fl, vs in by_floor.items() if vs}
 
     def _localize_floor(self, drops):
-        """Confidence-aware floor localization using downward riser headloss gradient.
+        """Confidence-aware localization using the downward headloss gradient along the pipes.
+        -> (suspected section or None, sections to check, confidence). A section is the
+        junction feeding some flats, named by its label.
 
-        A leak on floor k increases flow (and thus headloss) in all riser segments
-        above k (4 -> ... -> k), creating positive downward pressure-drop steps
-        step[f] = drop[f] - drop[f_above] down to k, and ~0 step below k.
+        A leak at a junction increases flow (and thus headloss) in all pipe segments upstream
+        of it, creating positive pressure-drop steps step[s] = drop[s] - drop[upstream of s]
+        down to it, and ~0 step beyond it.
         """
-        if not drops:
+        if not drops or max(drops.values()) < 0.05:
             return None, [], "unlocalised"
-        order = [f for f in ("4", "3", "2", "1", "G") if f in drops]
-        if not order or max(drops.values()) < 0.05:
-            return None, [], "unlocalised"
-        if len(order) == 1:
-            return order[0], [order[0]], "medium"
+        if len(drops) == 1:
+            only = next(iter(drops))
+            return only, [only], "medium"
 
-        steps = {order[idx]: round(drops[order[idx]] - drops[order[idx - 1]], 4) for idx in range(1, len(order))}
-        sig_floors = [f for f in order[1:] if steps[f] >= 0.022]
-        if sig_floors:
-            suspected = sig_floors[-1]  # lowest floor with significant downward headloss step
-            idx = order.index(suspected)
-            rng = [suspected] if idx == len(order) - 1 else [suspected, order[idx + 1]]
-            return suspected, rng, "high"
-        # No significant inter-floor step: either top-floor large burst (drop[4] > 0.45 m)
-        # or a medium/small leak whose inter-floor gradient is below 15-min burst noise.
-        if order[0] == "4" and drops["4"] >= 0.45:
-            return "4", ["4", "3"] if "3" in drops else ["4"], "high"
+        above = {s: self.tree.upstream_sections(s) for s in drops}          # nearest first
+        up = {s: next((a for a in above[s] if a in drops), None) for s in drops}
+        steps = {s: round(drops[s] - drops[up[s]], 4) for s in drops if up[s] is not None}
+        sig = [s for s in steps if steps[s] >= 0.022]
+        deepest = [s for s in sig if not any(s in above[other] for other in sig)]
+        if len(deepest) == 1:           # the furthest section with a significant headloss step
+            suspected = deepest[0]
+            return suspected, [suspected] + [s for s in drops if up[s] == suspected], "high"
+        if not sig:
+            # No significant step: either a large burst at a junction fed straight from the
+            # tank (drop > 0.45 m) or a medium/small leak whose gradient is below burst noise.
+            top = [s for s in drops if not above[s] and drops[s] >= 0.45]
+            if len(top) == 1:
+                return top[0], top + [s for s in drops if above[s][:1] == top], "high"
+        # (steps on two separate branches also end up here: one leak cannot be both)
         ranked = sorted(drops.items(), key=lambda kv: -kv[1])
-        return None, [f for f, _ in ranked[:2]], "unlocalised"
+        return None, [s for s, _ in ranked[:2]], "unlocalised"
 
     def supply_rule(self, now):
         """Multi-signal supply classification: distinguishes supply interruption from leak-induced tank drain."""
@@ -568,9 +595,10 @@ class Gateway:
                         localization_confidence=conf, floor_drops=drops)
             return
         if not newest and not pair & self.reported:         # an earlier leak, known only now
-            _, floor_range, conf = self._localize_floor(self._cross_floor_drops(first + 1))
+            suspected, floor_range, conf = self._localize_floor(self._cross_floor_drops(first + 1))
             self.decide(now, "PIPE_LEAK_PAST", interval=first + 1, error_pct=error_pct,
-                        began_t=first * SUMMARY_S, suspected_range=floor_range, localization_confidence=conf)
+                        began_t=first * SUMMARY_S, suspected_floor=suspected, suspected_range=floor_range,
+                        localization_confidence=conf)
         self.reported |= pair
 
     def _forget_old_blocks(self):
@@ -617,13 +645,14 @@ if __name__ == "__main__":
 
     events = lambda gw: [e["event"] for e in gw.events]
     F1, F2, T = "B-101", "B-102", "B-TANK"
-    gw = Gateway(FakeHAL(), [F1, F2], T)
+    house = Topology.load()
+    gw = Gateway(FakeHAL(), house.only([F1, F2]))
     ok, leak = {T: 100, F1: 50, F2: 50}, {T: 100, F1: 40, F2: 40}
     for i, v in enumerate([ok, leak, leak, ok, ok, leak, leak]):     # leak, fixed, second leak
         block(gw, i, v)
     assert events(gw) == ["PIPE_LEAK", "PIPE_LEAK"], events(gw)
     # A flat pressure alert is labelled only during a pipe leak and only if stamped after it began
-    gw4 = Gateway(FakeHAL(), [F1, F2], T)
+    gw4 = Gateway(FakeHAL(), house.only([F1, F2]))
 
     def label(t, alert="LEAK_PRESSURE_DROP"):
         gw4.hal.seq += 1
@@ -643,7 +672,7 @@ if __name__ == "__main__":
         block(gw4, i, v)
     assert label(gw4.hal.t) is None                           # pipe check re-armed
 
-    # Dispatch. Pipe leak with no pressure data: floor unknown, so every node; repeated until
+    # Dispatch. Pipe leak with no pressure data: spot unknown, so the tank only; repeated until
     # confirmed; ended by the balance check; a confirmation from the wrong node proves nothing
     def commands(gw, since=0):
         out = []
@@ -657,35 +686,101 @@ if __name__ == "__main__":
         gw.hal.box = [pack(m, sim_key(m["n"])) for m in packets]
         gw.step()
 
-    gw5 = Gateway(FakeHAL(), [F1, F2], T)
+    gw5 = Gateway(FakeHAL(), house.only([F1, F2]))
     gw5.step()
     assert unpack(gw5.hal.sent[0], sim_key) == {"k": "BEACON", "n": "GATEWAY", "s": 0, "gt": 0}, "beacon at startup"
     for i, v in enumerate([ok, leak, leak]):
         block(gw5, i, v)
     first = {(n, a) for n, a, _, _ in commands(gw5)}
-    assert first == {(n, "PIPE_LEAK") for n in (F1, F2, T)}, first
-    mine = {n: num for n, _, _, num in commands(gw5)}
+    assert first == {(T, "PIPE_LEAK")}, first
+    assert gw5.events[-1]["suspected_node"] is None and gw5.events[-1]["isolation_valve"] is None
+    number = commands(gw5)[0][3]
     gw5.hal.t += 10
-    deliver(gw5, {"k": "GOT", "n": F2, "s": mine[F1], "t": gw5.hal.t})
-    assert len(gw5.outbox) == 3, "wrong node"
-    deliver(gw5, *({"k": "GOT", "n": n, "s": num, "t": gw5.hal.t} for n, num in mine.items()))
+    deliver(gw5, {"k": "GOT", "n": F2, "s": number, "t": gw5.hal.t})
+    assert len(gw5.outbox) == 1, "wrong node"
+    deliver(gw5, {"k": "GOT", "n": T, "s": number, "t": gw5.hal.t})
     assert not gw5.outbox
     seen = len(gw5.hal.sent)
     for i in (3, 4):
         block(gw5, i, ok)
-    assert {(n, a, o) for n, a, o, _ in commands(gw5, seen)} == {(n, "PIPE_LEAK_CLEARED", 0) for n in (F1, F2, T)}
+    assert {(n, a, o) for n, a, o, _ in commands(gw5, seen)} == {(T, "PIPE_LEAK_CLEARED", 0)}
 
-    # Floor known: only the tank and those floors
-    gw6 = Gateway(FakeHAL(), ["B-401", "B-301", "B-101"], T)
-    gw6.decide(0, "PIPE_LEAK", suspected_floor="3", suspected_range=["3"], localization_confidence="high")
-    assert sorted(c["n"] for c in gw6.outbox.values()) == ["B-301", T]
+    # Located from the pressure summaries: the tank and every flat fed through that junction
+    def pressure_leak(tree, drops):
+        """Two quiet blocks, then two with water missing and each section's pressure down by drops."""
+        gw = Gateway(FakeHAL(), tree)
+        share = {f: 4.0 for f in tree.flats}
+        for i in range(4):
+            leaking = i >= 2
+            for n in sorted(tree.flats) + [tree.tank]:
+                gw.hal.seq += 1
+                m = {"k": "SUM", "n": n, "s": gw.hal.seq, "t": gw.hal.t, "i": i}
+                if n == tree.tank:
+                    m["vol_l"] = 4.0 * len(tree.flats) * (1.4 if leaking else 1.0)
+                else:
+                    p = 10.0 - (drops[tree.section_of(n)] if leaking else 0.0)
+                    m.update(vol_l=share[n], p_min=p, p_mean=p)
+                gw.hal.box.append(pack(m, sim_key(n)))
+            gw.step()
+            gw.hal.t += 900
+        ev = [e for e in gw.events if e["event"] == "PIPE_LEAK"][0]
+        return ev, {c["n"] for c in gw.outbox.values() if c["a"] == "PIPE_LEAK"}
+
+    on = lambda floors: {f for f in house.flats if f[2] in floors}
+    ev, told = pressure_leak(house, {"4": .514, "3": .558, "2": .617, "1": .657, "G": .663})    # at D1
+    assert ev["suspected_floor"] == "1" and ev["suspected_range"] == ["1", "G"], ev
+    assert (ev["suspected_node"], ev["isolation_valve"]) == ("B-D1", T)
+    assert told == on("1G") | {T}, "floors 2 to 4 are upstream of the leak"
+    ev, told = pressure_leak(house, {"4": .51, "3": .501, "2": .51, "1": .502, "G": .508})       # at D4
+    assert ev["suspected_floor"] == "4" and told == house.flats | {T}
+    ev, told = pressure_leak(house, {"4": .295, "3": .286, "2": .295, "1": .287, "G": .293})
+    assert ev["suspected_floor"] is None and told == {T}
+    ev, told = pressure_leak(house, {"4": .1, "3": .1, "2": .1, "1": .1, "G": .2})
+    assert ev["suspected_floor"] == "G" and told == on("G") | {T}
+
+    # A building whose pipe splits in two below the tank
+    def entry(name, kind, *children, **more):
+        return {"id": name, "type": kind, "valve": kind != "junction",
+                **({"children": list(children)} if children else {}), **more}
+
+    def branch(label, *flats, valve=False, below=()):
+        e = entry(f"J-{label}", "junction", *(entry(f, "flat") for f in flats), *below, label=label)
+        return {**e, "valve": valve}
+
+    forked = Topology({"schema_version": 1, "building": "forked", "root": entry(
+        T, "tank",
+        branch("east", "B-401", "B-402", valve=True, below=[branch("east-low", "B-301")]),
+        branch("west", "B-201", below=[branch("west-low", "B-101")]))})
+    quiet = {"east": .1, "east-low": .1, "west": .1, "west-low": .1}
+    ev, told = pressure_leak(forked, {**quiet, "east-low": .2})
+    assert told == {"B-301", T} and ev["isolation_valve"] == "J-east", (ev, told)    # nearest valve above
+    ev, told = pressure_leak(forked, {**quiet, "east-low": .2, "west-low": .2})
+    assert ev["suspected_floor"] is None and told == {T}, "two branches: spot unknown"
+    ev, told = pressure_leak(forked, {**quiet, "east": .5, "east-low": .5})
+    assert ev["suspected_floor"] == "east" and told == {"B-401", "B-402", "B-301", T}, (ev, told)
+
+    # A flat taken out of the tree between restarts leaves nothing behind in the saved state
+    hal8 = FakeHAL()
+    hal8.storage_path = os.path.join(tempfile.mkdtemp(), "GW8.jsonl")
+    gw8 = Gateway(hal8, house.only([F1, F2]))
+    gw8.step()
+    hal8.t = SILENT_S + 60
+    gw8.tell(hal8.t, F2, "PIPE_LEAK", hal8.t)
+    deliver(gw8, {"k": "SUM", "n": F1, "s": 1, "t": hal8.t, "i": 3, "vol_l": 1.0},
+            {"k": "SUM", "n": T, "s": 1, "t": hal8.t, "i": 3, "vol_l": 1.0})
+    assert F2 in gw8.silent and gw8.outbox
+    gw8 = Gateway(hal8, house.only([F1]))
+    gw8.step()
+    assert not gw8.silent and not gw8.outbox and F2 not in gw8.last_seen
+    assert (F2, "NODE_SILENT") not in gw8.analytics.incidents
+    assert not gw8.balance_paused
 
     # Supply states go to the tank; one replaces another; over before delivery: sent as over.
     # The gateway restarts with it undelivered, and still delivers
     hal7 = FakeHAL()
     hal7.storage_path = os.path.join(tempfile.mkdtemp(), "GW7.jsonl")
     hal7.t = 1000
-    gw7 = Gateway(hal7, [F1], T)
+    gw7 = Gateway(hal7, house.only([F1]))
     deliver(gw7, {"k": "FLAG", "n": T, "s": 1, "t": 1000, "f": "SUPPLY_LOW", "level": 0.4, "inflow": 0.0})
     assert [(c["n"], c["a"], c["over"]) for c in gw7.outbox.values()] == [(T, "SUPPLY_EVENT", 0)]
     hal7.t = 1060
@@ -695,7 +790,7 @@ if __name__ == "__main__":
     waiting = sorted((c["a"], c["over"]) for c in gw7.outbox.values())
     assert waiting == [("LEAK_TANK_DRAIN", 1), ("SUPPLY_CLEARED", 0), ("SUPPLY_EVENT", 1)], waiting
     hal7.sent.clear()
-    gw7 = Gateway(hal7, [F1], T)
+    gw7 = Gateway(hal7, house.only([F1]))
     gw7.step()
     assert len(commands(gw7)) == 3 and unpack(hal7.sent[-1], sim_key)["k"] == "BEACON"
 
@@ -704,7 +799,7 @@ if __name__ == "__main__":
 
     # F2 goes silent for 4 blocks (60 min): alert and pause; it comes back with its stored
     # summaries and the late blocks are checked
-    gw = Gateway(FakeHAL(), [F1, F2], T)
+    gw = Gateway(FakeHAL(), house.only([F1, F2]))
     for i in range(4):
         block(gw, i, {T: 100, F1: 10})
     assert events(gw) == ["NODE_SILENT", "BALANCE_PAUSED"], events(gw)
@@ -720,7 +815,7 @@ if __name__ == "__main__":
     assert "CLOCK_SKEW" in events(gw)
 
     # A summary with no volume (flow sensor dead all block) is logged; that block is not balanced
-    gw3 = Gateway(FakeHAL(), [F1, F2], T)
+    gw3 = Gateway(FakeHAL(), house.only([F1, F2]))
     block(gw3, 0, {T: 100, F1: 50})
     gw3.hal.box = [pack({"k": "SUM", "n": F2, "s": 900, "t": gw3.hal.t, "i": 0, "p_min": 10.0}, sim_key(F2))]
     gw3.step()
@@ -730,14 +825,14 @@ if __name__ == "__main__":
     # even after the gateway restarts; the ACK goes back signed with the node's key
     hal = FakeHAL()
     hal.storage_path = os.path.join(tempfile.mkdtemp(), "GATEWAY.jsonl")
-    gw = Gateway(hal, [F1], T)
+    gw = Gateway(hal, house.only([F1]))
     real = pack({"k": "ALERT", "n": F1, "s": 1, "t": 0, "a": "LEAK_NIGHT_FLOW", "flow": 0.05}, sim_key(F1))
     hal.box = [pack({"k": "ALERT", "n": F1, "s": 2, "t": 0, "a": "LEAK_NIGHT_FLOW"}, b"attacker-guessed"), real]
     gw.step()
     assert len(gw.log) == 1 and sorted(events(gw)) == ["BAD_PACKET", "NEW_ALERT"], events(gw)
     acks = [m for m in (unpack(raw, sim_key) for raw in hal.sent) if m["k"] == "ACK"]
     assert acks == [{"k": "ACK", "n": F1, "s": 1, "gt": 0}]
-    gw = Gateway(hal, [F1], T)                                           # gateway restarts
+    gw = Gateway(hal, house.only([F1]))                                           # gateway restarts
     hal.box = [real]                                                     # someone replays the alert
     gw.step()
     assert gw.log == [] and "NEW_ALERT" not in events(gw), "replay after restart must be ignored"
@@ -745,7 +840,7 @@ if __name__ == "__main__":
     # Out-of-order backlog after >1000-message gap: s=1500 arrives first, then old buffered s=2 arrives
     hal2 = FakeHAL()
     hal2.storage_path = os.path.join(tempfile.mkdtemp(), "GW2.jsonl")
-    gw2 = Gateway(hal2, [F1], T)
+    gw2 = Gateway(hal2, house.only([F1]))
     hal2.box = [pack({"k": "ALERT", "n": F1, "s": 1500, "t": 9000, "a": "LEAK_NIGHT_FLOW"}, sim_key(F1))]
     gw2.step()
     hal2.box = [pack({"k": "SUM", "n": F1, "s": 2, "t": 900, "i": 1, "vol_l": 12.0, "p_min": 10.0}, sim_key(F1))]

@@ -28,7 +28,7 @@ sys.path[:0] = [
 ]
 
 from aqua_edge import FlatNode, TankNode, DAY, HOUR  # noqa: E402
-from gateway import Gateway  # noqa: E402
+from gateway import Gateway, Topology  # noqa: E402
 from offline_radio import exchange  # noqa: E402
 from packet import sim_key  # noqa: E402
 
@@ -149,7 +149,7 @@ def run_net6_case(monitored, leak_node, leak_lps, start_h=30, seed=7):
     clock, readings, inboxes = [0.0], [None], {}
     hal = lambda n: SimHAL(n, clock, readings, inboxes)
     nodes = [FlatNode(j_to_alias[j], hal(j_to_alias[j])) for j in monitored] + [TankNode("B-TANK", hal("B-TANK"))]
-    gw = Gateway(hal("GATEWAY"), aliases, "B-TANK")
+    gw = Gateway(hal("GATEWAY"), Topology.load().only(aliases))
 
     times = res.node["pressure"].index.values
     actual_leak_lps = 0.0
