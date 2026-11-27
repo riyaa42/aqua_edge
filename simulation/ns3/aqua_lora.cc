@@ -22,7 +22,10 @@
 using namespace ns3;
 using namespace lorawan;
 
-static const uint32_t FREQ_HZ = 868100000; // ponytail: EU868 channel; module has no IN865 plan, same physics
+// Note: firmware uses custom TDMA slots + CAD + signed binary packets (packet.py) over plain
+// LoRa rather than LoRaWAN Class A/B/C MAC, so replay invokes LoraPhy::Send directly across
+// India's 3 IN865 channels (865.0625, 865.4025, 865.985 MHz) using tx_log.csv channel indices.
+static const uint32_t IN865_CHANNELS_HZ[3] = {865062500, 865402500, 865985000};
 static const double TX_DBM = 14;
 static const int TEST_PACKETS = 200, TEST_BYTES = 75;
 
@@ -58,14 +61,14 @@ Mark(std::string result, Ptr<const Packet> p, uint32_t)
 }
 
 static void
-SendAt(Ptr<LoraPhy> phy, uint32_t bytes, uint8_t sf, uint64_t* id)
+SendAt(Ptr<LoraPhy> phy, uint32_t bytes, uint8_t sf, uint32_t ch, uint64_t* id)
 {
     LoraTxParameters tx;
     tx.spreadingFactor = sf;
     tx.lowDataRateOptimize = sf >= 11;
     Ptr<Packet> p = Create<Packet>(bytes);
     *id = p->GetUid();
-    phy->Send(p, FREQ_HZ, IQPolarity::UP, tx, TX_DBM);
+    phy->Send(p, IN865_CHANNELS_HZ[ch % 3], IQPolarity::UP, tx, TX_DBM);
 }
 
 int
@@ -167,7 +170,7 @@ main(int argc, char* argv[])
             for (int k = 0; k < TEST_PACKETS; k++)
             {
                 Simulator::Schedule(Seconds(5.0 * (i * TEST_PACKETS + k) + 1), &SendAt, edPhy(i), TEST_BYTES,
-                                    edSf(i), &ids[i][k]);
+                                    edSf(i), k % 3, &ids[i][k]);
             }
         }
     }
@@ -185,8 +188,9 @@ main(int argc, char* argv[])
         std::vector<uint64_t> order(rows.size());
         for (size_t k = 0; k < rows.size(); k++)
         {
+            uint32_t ch = rows[k][7].empty() || rows[k][7] == "down" ? 0 : uint32_t(std::stoul(rows[k][7]));
             Simulator::Schedule(Seconds(std::stod(rows[k][0])), &SendAt, edPhy(index[rows[k][1]]),
-                                std::stoul(rows[k][5]), uint8_t(std::stoi(rows[k][6])), &order[k]);
+                                std::stoul(rows[k][5]), uint8_t(std::stoi(rows[k][6])), ch, &order[k]);
         }
         Simulator::Run();
         std::ofstream f(out);

@@ -20,7 +20,7 @@ from packet import NAMES, pack, peek, sim_key  # noqa: E402
 
 BW_HZ, CODING_RATE, PREAMBLE = 125_000, 1, 8   # LoRa defaults: 125 kHz, 4/5, 8 symbols
 DEFAULT_SF, DEFAULT_PDR = 7, 1.0               # used until ns-3 gives real numbers
-UPLINK_CHANNELS = 1                            # worst case; IN865 has 3 default uplink channels
+UPLINK_CHANNELS = 3                            # India IN865: 3 standard channels (865.0625, 865.4025, 865.985 MHz)
 CAD_TRIES, CAD_BACKOFF_S = 5, (0.1, 1.0)       # listen-before-talk: retries, random wait between them
 TURNAROUND_S = 0.01                            # a radio's gap between its own back-to-back packets
 CAD_SYMBOLS = 2                                # a CAD listen lasts ~2 symbols; packets newer than that go unheard
@@ -43,14 +43,19 @@ def load_links(path=LINK_TABLE):
 
 
 class Radio:
-    def __init__(self, log_path, links=None, seed=1):
+    def __init__(self, log_path, links=None, seed=1, channels=UPLINK_CHANNELS):
         self.links = load_links() if links is None else links
+        self.channels = channels
+        self.airtime_by_node = {}
         self.cuts = []                                    # (who, start_s, end_s); who = node or "all"
         self.rng = random.Random(seed)
         self.log = open(log_path, "w", newline="") if log_path else None
         self.writer = csv.DictWriter(self.log, LOG_FIELDS) if self.log else None
         if self.writer:
             self.writer.writeheader()
+
+    def duty_cycle_pct(self, node, elapsed_s):
+        return 100.0 * self.airtime_by_node.get(node, 0.0) / max(elapsed_s, 1.0)
 
     def link(self, node):
         return self.links.get(node, {"sf": DEFAULT_SF, "pdr": DEFAULT_PDR})
@@ -76,7 +81,8 @@ class Radio:
                     [n for n in outs if n != GATEWAY] if src == GATEWAY else [GATEWAY]
                 air = airtime_s(nbytes, sf or max(self.link(d)["sf"] for d in dsts))
                 x = {"src": src, "dsts": dsts, "msg": msg, "h": h, "bytes": nbytes, "air": air, "sf": sf, "backoffs": 0,
-                     "ch": self.rng.randrange(UPLINK_CHANNELS) if src != GATEWAY else "down"}
+                     "ch": self.rng.randrange(self.channels) if src != GATEWAY else "down"}
+                self.airtime_by_node[src] = self.airtime_by_node.get(src, 0.0) + air
                 if cad and src != GATEWAY:
                     x["want"] = t + offset
                     cad_wait.append(x)
@@ -128,7 +134,7 @@ if __name__ == "__main__":
     a = airtime_s(75, 7)
     print(f"airtime 75 bytes: SF7 {1000 * a:.1f} ms, SF12 {1000 * airtime_s(75, 12):.0f} ms")
     assert abs(a - 0.1334) < 0.001
-    r = Radio(None)
+    r = Radio(None, channels=1)  # single-channel test to force deterministic collision checks
     pk = lambda m: pack({"t": 0, **m}, sim_key(m["n"]))
     m = lambda n, s: pk({"n": n, "s": s, "k": "SUM"})
     A, B = "B-101", "B-102"

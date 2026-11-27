@@ -39,13 +39,41 @@ def flat_name(b, f, k):
     return f"{b}-{'G' if f == 0 else f}0{k}"
 
 
-def build(leak=False):
+def make_bursty_pattern(rng, days=2, step_min=5):
+    """Independent per-flat stochastic bursty residential demand pattern (true zero-flow gaps)."""
+    steps_per_day = 24 * 60 // step_min
+    total_steps = days * steps_per_day
+    arr = np.zeros(total_steps, dtype=float)
+    # Per-flat household scale (0.7x to 1.4x of 540 L/day) and phase shift (+/- 1 hour)
+    scale = rng.uniform(0.7, 1.4)
+    shift_steps = int(rng.integers(-12, 13))
+    i = 0
+    while i < total_steps:
+        hour = ((i + shift_steps) % steps_per_day) * step_min // 60
+        prob = 0.015 + 0.14 * (PATTERN[hour] / PATTERN.max())
+        if hour in (1, 2, 3, 4):  # quiet night hours: rare brief flush only
+            prob = 0.008
+        if rng.random() < prob:
+            # Burst duration (1 to 3 steps = 5-15 min) and intensity (shower/tap/flush)
+            dur = int(rng.choice([1, 1, 2, 3], p=[0.45, 0.25, 0.20, 0.10]))
+            amp = rng.uniform(1.8, 5.5)
+            arr[i : min(i + dur, total_steps)] += amp
+            i += dur + int(rng.integers(1, 4))
+        else:
+            i += 1
+    if arr.mean() > 0:
+        arr = arr / arr.mean() * scale
+    return arr.tolist()
+
+
+def build(leak=False, bursty=True, seed=42):
+    rng = np.random.default_rng(seed)
     wn = wntr.network.WaterNetworkModel()
     wn.options.hydraulic.inpfile_units = "LPS"      # litres/second, pressure in metres
     wn.options.time.duration = 24 * 3600
     wn.options.time.hydraulic_timestep = 300
     wn.options.time.report_timestep = 900
-    wn.options.time.pattern_timestep = 3600
+    wn.options.time.pattern_timestep = 300 if bursty else 3600
     wn.add_pattern("household", PATTERN.tolist())
     wn.add_curve("pump", "HEAD", [(PUMP_FLOW_LPS / 1000, PUMP_HEAD_M)])
     base_demand = LITRES_PER_FLAT_DAY / 1000 / 86400          # m3/s
@@ -69,7 +97,10 @@ def build(leak=False):
                         diameter=0.05, roughness=130)
             for k in range(1, FLATS_PER_FLOOR + 1):
                 n = flat_name(b, f, k)
-                wn.add_junction(n, base_demand=base_demand, demand_pattern="household",
+                pat_name = f"{n}_pat" if bursty else "household"
+                if bursty:
+                    wn.add_pattern(pat_name, make_bursty_pattern(rng, days=2, step_min=5))
+                wn.add_junction(n, base_demand=base_demand, demand_pattern=pat_name,
                                 elevation=f * FLOOR_HEIGHT_M + TAP_HEIGHT_M,
                                 coordinates=(x0 + (k - 2.5) * 8, f * 10 + 5 + (2 if k % 2 else -2)))
                 wn.add_pipe(f"{n}-P", d, n, length=8, diameter=0.025, roughness=130)
