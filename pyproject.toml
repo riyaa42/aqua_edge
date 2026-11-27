@@ -48,4 +48,4 @@ package = true
 
 [tool.uv.build-backend]
 module-root = ""
-module-name = ["tinyml", "gateway", "hal", "edge", "bogo_data_streaming", "tests", "tasks"]
+module-name = ["tinyml", "gateway", "hal", "edge", "bogo", "tests", "tasks"]

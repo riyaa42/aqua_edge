@@ -1,6 +1,6 @@
 # Experiments & Evaluation
 
-Controlled evaluation scripts comparing JalRakshak (`edge/`, `gateway/`) against `baselines/` across the 6 Slide 10 metrics:
+Controlled evaluation scripts comparing JalRakshak (`edge/`, `gateway/`) against [the baselines](baselines.md) across the 6 Slide 10 metrics:
 1. Detection Accuracy (Precision, Recall, F1 per task)
 2. Detection Latency
 3. Alert Latency (online vs. controlled outage durations: 0 min to 24 h)

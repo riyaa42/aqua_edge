@@ -52,16 +52,16 @@ Datasets are not in the repository: see the linked README for each area.
 | `uv run exp-temporal-anomaly` | Experiment 2, temporal anomaly detection | GECCO, Loddon data | **Overwrites** `temporal_model.json` and `exp2_results.txt` in `tinyml/quality/` |
 | `uv run exp-train-quality` | Retrains the water-quality classifier | Kenya, GECCO, CSU ROSS, Loddon data | **Overwrites** `quality_model.json` and `results.txt` in `tinyml/quality/` |
 
-The comparisons against `baselines/` planned in [`experiments/`](experiments/README.md) are not written yet, so they have no script.
+The comparisons against the baselines planned in [`planning/experiments.md`](planning/experiments.md) are not written yet, so they have no script.
 
 ## What Each Folder & File Contains
 
 | Folder / File | What is inside it (in simple terms) |
 |---|---|
 | `presentation/` | `initial/` (first review slides, speaking script, Q&A prep, reference list) and `final/` (reserved for final review materials) |
-| `circuit_plan.md` | Updated hardware components and connections: Raspberry Pi 3B nodes on 5 V USB power, a laptop gateway with an ESP8266 interface to its LoRa module, and the dataset-replay layer (replacing physical sensors, ADC, and battery HAT) |
-| `branch_reference.md` | Checklist of technical alignments for porting `live-simulation` and the full experimentation plan |
-| `planning_archive/` | Older planning and handover notes (`IMPROVEMENT_PLAN.md`, `HANDOVER.md`) kept for history |
+| `planning/circuit_plan.md` | Updated hardware components and connections: Raspberry Pi 3B nodes on 5 V USB power, a laptop gateway with an ESP8266 interface to its LoRa module, and the dataset-replay layer (replacing physical sensors, ADC, and battery HAT) |
+| `planning/archive/branch_reference.md` | Checklist of technical alignments for porting `live-simulation` and the full experimentation plan |
+| `planning/archive/` | Older planning and handover notes (`IMPROVEMENT_PLAN.md`, `HANDOVER.md`) kept for history |
 | `edge/` | The Python code for the Raspberry Pi 3B nodes (`aqua_edge.py`); `edge_based.py` and `cloud_based.py` are placeholders for the two node entry points |
 | `gateway/` | The Python code for the laptop gateway (`core.py`, `analytics.py`). The gateway reads the building's pipes and valves as a tree of nodes from `gateway/building_B.json` (schema in `gateway/README.md`). `edge_based.py` and `cloud_based.py` are placeholders for the two gateway server entry points |
 | `hal/` | Radio packets and SX1278 433 MHz settings (`packet.py`, `lora433.py`) and the hardware adapters (`pi_hal.py`) so the same detection code runs unchanged in simulation and on the Pi; placeholder for the gateway's ESP8266 passthrough |
@@ -69,12 +69,12 @@ The comparisons against `baselines/` planned in [`experiments/`](experiments/REA
 | `tinyml/quality/` | Offline training, quantization, and testing code for the water-quality neural network (`train_quality.py`, `results.txt`). Holds `quality_model.py` and produces `quality_model.json` for `edge/` |
 | `tinyml/leakage/` | Standalone leak-rule comparison scripts (`compare_leaks.py`) and documentation comparing flow-based and pressure-based leak detection |
 | `tinyml/consumption/` | Abnormal water-consumption detection experiments (spikes, night bursts, prolonged zero flow, and Paper [3] Lempel–Ziv compression-rate analytics), scored separately from leaks |
-| `bogo_data_streaming/` | *(Planned, empty for now)* Streams parts of the datasets as real-time sensor data, in place of physical sensors |
+| `bogo/` | *(Planned, empty for now)* Streams parts of the datasets as real-time sensor data, in place of physical sensors |
 | `tests/` | Gateway analytics tests and the unified runtime replay and benchmark |
 | `tasks/` | The functions behind the `uv run` scripts above |
 | `simulation/` | Everything that models the physical world: EPANET/WNTR pipe network (`scripts/`), real-time 21-node + LoRa radio simulator (`live/`), ns-3 LoRaWAN check (`ns3/`), and parked 3D simulator (`webots/`) |
-| `baselines/` | *(Planned)* Cloud-dependent baseline (Ali et al. [6]) and single-task edge baselines kept separate from the Aqua Edge code for fair comparison |
-| `experiments/` | *(Planned)* Evaluation scripts that feed identical scenarios and controlled outages (0 min–24 h) into the Aqua Edge code (`edge/`, `gateway/`) and `baselines/` to measure all 6 Slide 10 metrics |
+| `planning/baselines.md` | *(Planned)* Cloud-dependent baseline (Ali et al. [6]) and single-task edge baselines kept separate from the Aqua Edge code for fair comparison |
+| `planning/experiments.md` | *(Planned)* Evaluation scripts that feed identical scenarios and controlled outages (0 min–24 h) into the Aqua Edge code (`edge/`, `gateway/`) and the baselines to measure all 6 Slide 10 metrics |
 
 ## Python setup
 
