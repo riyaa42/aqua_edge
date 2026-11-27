@@ -5,7 +5,7 @@ The real code for the nodes and the gateway. It only uses the Python standard li
 | File | Runs on | What it does |
 |---|---|---|
 | `aqua_edge.py` | Every node (20 flats + tank), Raspberry Pi 4 | Learns normal on day 1 (saved to SD hourly, so a power cut keeps it), leak checks with flow only (flat: night, continuous flow, too much), water quality and tank outflow checks (tank), store-and-forward to SD card (saved safely, so a power cut never leaves half a file), sending in time slots, re-sending |
-| `quality_model.py` + `quality_model.json` | Tank node | Water-quality model: 8-bit neural network (308 bytes), pH + TDS + turbidity in, NORMAL / RUNOFF / CHEMICAL out; integer-only, plain Python. Trained by `../tinyml/train_quality.py` |
+| `quality_model.py` + `quality_model.json` + `temporal_model.json` | Edge node | Offline 3-module water-quality stack (pure Python, `int8`): **Module 1** (`check_standards`, authoritative IS 10500 / *TrinkwV* limits), **Module 2** (`TemporalModel`, 432 B `int8` Temporal AE for subtle temporal anomalies), and **Module 3** (`QualityModel`, 324 B `int8` 4-feature classifier: `NORMAL` / `RUNOFF` / `CHEMICAL`) |
 | `packet.py` | Nodes and gateway | Radio packets: compact binary (about a third of the JSON size), signed with a 4-byte tag (HMAC-SHA256) using a key shared between each node and the gateway; a message counter that never repeats |
 | `gateway.py` | Gateway laptop (LoRa module on an ESP32 bridges the radio) | Replies to every message (with the time), building check (water in = water out), silent-node alerts, supply-event rule, new vs repeat alerts, clock check |
 

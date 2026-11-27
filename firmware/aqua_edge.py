@@ -34,7 +34,7 @@ import json
 import os
 
 from packet import pack, unpack
-from quality_model import QualityModel, QualityMonitor
+from quality_model import QualityModel, QualityMonitor, TemporalModel
 
 DAY, HOUR = 86400, 3600
 LEARN_S = DAY                 # first day: learn this node's normal pattern
@@ -275,7 +275,8 @@ class FlatNode(Node):
         self.acc["p_min"] = min(self.acc.get("p_min", 1e9), r["pressure_m"])
 
 
-QUALITY_MODEL = QualityModel()    # 8-bit network, Sharma et al. [1]; trained by tinyml/train_quality.py
+QUALITY_MODEL = QualityModel()    # Module 3: 8-bit 3-class classifier, Sharma et al. [1]
+TEMPORAL_MODEL = TemporalModel()  # Module 2: 8-bit Temporal AE (Exp 2)
 
 
 class TankNode(Node):
@@ -283,12 +284,16 @@ class TankNode(Node):
 
     def __init__(self, node_id, hal):
         super().__init__(node_id, hal)
-        self.qmon = QualityMonitor(QUALITY_MODEL, window=3, confirm_n=QUALITY_MIN, clear_n=QUALITY_CLEAR_MIN)
+        self.qmon = QualityMonitor(
+            QUALITY_MODEL, temporal_model=TEMPORAL_MODEL, window=3, confirm_n=QUALITY_MIN, clear_n=QUALITY_CLEAR_MIN
+        )
         self.supply_run = self.low_run = self.ok_run = 0
         self.bad_class, self.low_flagged = None, False
 
     def check(self, now, hour, r):
-        _, _, _, q_ev = self.qmon.update(r.get("temp_c", 25.0), r["ph"], r["tds_ppm"], r["turbidity_ntu"])
+        _, _, _, q_ev, t_ev = self.qmon.update(
+            r.get("temp_c", 25.0), r["ph"], r["tds_ppm"], r["turbidity_ntu"], ts_s=now
+        )
         if q_ev:
             kind, cls_name, avg, _ = q_ev
             if kind == "ALERT":
@@ -298,6 +303,13 @@ class TankNode(Node):
                 self.alerts.pop(f"QUALITY_{self.bad_class}", None)
                 self.bad_class = None
                 self.emit("ALERT", a="QUALITY_CLEARED")
+        if t_ev:
+            t_kind, t_score, _ = t_ev
+            if t_kind == "TEMPORAL_ALERT":
+                self.alert("QUALITY_TEMPORAL_ANOMALY", score=round(t_score, 3))
+            elif t_kind == "TEMPORAL_CLEARED":
+                self.alerts.pop("QUALITY_TEMPORAL_ANOMALY", None)
+                self.emit("ALERT", a="QUALITY_TEMPORAL_CLEARED")
         # Abnormal supply: far more water leaving the tank than normal for this hour
         b = self.base["outflow_lps"]
         high = r["outflow_lps"] > b.mean(hour) + max(SUPPLY_SIGMAS * b.std(hour), SUPPLY_MARGIN_LPS)

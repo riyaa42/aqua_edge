@@ -13,6 +13,7 @@ Evaluates:
   - External temporal evaluation on Loddon Catchment (storm windows) and CSU ROSS 2019 (false alert rate/day).
 """
 import csv
+import json
 import math
 import os
 import time
@@ -22,6 +23,8 @@ import numpy as np
 from sklearn.metrics import roc_auc_score
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
+TEMPORAL_MODEL_PATH = os.path.join(ROOT, "firmware", "temporal_model.json")
 COND_TO_TDS = 0.65
 rng = np.random.default_rng(42)
 
@@ -161,6 +164,31 @@ class TemporalAE:
             a = np.maximum(out, 0) if l < len(self.Wq) - 1 else out
         return np.mean((a - z) ** 2, axis=1)
 
+    def export_dict(self, mu, sd, threshold, alpha_short=1 / 15, alpha_long=1 / 720, warmup=15, confirm_n=3, max_gap_s=1800):
+        return {
+            "version": 1,
+            "feature_order": ["temp_c", "ph", "log1p_tds_ppm", "log1p_turbidity_ntu"],
+            "temporal_order": ["short_delta_4", "long_deviation_4"],
+            "alpha_short": alpha_short,
+            "alpha_long": alpha_long,
+            "warmup_samples": warmup,
+            "confirm_n": confirm_n,
+            "clear_n": 10,
+            "max_gap_s": max_gap_s,
+            "threshold": float(threshold),
+            "mu": mu.tolist(),
+            "sd": sd.tolist(),
+            "layers": [
+                {
+                    "w": wq.astype(int).tolist(),
+                    "b": b.astype(float).tolist(),
+                    "sw": float(sw),
+                    "sa": float(sa),
+                }
+                for wq, sw, sa, b in zip(self.Wq, self.sw, self.sa, self.B)
+            ],
+        }
+
 
 def apply_confirm(pred, n_confirm):
     if n_confirm <= 1:
@@ -242,6 +270,11 @@ def main():
     ae_te = tae.mse_int8(z_ten)
     y_test = gev[mid:].astype(int)
     auc = roc_auc_score(y_test, ae_te)
+
+    # Export trained GECCO Temporal AE (int8) with validation-calibrated q=0.9990 threshold
+    export_thr = float(np.quantile(ae_cal, 0.9990))
+    with open(TEMPORAL_MODEL_PATH, "w") as f:
+        json.dump(tae.export_dict(mu, sd, export_thr), f)
 
     say(f"=== GECCO 2019 Temporal Leakage Audit & PR Trade-Off (dt={dt_g:.1f} min/sample, test_days={len(y_test)*dt_g/1440:.1f} d, AUC={auc:.3f}) ===")
     say("  Leakage checks: Causal EWMA=PASS | Chronological split=PASS | Train-only norm=PASS | No boundary event overlap=PASS")

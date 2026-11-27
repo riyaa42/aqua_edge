@@ -1,16 +1,24 @@
 # Aqua Edge: TinyML (Water Quality)
 
-The water-quality pipeline for the edge node. It combines **two-stage noise filtering** (a 3-sample moving average before inference, followed by 3-consecutive-reading validation), an **independent deterministic standards compliance check** (IS 10500:2012), and a **4-feature `int8`-quantized TinyML MLP** (`4 → 16 → 8 → 3`: **NORMAL**, **RUNOFF**, **CHEMICAL**), matching Sharma et al. [1].
+The offline water-quality stack for the Raspberry Pi 4 edge node separates three distinct responsibilities:
 
-Only water quality uses a neural network. Leakage (`../leak_detection/`) and abnormal consumption (`../abnormal_consumption/`) use lightweight statistical and compression-rate methods.
+1. **Module 1 — Authoritative Standards Checker (`check_standards` in `../firmware/quality_model.py`):** Deterministic regulatory compliance against **IS 10500:2012** (or German *TrinkwV*). Never overridden by ML scores.
+2. **Module 2 — Primary ML Detector (`TemporalModel` in `../firmware/quality_model.py`, `../firmware/temporal_model.json`):** `int8`-quantized Temporal Autoencoder (`8 → 12 → 4 → 12 → 8`, `432 bytes`) operating on causal `[15-min short delta, 12-h persistent deviation]` across all 4 sensors to catch subtle in-range temporal anomalies (`QUALITY_TEMPORAL_ANOMALY`). Handles startup warm-up, missing readings, and timestamp gaps.
+3. **Module 3 — Secondary Contamination Classifier (`QualityModel` in `../firmware/quality_model.py`, `../firmware/quality_model.json`):** 4-feature `int8`-quantized MLP (`4 → 16 → 8 → 3`, `324 bytes`: `NORMAL`, `RUNOFF`, `CHEMICAL`) for secondary contamination pattern attribution.
+
+Only water quality uses TinyML. Leakage (`../leak_detection/`) and abnormal consumption (`../abnormal_consumption/`) use lightweight statistical and compression-rate methods.
 
 | File | What it is |
 |---|---|
-| `train_quality.py` | Leakage-free 5-fold CV, training, `int8` quantization, and external evaluation (`uv run python tinyml/train_quality.py`, ~32 s) |
-| `results.txt` | Metrics from the latest training & validation run |
-| `../firmware/quality_model.py` | Pure-Python `int8` inference (`QualityModel`), `check_standards`, and two-stage `QualityMonitor` (`python3 firmware/quality_model.py`) |
-| `../firmware/quality_model.json` | Trained 4-feature `int8` model (`1,435 bytes` JSON; `324 bytes` weights + biases) |
-| `pre-quality-check/quality.py` | Earlier 4-feature synthetic prototype (kept for reference) |
+| `train_quality.py` | Module 3 training, leakage-free 5-fold CV, `int8` quantization, and external evaluation (`uv run python tinyml/train_quality.py`) |
+| `results.txt` | Module 3 evaluation metrics |
+| `exp2_temporal_anomaly.py` | Module 2 training, leakage audit, PR trade-off, Loddon test, and export of `../firmware/temporal_model.json` |
+| `exp2_results.txt` | Module 2 evaluation metrics |
+| `exp1_multivariate_anomaly.py` | Archived Experiment 1 static multivariate benchmark (`exp1_results.txt`) |
+| `test_temporal_parity.py` | Bit-level parity (`1.11e-16`) and packet serialization test for Module 2 |
+| `../firmware/quality_model.py` | Pure-Python offline runtime for Modules 1, 2, and 3 (`QualityMonitor`) |
+| `../firmware/quality_model.json` | Trained Module 3 `int8` classifier (`1,435 bytes` JSON; `324 bytes` weights+biases) |
+| `../firmware/temporal_model.json` | Trained Module 2 `int8` temporal autoencoder (`432 bytes` weights+biases) |
 
 ## 1. Model & Filtering Design
 
