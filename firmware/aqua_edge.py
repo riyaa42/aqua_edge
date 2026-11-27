@@ -234,10 +234,14 @@ class Node:
             self.save_baseline()
         if now < LEARN_S:
             for k in self.sensors:
-                self.base[k].add(hour, r[k])
+                v = r.get(k)
+                if v is not None and not math.isnan(v):
+                    self.base[k].add(hour, v)
         else:
             for k in self.sensors:
-                self.base[k].collect(r[k])
+                v = r.get(k)
+                if v is not None and not math.isnan(v):
+                    self.base[k].collect(v)
             self.check(now, hour, r)
             self.alerts = {k: seen for k, seen in self.alerts.items() if now - seen < ALERT_CLEAR_S}
             # ponytail: minutes before an alert fires (up to 8 h for continuous flow) still count
@@ -278,58 +282,162 @@ class Node:
         raise NotImplementedError
 
 
-class FlatNode(Node):
-    sensors = ("flow_lps", "pressure_m")
+QUALITY_MODEL = QualityModel()    # Module 3: 8-bit 3-class classifier, Sharma et al. [1]
+TEMPORAL_MODEL = TemporalModel()  # Module 2: 8-bit Temporal AE (Exp 2)
 
-    def __init__(self, node_id, hal):
+
+def _finite(val):
+    return val is not None and not math.isnan(val)
+
+
+class EdgeRuntime(Node):
+    """Composable edge runtime supporting 'flat', 'tank', and 'combined' pipeline modes."""
+
+    MODE_SENSORS = {
+        "flat": ("flow_lps", "pressure_m"),
+        "tank": ("outflow_lps", "level_m"),
+        "combined": ("flow_lps", "pressure_m", "outflow_lps", "level_m"),
+    }
+
+    def __init__(self, node_id, hal, mode="combined"):
+        if mode not in self.MODE_SENSORS:
+            raise ValueError(f"unknown EdgeRuntime mode: {mode}")
+        self.mode = mode
+        self.sensors = self.MODE_SENSORS[mode]
         super().__init__(node_id, hal)
-        self.night_run = self.high_run = self.cont_run = self.p_leak_run = 0
-        self.cmon = StatisticalZeroFlowDetector()
+        self._p_sum, self._p_cnt = 0.0, 0
+
+        if mode in ("flat", "combined"):
+            self.night_run = self.high_run = self.cont_run = self.p_leak_run = 0
+            self.cmon = StatisticalZeroFlowDetector()
+        if mode in ("tank", "combined"):
+            self.qmon = QualityMonitor(
+                QUALITY_MODEL, temporal_model=TEMPORAL_MODEL, window=3, confirm_n=QUALITY_MIN, clear_n=QUALITY_CLEAR_MIN
+            )
+            self.supply_run = self.low_run = self.ok_run = 0
+            self.bad_class, self.low_flagged = None, False
+            self.min_level = None
+            self._day1_levels = []
+            self.prev_level = None
 
     def check(self, now, hour, r):
-        """Leak & consumption checks. Runs once a minute."""
+        if self.mode in ("flat", "combined"):
+            self._check_flat(now, hour, r)
+        if self.mode in ("tank", "combined"):
+            self._check_tank(now, hour, r)
+
+    def _check_flat(self, now, hour, r):
+        """Flat-side leak & consumption checks. Skips missing/NaN streams safely."""
         flow = r.get("flow_lps")
-        if flow is None or math.isnan(flow):
+        if not _finite(flow):
             return
-        # Continuous night flow: nobody should be using water at 1-5 am
         at_night = NIGHT_START_H <= hour < NIGHT_END_H
         self.night_run = self.night_run + 1 if at_night and flow > NIGHT_FLOW_LPS else 0
         if self.night_run >= NIGHT_FLOW_MIN:
             self.alert("LEAK_NIGHT_FLOW", flow=round(flow, 4))
-        # Continuous flow: a home's water is off now and then; a leak never stops. Catches small
-        # leaks that start in the daytime hours before the night check, and ones below its limit
         self.cont_run = self.cont_run + 1 if flow > CONT_FLOW_LPS else 0
         if self.cont_run >= CONT_FLOW_MIN:
             self.alert("LEAK_CONTINUOUS_FLOW", flow=round(flow, 4))
-        # Abnormal consumption against this flat's own daily pattern
         limit = max(HIGH_USE_FACTOR * self.base["flow_lps"].mean(hour), HIGH_USE_MIN_LPS)
         self.high_run = self.high_run + 1 if flow > limit else 0
         if self.high_run >= HIGH_USE_MIN:
             self.alert("ABNORMAL_CONSUMPTION", flow=round(flow, 4))
-        # Pressure-assisted flat leak (Paper [2] + flow confirmation):
-        # Never triggers on pressure alone; requires BOTH pressure drop vs own baseline AND
-        # abnormally high flow for this flat (above normal burst showers).
-        p_base = self.base["pressure_m"]
-        f_base = self.base["flow_lps"]
-        p_drop = p_base.mean(hour) - r["pressure_m"]
-        p_low = p_drop > max(PRESSURE_DROP_SIGMAS * p_base.std(hour), PRESSURE_DROP_MIN_M)
-        f_high = flow > max(HIGH_USE_FACTOR * f_base.mean(hour), f_base.mean(hour) + 3.0 * f_base.std(hour), 0.20)
-        self.p_leak_run = self.p_leak_run + 1 if (p_low and f_high) else 0
-        if self.p_leak_run >= PRESSURE_LEAK_MIN:
-            self.alert("LEAK_PRESSURE_DROP", flow=round(flow, 4), p_min=round(r["pressure_m"], 2))
-        # Separate abnormal-consumption checks (abnormal_consumption/detectors.py)
+        pres = r.get("pressure_m")
+        if _finite(pres):
+            p_base = self.base["pressure_m"]
+            f_base = self.base["flow_lps"]
+            p_drop = p_base.mean(hour) - pres
+            p_low = p_drop > max(PRESSURE_DROP_SIGMAS * p_base.std(hour), PRESSURE_DROP_MIN_M)
+            f_high = flow > max(HIGH_USE_FACTOR * f_base.mean(hour), f_base.mean(hour) + 3.0 * f_base.std(hour), 0.20)
+            self.p_leak_run = self.p_leak_run + 1 if (p_low and f_high) else 0
+            if self.p_leak_run >= PRESSURE_LEAK_MIN:
+                self.alert("LEAK_PRESSURE_DROP", flow=round(flow, 4), p_min=round(pres, 2))
+        else:
+            self.p_leak_run = 0
         for ev_type, _ in self.cmon.step(now, flow):
             if ev_type != "UNUSUAL_HIGH_CONSUMPTION":
                 self.alert(ev_type, flow=round(flow, 4))
 
+    def _check_tank(self, now, hour, r):
+        """Tank-side water quality & outflow/level checks. Skips missing/NaN streams safely."""
+        ph, tds, turb = r.get("ph"), r.get("tds_ppm"), r.get("turbidity_ntu")
+        if _finite(ph) and _finite(tds) and _finite(turb):
+            temp_c = r.get("temp_c", 25.0)
+            if not _finite(temp_c):
+                temp_c = 25.0
+            _, _, _, q_ev, t_ev = self.qmon.update(temp_c, ph, tds, turb, ts_s=now)
+            if q_ev:
+                kind, cls_name, avg, _ = q_ev
+                if kind == "ALERT":
+                    self.bad_class = cls_name
+                    self.alert(f"QUALITY_{cls_name}", ph=round(avg[1], 2), tds=round(avg[2]))
+                elif kind == "CLEARED" and self.bad_class:
+                    self.alerts.pop(f"QUALITY_{self.bad_class}", None)
+                    self.bad_class = None
+                    self.emit("ALERT", a="QUALITY_CLEARED")
+            if t_ev:
+                t_kind, t_score, _ = t_ev
+                if t_kind == "TEMPORAL_ALERT":
+                    self.alert("QUALITY_TEMPORAL_ANOMALY", score=round(t_score, 3))
+                elif t_kind == "TEMPORAL_CLEARED":
+                    self.alerts.pop("QUALITY_TEMPORAL_ANOMALY", None)
+                    self.emit("ALERT", a="QUALITY_TEMPORAL_CLEARED")
+
+        outflow = r.get("outflow_lps")
+        if _finite(outflow):
+            b = self.base["outflow_lps"]
+            high = outflow > b.mean(hour) + max(SUPPLY_SIGMAS * b.std(hour), SUPPLY_MARGIN_LPS)
+            self.supply_run = self.supply_run + 1 if high else 0
+            if self.supply_run >= SUPPLY_MIN:
+                self.alert("ABNORMAL_SUPPLY", flow=round(outflow, 3))
+
+        lvl = r.get("level_m")
+        if _finite(lvl):
+            lb = self.base["level_m"]
+            floor_m = (self.min_level - 0.03) if self.min_level is not None else (
+                lb.mean(hour) - max(PRESSURE_SIGMAS * lb.std(hour), PRESSURE_MARGIN_M)
+            )
+            low = lvl < min(floor_m, lb.mean(hour) - PRESSURE_MARGIN_M)
+            self.low_run, self.ok_run = (self.low_run + 1, 0) if low else (0, self.ok_run + 1)
+            inflow = r.get("inflow_lps", 0.0)
+            inflow_v = inflow if _finite(inflow) else 0.0
+            if self.low_run >= PRESSURE_MIN and not self.low_flagged:
+                self.low_flagged = True
+                self.emit("FLAG", f="SUPPLY_LOW", level=round(lvl, 3), inflow=round(inflow_v, 3))
+            elif self.ok_run >= PRESSURE_MIN:
+                self.low_flagged = False
+
     def accumulate(self, r):
-        if self.hal.now() < LEARN_S:
-            self.cmon.step(self.hal.now(), r.get("flow_lps"))
-        self.acc["vol_l"] = self.acc.get("vol_l", 0.0) + r["flow_lps"] * 60
-        self.acc["p_min"] = min(self.acc.get("p_min", 1e9), r["pressure_m"])
-        self._p_sum = getattr(self, "_p_sum", 0.0) + r["pressure_m"]
-        self._p_cnt = getattr(self, "_p_cnt", 0) + 1
-        self.acc["p_mean"] = self._p_sum / self._p_cnt
+        now = self.hal.now()
+        if self.mode in ("flat", "combined"):
+            flow = r.get("flow_lps")
+            if now < LEARN_S and _finite(flow):
+                self.cmon.step(now, flow)
+            if _finite(flow):
+                self.acc["vol_l"] = self.acc.get("vol_l", 0.0) + flow * 60
+            pres = r.get("pressure_m")
+            if _finite(pres):
+                self.acc["p_min"] = min(self.acc.get("p_min", 1e9), pres)
+                self._p_sum += pres
+                self._p_cnt += 1
+                self.acc["p_mean"] = self._p_sum / self._p_cnt
+        if self.mode in ("tank", "combined"):
+            lvl = r.get("level_m")
+            if _finite(lvl):
+                if 1800 <= now < LEARN_S:
+                    self._day1_levels.append(lvl)
+                elif now >= LEARN_S and self.min_level is None and self._day1_levels:
+                    s = sorted(self._day1_levels)
+                    self.min_level = s[int(0.10 * (len(s) - 1))]
+                    self._day1_levels.clear()
+                self.prev_level = lvl
+                self.acc["level_m"] = lvl
+            outflow = r.get("outflow_lps")
+            if self.mode == "tank" and _finite(outflow):
+                self.acc["vol_l"] = self.acc.get("vol_l", 0.0) + outflow * 60
+            inflow = r.get("inflow_lps")
+            if _finite(inflow):
+                self.acc["in_l"] = self.acc.get("in_l", 0.0) + inflow * 60
 
     def summarise(self, now, r):
         i = int(now // SUMMARY_S)
@@ -341,78 +449,16 @@ class FlatNode(Node):
         self.accumulate(r)
 
 
-QUALITY_MODEL = QualityModel()    # Module 3: 8-bit 3-class classifier, Sharma et al. [1]
-TEMPORAL_MODEL = TemporalModel()  # Module 2: 8-bit Temporal AE (Exp 2)
-
-
-class TankNode(Node):
-    sensors = ("outflow_lps", "level_m")
-
+class FlatNode(EdgeRuntime):
+    """Physical flat deployment: flow + pressure -> leak + abnormal consumption."""
     def __init__(self, node_id, hal):
-        super().__init__(node_id, hal)
-        self.qmon = QualityMonitor(
-            QUALITY_MODEL, temporal_model=TEMPORAL_MODEL, window=3, confirm_n=QUALITY_MIN, clear_n=QUALITY_CLEAR_MIN
-        )
-        self.supply_run = self.low_run = self.ok_run = 0
-        self.bad_class, self.low_flagged = None, False
-        self.min_level = None
-        self._day1_levels = []
-        self.prev_level = None
+        super().__init__(node_id, hal, mode="flat")
 
-    def check(self, now, hour, r):
-        _, _, _, q_ev, t_ev = self.qmon.update(
-            r.get("temp_c", 25.0), r["ph"], r["tds_ppm"], r["turbidity_ntu"], ts_s=now
-        )
-        if q_ev:
-            kind, cls_name, avg, _ = q_ev
-            if kind == "ALERT":
-                self.bad_class = cls_name
-                self.alert(f"QUALITY_{cls_name}", ph=round(avg[1], 2), tds=round(avg[2]))
-            elif kind == "CLEARED" and self.bad_class:
-                self.alerts.pop(f"QUALITY_{self.bad_class}", None)
-                self.bad_class = None
-                self.emit("ALERT", a="QUALITY_CLEARED")
-        if t_ev:
-            t_kind, t_score, _ = t_ev
-            if t_kind == "TEMPORAL_ALERT":
-                self.alert("QUALITY_TEMPORAL_ANOMALY", score=round(t_score, 3))
-            elif t_kind == "TEMPORAL_CLEARED":
-                self.alerts.pop("QUALITY_TEMPORAL_ANOMALY", None)
-                self.emit("ALERT", a="QUALITY_TEMPORAL_CLEARED")
-        # Abnormal supply: far more water leaving the tank than normal for this hour
-        b = self.base["outflow_lps"]
-        high = r["outflow_lps"] > b.mean(hour) + max(SUPPLY_SIGMAS * b.std(hour), SUPPLY_MARGIN_LPS)
-        self.supply_run = self.supply_run + 1 if high else 0
-        if self.supply_run >= SUPPLY_MIN:
-            self.alert("ABNORMAL_SUPPLY", flow=round(r["outflow_lps"], 3))
-        # Tank level below learned normal operating floor (e.g. below pump-on threshold):
-        # avoids both false alarms from normal tank cycling (high hourly std) and missed
-        # pump failures when hourly std is wide.
-        lb = self.base["level_m"]
-        floor_m = (self.min_level - 0.03) if self.min_level is not None else (
-            lb.mean(hour) - max(PRESSURE_SIGMAS * lb.std(hour), PRESSURE_MARGIN_M)
-        )
-        low = r["level_m"] < min(floor_m, lb.mean(hour) - PRESSURE_MARGIN_M)
-        self.low_run, self.ok_run = (self.low_run + 1, 0) if low else (0, self.ok_run + 1)
-        if self.low_run >= PRESSURE_MIN and not self.low_flagged:
-            self.low_flagged = True
-            self.emit("FLAG", f="SUPPLY_LOW", level=round(r["level_m"], 3), inflow=round(r["inflow_lps"], 3))
-        elif self.ok_run >= PRESSURE_MIN:
-            self.low_flagged = False
 
-    def accumulate(self, r):
-        now = self.hal.now()
-        if 1800 <= now < LEARN_S:
-            self._day1_levels.append(r["level_m"])
-        elif now >= LEARN_S and self.min_level is None and self._day1_levels:
-            s = sorted(self._day1_levels)
-            # 10th percentile rejects startup transients and brief (<2.4h) Day-1 outages
-            self.min_level = s[int(0.10 * (len(s) - 1))]
-            self._day1_levels.clear()
-        self.prev_level = r["level_m"]
-        self.acc["vol_l"] = self.acc.get("vol_l", 0.0) + r["outflow_lps"] * 60
-        self.acc["in_l"] = self.acc.get("in_l", 0.0) + r["inflow_lps"] * 60
-        self.acc["level_m"] = r["level_m"]
+class TankNode(EdgeRuntime):
+    """Physical tank deployment: level/inflow/outflow + water-quality probes."""
+    def __init__(self, node_id, hal):
+        super().__init__(node_id, hal, mode="tank")
 
 
 if __name__ == "__main__":
