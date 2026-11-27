@@ -71,7 +71,7 @@ Hardware: LoRa module + ESP32 (radio bridge: passes packets between LoRa and USB
 | Listen before talk (LoRa CAD) + random backoff 0.1 to 1 s, up to 5 tries | Alerts: sent the same minute they fire |
 | Gateway replies inside the sender's slot (idea from LoRaWAN Class A) | Every ACK: the gateway is one radio and cannot hear while it sends, so its replies stay out of other nodes' slots |
 | Re-send if no ACK within 2 minutes | Everything |
-| Signed binary packets (`firmware/packet.py`) | Every packet, ACKs included: about a third of the JSON size, 4-byte signature (HMAC-SHA256) with a key shared by that node and the gateway. Forged or changed packets are dropped (`BAD_PACKET`); a repeated counter is a duplicate or replay and is not used again, even after a gateway restart. Signed, not encrypted. |
+| Encrypted, signed binary packets (`firmware/packet.py`) | Every packet, ACKs included: about a third of the JSON size, body encrypted with AES-128 in counter mode (adds no bytes; header with type, node, counter and time stays readable, as in LoRaWAN), 4-byte signature (HMAC-SHA256) with a key shared by that node and the gateway. Forged or changed packets are dropped (`BAD_PACKET`); a repeated counter is a duplicate or replay and is not used again, even after a gateway restart. The encryption key is derived from the node's key, so there is still one key file. |
 | Store-and-forward to SD card | Messages wait during radio cuts [Mariadhason et al. [4], for timestamped store-and-forward to SD card] |
 | At most 4 messages per node per minute; 10 ms gap between own packets | Keeps traffic inside the slot |
 
@@ -163,20 +163,17 @@ Settled on 11 November 2026: nodes on mains power, gateway = LoRa + ESP32 + lapt
 
 ## 8. Next steps (suggested order)
 
-**Newer agreed plan (2026-11-21): [`docs/IMPROVEMENT_PLAN.md`](docs/IMPROVEMENT_PLAN.md).** It covers safe SD saves, valve removal, signed binary radio messages and smarter leak checks. On real hardware the sensors are replaced by recorded readings fed row by row from a file. Where this list and that plan disagree, the plan wins.
+**Simulation only from 2026-11-27: no hardware.** The project is shown through the simulation and the dashboard. `firmware/pi_hal.py` stays as the written design for a real node (untested); the Pi test, the gateway laptop's USB layer and the ESP32 bridge are dropped.
 
-1. Decide open decision 1 (quality model classes).
-2. **Real Pi Zero 2 W test:** run one node's firmware with simulated readings; measure memory (`/usr/bin/time -v`), processor (`htop`), temperature (`vcgencmd measure_temp`).
-3. **Hardware layers** (same interface as `NetHAL` in `simulation/live/node.py`):
-   - `firmware/pi_hal.py` for the nodes: **done (2026-11-27)**, untested on hardware so far. Reads recorded sensor readings row by row from a file (the sensors are simulated), plus the real SX1276 / RFM95 LoRa module with CAD, DS3231 clock, SD card, buzzer and LEDs. Setup and wiring: `firmware/README.md`. Testing on a Raspberry Pi 4 (the Zero 2 W is broken).
-   - A laptop hardware layer for the gateway that exchanges packets with the ESP32 over USB serial, plus a small ESP32 program that bridges LoRa and serial (and sends the ACKs the laptop asks for, at the second the laptop asks). The laptop layer must give the gateway `hal.slots` (every node's slot, from the installation file) so ACKs go in the sender's slot.
-4. **TinyML model:** done (2026-11-23). Next step there: lab tests with tap water spiked with known runoff or cleaner.
-5. Timestamps (UTC Unix seconds, ISO 8601 logs).
-6. One combined "all silent" alert; re-send backoff.
-7. Test the too-much check on Cache County data.
-8. Slot fit check if any node ever needs SF10 or above; set slots at installation; re-run the ns-3 link table once the gateway position is known.
-9. Monitoring dashboard on the laptop.
-10. Merge `live-simulation` into `main` after team review.
+1. **Encryption:** done (2026-11-27). Packet bodies are encrypted with AES-128 in counter mode (`firmware/packet.py`).
+2. **Dashboard leak demo** (next): pick one flat, choose how bad the leak is, and fast-forward the simulation until that flat's alert reaches the gateway. Show when the leak started, which check caught it, how long that took and when the gateway knew. Caretaker view first (every flat as a green/yellow/red tile, alerts, tank); radio numbers in a second tab. Builds on the Streamlit control panel (`simulation/live/control_panel.py`). Still to decide: choose the leak's start time or not; three fixed sizes or a slider; race through the learning day automatically.
+3. **Security demo:** an attacker in the radio model that sends forged packets, replays old ones and listens in, plus a checker line proving all forged and replayed packets were rejected and the bodies were unreadable. Also make `NetHAL` (simulated node) check the ACK signature before setting its clock, as `pi_hal.py` already does.
+4. **Retry storm:** wait longer between re-sends the longer a radio cut lasts (about 13,000 re-send attempts in a 3.5 h cut today).
+5. **Realistic water use:** test the leak checks on real household data (Cache County HydroShare, 31 homes, 4-second readings), because the simulated use is too smooth for "0 false alarms" to mean much.
+6. One combined "all nodes silent" alert instead of 21 separate `NODE_SILENT`.
+7. Timestamps in logs (ISO 8601).
+8. Agree final pass marks in `simulation/live/check_comms.py`.
+9. Slot fit check if any node ever needs SF9 or above (gateway replies included).
 
 ---
 

@@ -1,17 +1,26 @@
-"""Aqua Edge radio packets: compact binary, signed. Used by the nodes and the gateway.
+"""Aqua Edge radio packets: compact binary, encrypted and signed. Used by the nodes and the gateway.
 
-Plain LoRa has no security, so we borrow two ideas from LoRaWAN (docs/IMPROVEMENT_PLAN.md
-section 3): a short signature (tag) on every packet, and a counter that never repeats.
+Plain LoRa has no security, so we borrow three ideas from LoRaWAN (docs/IMPROVEMENT_PLAN.md
+section 3): the body is encrypted with AES-128 in counter mode, a short signature (tag) covers
+the whole packet, and a counter never repeats.
 
-    header  type(1) node(1) counter(4) time(4)      10 bytes
-    body    fields, each: field number(1) + value    (ALERT, FLAG, SUM; none for ACK)
-    tag     first 4 bytes of HMAC-SHA256(key, header + body)
+    header  type(1) node(1) counter(4) time(4)      10 bytes, readable
+    body    fields, each: field number(1) + value    encrypted (ALERT, FLAG, SUM; none for ACK)
+    tag     first 4 bytes of HMAC-SHA256(key, header + encrypted body)
 
 - Node packets: node = sender, counter = the node's sequence number, time = node clock.
 - ACK: node = the node being answered, counter = the sequence number it acknowledges,
   time = gateway clock ("gt"). Signed with that node's key, so nobody else can fake it.
-- Signed only, not encrypted: anyone can read a packet, nobody can forge or change one.
-- Each node shares one secret 16-byte key with the gateway: hal.key(name).
+- Nobody can read the body (flow, volumes, pH, which alert) or forge or change any packet.
+  The header stays readable, as in LoRaWAN, so the gateway knows whose key to use: a listener
+  can still see that B-203 sent an ALERT at 02:30, but not what it says.
+- Counter mode adds no bytes, so encryption does not change packet sizes or airtime. Its
+  starting block is the header, which never repeats for a key (the node's counter never
+  repeats; the type byte tells a message from its ACK). A resend is the identical packet.
+- Encrypt, then sign: the tag is checked before anything is decrypted.
+- Each node shares one secret 16-byte key with the gateway: hal.key(name). The encryption key
+  is derived from it, so encrypting and signing use different keys (like LoRaWAN's two
+  session keys) without a second key file.
 
     python3 packet.py      # self-check
 """
@@ -19,6 +28,8 @@ import hashlib
 import hmac
 import json
 import struct
+
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
 TAG_BYTES = 4                                   # LoRaWAN also uses a 4-byte check
 HEADER = struct.Struct(">BBII")
@@ -61,17 +72,26 @@ def _tag(key, data):
     return hmac.new(key, data, hashlib.sha256).digest()[:TAG_BYTES]
 
 
+def _crypt(key, header, body):
+    """AES-128 in counter mode; the same call encrypts and decrypts."""
+    enc_key = hmac.new(key, b"aqua-edge-encrypt", hashlib.sha256).digest()[:16]
+    c = Cipher(algorithms.AES(enc_key), modes.CTR(header + bytes(16 - len(header)))).encryptor()
+    return c.update(body) + c.finalize()
+
+
 def pack(m, key):
-    """Message dict -> signed bytes. Unknown fields or alert names fail loudly."""
+    """Message dict -> encrypted, signed bytes. Unknown fields or alert names fail loudly."""
     t = m["gt"] if m["k"] == "ACK" else m["t"]
-    data = HEADER.pack(KINDS.index(m["k"]), NAMES.index(m["n"]), m["s"], round(t))
+    header = HEADER.pack(KINDS.index(m["k"]), NAMES.index(m["n"]), m["s"], round(t))
+    body = b""
     for name in FIELD_NAMES:
         if name in m:
             v = CODES[name].index(m[name]) if name in CODES else m[name]
-            data += bytes([FIELD_NAMES.index(name)]) + struct.pack(FIELDS[name], v)
+            body += bytes([FIELD_NAMES.index(name)]) + struct.pack(FIELDS[name], v)
     extra = set(m) - HEADER_KEYS - set(FIELDS)
     if extra:
         raise ValueError(f"no packet field for {sorted(extra)}")
+    data = header + _crypt(key, header, body)
     return data + _tag(key, data)
 
 
@@ -83,20 +103,21 @@ def peek(raw):
 
 
 def unpack(raw, key_for):
-    """Signed bytes -> message dict, or None if the packet is broken or the tag is wrong.
-    key_for(name) gives the key for the node named in the header (None: not ours to read)."""
+    """Encrypted, signed bytes -> message dict, or None if the packet is broken or the tag is
+    wrong. key_for(name) gives the key for the node named in the header (None: not ours to read)."""
     try:
         m = peek(raw)
         key = key_for(m["n"])
         if key is None or not hmac.compare_digest(_tag(key, raw[:-TAG_BYTES]), raw[-TAG_BYTES:]):
-            return None
-        pos, end = HEADER.size, len(raw) - TAG_BYTES
-        while pos < end:
-            name = FIELD_NAMES[raw[pos]]
-            (v,) = struct.unpack_from(FIELDS[name], raw, pos + 1)
+            return None                                 # checked before anything is decrypted
+        body = _crypt(key, raw[:HEADER.size], raw[HEADER.size:-TAG_BYTES])
+        pos = 0
+        while pos < len(body):
+            name = FIELD_NAMES[body[pos]]
+            (v,) = struct.unpack_from(FIELDS[name], body, pos + 1)
             pos += 1 + struct.calcsize(FIELDS[name])
             m[name] = CODES[name][v] if name in CODES else round(v, 4) if isinstance(v, float) else v
-        return m if pos == end else None
+        return m if pos == len(body) else None
     except (IndexError, struct.error):
         return None
 
@@ -117,10 +138,18 @@ if __name__ == "__main__":
     for m in msgs:
         raw = pack(m, keys(m["n"]))
         assert unpack(raw, keys) == m, (unpack(raw, keys), m)          # same message back
-        bad = bytearray(raw)
-        bad[5] ^= 1                                                      # one bit changed
-        assert unpack(bytes(bad), keys) is None
+        fields = sum(1 + struct.calcsize(FIELDS[f]) for f in m if f in FIELDS)
+        assert len(raw) == HEADER.size + fields + TAG_BYTES              # encryption adds no bytes
+        for bit_at in (5, HEADER.size) if fields else (5,):
+            bad = bytearray(raw)
+            bad[bit_at] ^= 1                                             # one bit changed: header or encrypted body
+            assert unpack(bytes(bad), keys) is None
         print(f"{m['k']:5} {len(raw):3} bytes (JSON {len(json.dumps(m, separators=(',', ':'))):3})")
+    # Nobody without the key can read the body: the packed flow value does not appear in the packet,
+    # and the same message under another node's key gives different bytes
+    alert = msgs[1]
+    assert struct.pack(">f", alert["flow"]) not in pack(alert, k203)
+    assert pack(alert, k203)[HEADER.size:] != pack(alert, k101)[HEADER.size:]
     ack = pack(msgs[-1], k203)
     assert unpack(ack, lambda n: k101 if n == "B-203" else None) is None   # signed with the wrong key
     assert unpack(ack, lambda n: None) is None                           # not ours to read

@@ -158,7 +158,7 @@ Self-checks: `python3 live/radio.py` and `python3 webots/run_offline.py`.
 - **Hearing assumption.** The radio model assumes every node can hear every other node (one building). Hidden nodes are not checked.
 - **One channel.** Our gateway is a single SX1276, so everything uses one channel. Using IN865's other 2 channels would need a multi-channel gateway chip (SX1302).
 - **Frequency band in ns-3.** ns-3 uses the EU868 frequency, because the module has no Indian band. The physics is the same.
-- **Packet format.** Packets are signed binary (`firmware/packet.py`), about a third of the JSON size. Keys are made from the node name for the simulation; real nodes need a key file on the SD card.
+- **Packet format.** Packets are encrypted, signed binary (`firmware/packet.py`), about a third of the JSON size. Only the body is encrypted: a listener can see that a node sent an alert, but not what it says. Keys are made from the node name for the simulation; real nodes need a key file on the SD card.
 - **Leak modelling.** Leaks use internal WNTR settings (tested with wntr 1.5.0).
 - **Gateway repeat check.** The gateway cannot yet tell "the same leak flickering" from "a new leak". It only marks repeats.
 - **Retry storm.** During a 3.5-hour radio cut, nodes made about 13,000 re-send attempts.

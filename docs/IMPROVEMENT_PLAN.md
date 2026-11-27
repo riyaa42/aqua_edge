@@ -117,11 +117,11 @@ It is used by the nodes and the gateway, and needs only the standard library (`s
 
 ### 3.3 To discuss (defaults used for now)
 
-Defaults chosen when building: **4-byte tag** (`TAG_BYTES`, the same size LoRaWAN uses), **signed only, not encrypted**, and simulation keys made from the node name (`sim_key`, simulation only). Real nodes and the gateway read their keys from a key file on the SD card with `load_keys` (never committed: `*keys.json` is in `.gitignore`).
+Defaults chosen when building: **4-byte tag** (`TAG_BYTES`, the same size LoRaWAN uses), **signed only, not encrypted** (since 2026-11-27 the body is also encrypted, AES-128 in counter mode; see open question 3), and simulation keys made from the node name (`sim_key`, simulation only). Real nodes and the gateway read their keys from a key file on the SD card with `load_keys` (never committed: `*keys.json` is in `.gitignore`).
 
 1. Is a 4-byte tag enough for us, or should we use 8 bytes (safer, 4 more bytes on air)?
 2. How do the keys get onto each node at installation, and what happens if one node's key leaks?
-3. Should messages also be **encrypted** (hidden), or only signed (readable but tamper-proof)? Flat water use is personal data.
+3. Should messages also be **encrypted** (hidden), or only signed (readable but tamper-proof)? Flat water use is personal data. **Decided 2026-11-27: encrypt.** The body (values, which alert) is encrypted with AES-128 in counter mode, as LoRaWAN does; the 10-byte header stays readable so the gateway knows whose key to use. No extra bytes, and the encryption key is derived from the existing node key.
 
 ## 4. Phase 3: smarter leak detection (discuss first)
 
