@@ -118,11 +118,24 @@ def state(run=RUN, radio=False):
 
     tank = [m for m in log if m["n"] == "B-TANK"]
     levels = [[m["t"], m["level_m"]] for m in tank if m["k"] == "SUM" and "level_m" in m]
-    quality = next((m["a"] for m in reversed(tank) if m["k"] == "ALERT" and m["a"].startswith("QUALITY")), "QUALITY_CLEARED")
+    qalerts = [m for m in tank if m["k"] == "ALERT" and m["a"].startswith("QUALITY")]
+    quality = qalerts[-1]["a"] if qalerts else "QUALITY_CLEARED"
+    # Water quality card: the tank node only sends readings with a bad-water alert (it judges the
+    # water itself), so show the last bad reading, and the latest runoff/chemical test with when it was caught
+    bad = [m for m in qalerts if m["a"] != "QUALITY_CLEARED"]
+    qtests = [e for e in applied if e["do"] == "quality"]
+    qtest = qtests[-1] if qtests else None
+    if qtest:
+        hit = next((m for m in bad if m["a"] == "QUALITY_" + qtest["kind"].upper() and m["t"] >= qtest["t"]), None)
+        clean = hit and next((m for m in qalerts if m["a"] == "QUALITY_CLEARED" and m["t"] > hit["t"]), None)
+        qtest = {"kind": qtest["kind"], "start": qtest["t"], "end": qtest["t"] + 60 * qtest["minutes"],
+                 "alert": hit and {k: hit[k] for k in ("a", "t", "rx")}, "clean": clean and clean["rx"]}
     feed = [e for e in gw if e["event"] not in ("BALANCE_PAUSED",)][-40:][::-1]
 
     out = {"running": running, "clock": clock, "nodes": nodes, "sites": lines(run, "leak_sites.txt"),
            "status": status, "active": active, "led": led, "leaks": leaks[::-1], "later": later, "feed": feed, "levels": levels[-96:], "quality": quality,
+           "quality_since": qalerts[-1]["rx"] if qalerts else None,
+           "quality_bad": bad and {k: bad[-1].get(k) for k in ("a", "ph", "tds", "t", "rx")}, "quality_test": qtest,
            "messages": len(log)}
     if radio:
         out["radio"] = radio_stats(run, log)
@@ -288,6 +301,18 @@ def check():
         f.write(json.dumps({"t": 101000, "do": "fix", "where": "B-D1"}) + "\n")
     s = state(run)
     assert [m["a"] for m in s["active"] if m["n"] in ("PIPE", "B-TANK")] == ["QUALITY_RUNOFF"], s["active"]
+    # Water quality card: a runoff test, caught by the tank node, then reported clean again
+    with open(os.path.join(run, "events_applied.jsonl"), "a") as f:
+        f.write(json.dumps({"t": 102000, "do": "quality", "kind": "runoff", "minutes": 60}) + "\n")
+    with open(os.path.join(run, "gateway_log.jsonl"), "a") as f:
+        f.write(json.dumps({"k": "ALERT", "n": "B-TANK", "s": 10, "t": 102180, "a": "QUALITY_RUNOFF", "ph": 6.4, "tds": 52, "rx": 102240}) + "\n")
+    s = state(run)
+    assert s["quality_test"] == {"kind": "runoff", "start": 102000, "end": 105600, "alert": {"a": "QUALITY_RUNOFF", "t": 102180, "rx": 102240}, "clean": None}, s["quality_test"]
+    assert s["quality_bad"] == {"a": "QUALITY_RUNOFF", "ph": 6.4, "tds": 52, "t": 102180, "rx": 102240} and s["quality_since"] == 102240
+    with open(os.path.join(run, "gateway_log.jsonl"), "a") as f:
+        f.write(json.dumps({"k": "ALERT", "n": "B-TANK", "s": 11, "t": 106200, "a": "QUALITY_CLEARED", "rx": 106260}) + "\n")
+    s = state(run)
+    assert s["quality"] == "QUALITY_CLEARED" and s["quality_test"]["clean"] == 106260 and not any(m["n"] == "B-TANK" for m in s["active"])
     # Only sensible commands get through
     sites, nodes = s["sites"], s["nodes"]
     good = [{"do": "leak", "where": "B-203", "size": 0.3, "at_s": 100000}, {"do": "leak", "where": "B-D1", "size": "large"},

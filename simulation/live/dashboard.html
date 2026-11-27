@@ -47,6 +47,7 @@ button, select, input { font: inherit; color: inherit; }
 .clock { display: flex; align-items: center; gap: 12px; padding: 10px 12px 10px 22px; border-radius: 999px; }
 .clock #clock { font-family: var(--display); font-size: 1.4rem; font-weight: 500; font-variant-numeric: tabular-nums; }
 .chip { display: inline-block; padding: 4px 12px; border-radius: 999px; font-size: .85rem; font-weight: 700; background: var(--slab); box-shadow: var(--well-shadow); }
+.chip.bad { background: var(--alert); }
 .chip.racing { background: var(--action); color: #fff; box-shadow: inset -3px -4px 8px rgba(0, 0, 0, .15), inset 3px 4px 8px rgba(255, 255, 255, .35); }
 .controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
 .controls .btn { white-space: nowrap; }
@@ -70,9 +71,25 @@ select { border: 0; border-radius: 16px; padding: 10px 14px; background: var(--s
 
 /* First screen: three columns that fill the window, long lists scroll inside their own card */
 .screen { height: calc(100vh - 14px); min-height: 640px; display: flex; flex-direction: column; }
-.cockpit { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(360px, .85fr) minmax(400px, 1fr); gap: 22px; padding-bottom: 14px; }
+.cockpit { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, .95fr) minmax(380px, 1fr) minmax(400px, 1fr); gap: 22px; padding-bottom: 14px; }
 .col { display: flex; flex-direction: column; gap: 22px; min-height: 0; min-width: 0; }
 .col > * { flex: none; }
+/* Middle column scrolls inside itself if the window is short, instead of spilling over the page below.
+   The padding keeps the cards' soft shadows from being cut off at the scroll edge */
+.col.mid { overflow-y: auto; margin: -16px -18px; padding: 16px 18px; }
+.verdict { display: grid; gap: 2px; margin: 8px 0 10px; padding: 10px 16px; border-radius: 20px; background: var(--calm);
+  box-shadow: inset -4px -5px 10px color-mix(in srgb, var(--calm-deep) 30%, transparent), inset 4px 5px 10px rgba(255, 255, 255, .55); }
+.verdict b { font-family: var(--display); font-weight: 600; font-size: 1.35rem; line-height: 1.2; }
+.verdict span { font-size: .9rem; }
+.verdict.bad { background: var(--alert); box-shadow: inset -4px -5px 10px color-mix(in srgb, var(--alert-deep) 30%, transparent), inset 4px 5px 10px rgba(255, 255, 255, .5); }
+.verdict.none { background: var(--slab); box-shadow: var(--well-shadow); }
+.q-reading b.out { color: var(--alert-deep); }
+.water .moments { margin: 0 0 10px; }
+.water .moments li { padding: 8px 10px; }
+.water .tank-row { margin: 10px 0 0; padding-top: 10px; border-top: 2px solid var(--slab); }
+.other { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; padding-block: 14px; }
+.other h2 { margin: 0; }
+.other .events { margin: 0; }
 .col > .grow { flex: 1 1 0; min-height: 150px; display: flex; flex-direction: column; }
 .card { padding: 20px 22px; }
 .card h2 { margin-bottom: 6px; font-size: 1.2rem; }
@@ -199,7 +216,8 @@ select { border: 0; border-radius: 16px; padding: 10px 14px; background: var(--s
 .picked strong { font-family: var(--display); font-size: 2rem; font-weight: 600; line-height: 1.1; }
 #picked-info { margin-bottom: 12px; }
 .picked span { color: var(--ink-soft); font-weight: 700; }
-.sizes { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+.sizes { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 8px; }
+.sizes input[type=range] { flex: 1 1 140px; margin: 0 0 0 6px; }
 .sizes button[aria-pressed="true"], .seg button[aria-pressed="true"] { background: var(--action); color: #fff;
   box-shadow: 5px 6px 12px rgba(74, 95, 196, .3), inset -3px -4px 8px rgba(30, 40, 110, .25), inset 3px 4px 8px rgba(255, 255, 255, .35); }
 input[type=range] { width: 100%; appearance: none; height: 16px; border-radius: 999px; background: var(--slab); box-shadow: var(--well-shadow); margin: 6px 0 8px; }
@@ -264,6 +282,7 @@ input[type=range]::-moz-range-thumb { width: 30px; height: 30px; border: 0; bord
 /* Smaller or shorter screens: the page scrolls normally instead of fitting the window */
 @media (max-width: 1250px), (max-height: 820px) {
   .screen { height: auto; min-height: 0; }
+  .col.mid { overflow: visible; margin: 0; padding: 0; }
   .cockpit { grid-template-columns: minmax(0, 1fr) minmax(340px, 1fr); }
   .cockpit > .col:last-child { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr; align-items: start; }
   .cockpit > .col:last-child > .alarm { grid-column: 1 / -1; max-height: none; }
@@ -300,6 +319,7 @@ input[type=range]::-moz-range-thumb { width: 30px; height: 30px; border: 0; bord
       <span><small>Lost to collisions</small><b id="rs-col">-</b></span>
       <span><small>Usual delay</small><b id="rs-delay">-</b></span>
     </a>
+    <button class="btn" data-cmd='{"do":"radio_cut","who":"all","minutes":60}' title="Test: every node's radio goes silent for an hour">Cut every radio, 1 h</button>
     <div class="controls">
       <select id="speed" aria-label="Simulation speed">
         <option value="0">As fast as possible</option>
@@ -310,6 +330,7 @@ input[type=range]::-moz-range-thumb { width: 30px; height: 30px; border: 0; bord
       </select>
       <button class="btn" id="playpause">Pause</button>
       <button class="btn" id="reset">Start again</button>
+      <button class="btn" data-cmd='{"do":"stop"}'>Stop</button>
       <button class="btn" id="sound" aria-pressed="true">Sound on</button>
     </div>
   </header>
@@ -337,10 +358,9 @@ input[type=range]::-moz-range-thumb { width: 30px; height: 30px; border: 0; bord
       </div>
     </section>
 
-    <section class="col">
+    <section class="col mid">
       <article class="card clay" id="test-card">
         <h2>Add a leak</h2>
-        <p class="hint">Pick a node label or a white dot on the down pipe in the drawing. Add as many leaks as you like and run time from the top bar, or fast-forward until the leak is found.</p>
         <div id="start-box" hidden>
           <p class="hint" style="margin-top:14px">No simulation is running. Starting one takes about a minute: every flat first spends a simulated day learning what normal water use looks like.</p>
           <div class="stack"><button class="btn primary" id="start">Start simulation</button></div>
@@ -352,9 +372,8 @@ input[type=range]::-moz-range-thumb { width: 30px; height: 30px; border: 0; bord
             <button class="btn" data-size="small" data-lps="0.05" aria-pressed="true">Small</button>
             <button class="btn" data-size="medium" data-lps="0.5" aria-pressed="false">Medium</button>
             <button class="btn" data-size="large" data-lps="1.5" aria-pressed="false">Severe</button>
+            <input type="range" id="lps" min="0.01" max="2" step="0.01" value="0.05" aria-label="Or set any leak size">
           </div>
-          <label for="lps" class="hint">Or set any size</label>
-          <input type="range" id="lps" min="0.01" max="2" step="0.01" value="0.05">
           <p class="lps" id="lps-text"></p>
           <div class="seg" role="group" aria-label="When the leak starts">
             <button class="btn" data-start="now" aria-pressed="true">Right now</button>
@@ -372,21 +391,18 @@ input[type=range]::-moz-range-thumb { width: 30px; height: 30px; border: 0; bord
           </div>
         </div>
       </article>
-      <article class="card clay">
-        <div class="card-head"><h2>Tank</h2><span class="chip" id="tank-quality">Clean</span></div>
+      <article class="card clay water" id="water-card">
+        <div class="card-head"><h2>Water quality</h2><span class="chip" id="tank-quality">Clean</span></div>
+        <div class="verdict" id="verdict"><b id="verdict-text">No report yet</b><span id="verdict-sub"></span></div>
+        <ol class="moments" id="q-test" hidden></ol>
+        <p class="hint q-reading" id="q-reading"></p>
+        <div class="events">
+          <button class="btn" data-cmd='{"do":"quality","kind":"runoff","minutes":60}'>Send runoff into the tank, 1 h</button>
+          <button class="btn" data-cmd='{"do":"quality","kind":"chemical","minutes":45}'>Send a chemical in, 45 min</button>
+        </div>
         <div class="tank-row">
           <p class="big" id="tank-level">No report<small></small></p>
-          <svg class="spark" id="spark" viewBox="0 0 300 70" preserveAspectRatio="none" aria-label="Tank level over the last day"></svg>
-        </div>
-        <p class="hint">Water level from the tank's 15-minute reports.</p>
-      </article>
-      <article class="card clay">
-        <h2>Other events</h2>
-        <div class="events">
-          <button class="btn" data-cmd='{"do":"quality","kind":"runoff","minutes":60}'>Runoff into the tank, 1 h</button>
-          <button class="btn" data-cmd='{"do":"quality","kind":"chemical","minutes":45}'>Chemical into the tank, 45 min</button>
-          <button class="btn" data-cmd='{"do":"radio_cut","who":"all","minutes":60}'>Cut every radio, 1 h</button>
-          <button class="btn quiet" data-cmd='{"do":"stop"}'>Stop the simulation</button>
+          <svg class="spark" id="spark" viewBox="0 0 300 70" preserveAspectRatio="none" aria-label="Tank water level over the last day"></svg>
         </div>
       </article>
     </section>
@@ -695,12 +711,41 @@ function renderTank() {
   water.style.background = S.quality === "QUALITY_RUNOFF" ? "var(--runoff)" : S.quality === "QUALITY_CHEMICAL" ? "var(--chemical)" : "var(--water)";
   $("#tank-label").innerHTML = last == null ? "Tank<small>no report yet</small>" : `${last.toFixed(2)} m<small>${QUALITY[S.quality]}</small>`;
   $("#tank-level").innerHTML = last == null ? "No report<small></small>" : `${last.toFixed(2)} m <small>of water</small>`;
-  $("#tank-quality").textContent = QUALITY[S.quality];
+  renderWater();
   const svg = $("#spark");
   if (lv.length < 2) { svg.innerHTML = ""; return; }
   const t0 = lv[0][0], t1 = lv[lv.length - 1][0], lo = Math.min(...lv.map(p => p[1])) - .05, hi = Math.max(...lv.map(p => p[1])) + .05;
   const pts = lv.map(([t, v]) => `${((t - t0) / (t1 - t0 || 1) * 296 + 2).toFixed(1)},${(66 - (v - lo) / (hi - lo) * 62).toFixed(1)}`).join(" ");
   svg.innerHTML = `<polyline points="2,70 ${pts} 298,70" fill="var(--water)" opacity=".35"/><polyline points="${pts}" fill="none" stroke="#4a90c8" stroke-width="3" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>`;
+}
+
+/* Water quality: the tank node's small model judges pH, dissolved salts and cloudiness every minute and only
+   radios when the water turns bad or clean again, so the readings shown are the ones sent with the last bad-water alert */
+const LIMITS = {ph: [6.5, 8.5], tds: [0, 500]};   // IS 10500, the limits the model was trained on
+function renderWater() {
+  const live = S.running && S.clock, bad = S.quality !== "QUALITY_CLEARED", heard = S.levels.length || S.quality_since != null;
+  $("#tank-quality").textContent = QUALITY[S.quality]; $("#tank-quality").classList.toggle("bad", bad);
+  $("#verdict").className = "verdict " + (!heard ? "none" : bad ? "bad" : "");
+  $("#verdict-text").textContent = !heard ? "No report yet" : bad ? `${QUALITY[S.quality]}: not safe to drink` : "Clean, safe to drink";
+  $("#verdict-sub").textContent = bad ? `Raised by the tank node, gateway heard it ${when(S.quality_since)}. What to do is under Needs attention.`
+    : S.quality_since != null ? `Reported clean again ${when(S.quality_since)}. Checked every minute on the tank node.`
+    : "Checked every minute on the tank node: pH, dissolved salts (TDS) and cloudiness.";
+  const b = S.quality_bad, val = (k, v, unit) => {
+    const [lo, hi] = LIMITS[k], out = v < lo || v > hi;
+    return `<b class="${out ? "out" : ""}">${k === "ph" ? "pH" : "TDS"} ${v}${unit}</b>${out ? (v < lo ? " (too low)" : " (too high)") : ""}`;
+  };
+  $("#q-reading").innerHTML = (b && b.ph != null ? `Readings sent with the ${bad ? "" : "last "}alert: ${val("ph", b.ph, "")}, ${val("tds", b.tds, " ppm")}. ` : "")
+    + "Safe (IS 10500): pH 6.5 to 8.5, TDS up to 500 ppm, cloudiness up to 5 NTU.";
+  const q = S.quality_test, box = $("#q-test"), t = S.clock ? S.clock.t : 0;
+  box.hidden = !q;
+  if (!q) return;
+  const hm = x => when(x).split(", ")[1], name = q.kind === "runoff" ? "Runoff" : "Chemical", a = q.alert;
+  const step = (n, cls, head, sub) => `<li class="${cls}"><span class="n">${n}</span><span><b>${head}</b><span>${sub}</span></span></li>`;
+  box.innerHTML = step(1, "done", `${name} in ${hm(q.start)}`, t < q.end ? `test runs until ${hm(q.end)}` : `for ${mins(q.end - q.start)}`)
+    + (a ? step(2, "hit", `Caught ${hm(a.t)}`, `${mins(a.t - q.start)} later, gateway ${hm(a.rx)}`)
+         : step(2, "wait", "Not caught yet", live ? "needs 3 bad minutes in a row" : "the run ended first"))
+    + (q.clean ? step(3, "done", `Clean ${hm(q.clean)}`, "10 good minutes in a row")
+         : step(3, "wait", "Not clean yet", t < q.end ? "test still running" : "needs 10 good minutes"));
 }
 
 function renderControls() {
