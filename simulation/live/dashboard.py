@@ -75,13 +75,16 @@ def state(run=RUN, radio=False):
         if m["a"] == "QUALITY_CLEARED":
             calm_since[m["n"]] = m["rx"]
     alerts = [m for m in alerts if m["a"] != "QUALITY_CLEARED"]
-    status = {n: "ok" for n in nodes}
+    status, latest = {n: "ok" for n in nodes}, {}
     for e in gw:
         if e["event"] in ("NODE_SILENT", "NODE_BACK") and e["node"] in status:
             status[e["node"]] = "silent" if e["event"] == "NODE_SILENT" else "ok"
     for m in alerts:
         if m["rx"] > calm_since.get(m["n"], -1):
-            status[m["n"]] = "alert"
+            status[m["n"]], latest[m["n"]] = "alert", m
+    # Problems the gateway knows about and nobody has fixed yet, newest first (the alarm banner)
+    active = sorted(({k: m[k] for k in ("n", "a", "t", "rx")} for m in latest.values()), key=lambda m: -m["rx"])
+    led = {e["n"]: e["led"] for e in jsonl(run, "leds.jsonl")}   # each node's own LED (red = buzzer on)
 
     # Every leak in this run, newest first: when it started, which check caught it, when the
     # gateway knew. A leak ends when it is fixed or its flat gets a new leak size ("replaced").
@@ -106,7 +109,7 @@ def state(run=RUN, radio=False):
     feed = [e for e in gw if e["event"] not in ("BALANCE_PAUSED",)][-40:][::-1]
 
     out = {"running": running, "clock": clock, "nodes": nodes, "sites": lines(run, "leak_sites.txt"),
-           "status": status, "leaks": leaks[::-1], "later": later, "feed": feed, "levels": levels[-96:], "quality": quality,
+           "status": status, "active": active, "led": led, "leaks": leaks[::-1], "later": later, "feed": feed, "levels": levels[-96:], "quality": quality,
            "messages": len(log)}
     if radio:
         out["radio"] = radio_stats(run, log)
@@ -227,11 +230,14 @@ def check():
     assert s["running"] and s["status"] == {"B-203": "alert", "B-204": "silent", "B-TANK": "ok"}, s["status"]
     assert s["leaks"][0]["alert"] == {"a": "LEAK_NIGHT_FLOW", "t": 95400, "rx": 95460}, s["leaks"]
     assert s["levels"] == [[93600, 1.42]] and s["quality"] == "QUALITY_CLEARED"
+    assert s["active"] == [{"n": "B-203", "a": "LEAK_NIGHT_FLOW", "t": 95400, "rx": 95460}]
+    w("leds.jsonl", '{"t": 95400, "n": "B-203", "led": "red"}\n{"t": 95400, "n": "B-204", "led": "yellow"}\n')
+    assert state(run)["led"] == {"B-203": "red", "B-204": "yellow"}
     # Fixing the leak turns the flat calm again and closes the test
     with open(os.path.join(run, "events_applied.jsonl"), "a") as f:
         f.write(json.dumps({"t": 97000, "do": "fix", "where": "B-203"}) + "\n")
     s = state(run)
-    assert s["status"]["B-203"] == "ok" and s["leaks"][0]["fixed"] == 97000
+    assert s["status"]["B-203"] == "ok" and s["leaks"][0]["fixed"] == 97000 and s["active"] == []
     # A second leak elsewhere, one scheduled for later, and a new size for an open leak
     with open(os.path.join(run, "events_applied.jsonl"), "a") as f:
         f.write(json.dumps({"t": 97100, "do": "leak", "where": "B-204", "size": "small"}) + "\n")

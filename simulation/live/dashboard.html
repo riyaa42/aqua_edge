@@ -67,7 +67,7 @@ select { border: 0; border-radius: 16px; padding: 10px 14px; background: var(--s
 .tabs button[aria-selected="true"] { background: var(--clay); color: var(--ink); box-shadow: 4px 5px 10px rgba(var(--shade), .18), inset 3px 4px 8px rgba(255, 255, 255, .9); }
 
 /* Building tab layout */
-.grid { display: grid; grid-template-columns: minmax(330px, 460px) 1fr; gap: 28px; align-items: start; }
+.grid { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(340px, 1fr); gap: 28px; align-items: start; }
 .side { display: grid; gap: 28px; }
 .lower { display: grid; grid-template-columns: 1.4fr 1fr 1fr; gap: 28px; margin-top: 28px; }
 .card { padding: 26px 28px; }
@@ -104,6 +104,76 @@ select { border: 0; border-radius: 16px; padding: 10px 14px; background: var(--s
 .dot { width: 14px; height: 14px; border-radius: 50%; flex: none; background: var(--calm); box-shadow: inset -2px -3px 4px rgba(var(--shade), .2), inset 2px 2px 3px rgba(255, 255, 255, .6); }
 .dot.alert { background: var(--alert); } .dot.silent { background: var(--watch); } .dot.action { background: var(--action); }
 .legend svg { width: 12px; height: 16px; }
+
+/* Building cutaway: drawn from the real node positions (ns3/positions.csv), walls see-through */
+.diagram { padding: 14px 10px 6px; border-radius: 40px; }
+.diagram svg { width: 100%; height: auto; display: block; overflow: visible; }
+.dg-ground { fill: #c9d8e2; fill-opacity: .55; stroke: rgba(33, 59, 79, .12); stroke-width: .1; }
+.dg-wall { fill: #fff; fill-opacity: .14; stroke: rgba(33, 59, 79, .3); stroke-width: .07; stroke-linejoin: round; pointer-events: none; }
+.dg-wall.back { fill-opacity: .38; }
+.dg-wall.inner { fill-opacity: .1; stroke: rgba(33, 59, 79, .16); }
+.dg-slab { fill: #e6eef3; fill-opacity: .75; stroke: rgba(33, 59, 79, .35); stroke-width: .08; stroke-linejoin: round; pointer-events: none; }
+.dg-room { fill: var(--calm); fill-opacity: .5; cursor: pointer; transition: fill .4s, fill-opacity .2s; }
+.dg-room:hover { fill-opacity: .72; }
+.dg-room.alert { fill: var(--alert); fill-opacity: .7; }
+.dg-room.silent { fill: var(--watch); fill-opacity: .7; }
+.dg-room.off { fill: #cfd9e0; cursor: default; }
+.dg-room.sel { stroke: var(--action); stroke-width: .3; stroke-linejoin: round; }
+.dg-pipe { fill: none; stroke: #79b4d8; stroke-width: .34; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
+.dg-pipe.rise { stroke: #3a76a8; }
+.dg-pipe.branch { stroke-width: .2; stroke: #93c6e2; }
+.dg-pipe.buried { stroke-dasharray: .6 .45; }
+.dg-buried { fill: #b8cbd8; fill-opacity: .35; stroke: #6c8799; stroke-width: .08; stroke-dasharray: .5 .4; }
+.dg-node { cursor: pointer; }
+.dg-node rect { fill: var(--clay); stroke: rgba(33, 59, 79, .4); stroke-width: .08; }
+.dg-node.sel rect { stroke: var(--action); stroke-width: .3; }
+.dg-node text, .dg-label { font-family: var(--display); font-weight: 600; fill: var(--ink); }
+.dg-label { fill: var(--ink-soft); font-family: var(--body); font-weight: 800; }
+.dg-led { fill: #5fb3a6; stroke: rgba(33, 59, 79, .3); stroke-width: .06; }
+.dg-led.yellow { fill: #e8b84a; } .dg-led.red { fill: #e0475f; }
+.dg-led.off { fill: #b9c6cf; }
+.dg-buzz path { fill: none; stroke: #c24459; stroke-width: .16; stroke-linecap: round; animation: buzz 1s steps(2) infinite; }
+@keyframes buzz { 50% { opacity: .15; } }
+.dg-site { fill: #fff; stroke: #3a76a8; stroke-width: .16; cursor: pointer; }
+.dg-site:hover { fill: #dce9ff; }
+.dg-site.sel { stroke: var(--action); stroke-width: .3; }
+.dg-site.leak { fill: var(--alert); }
+.dg-drip path { fill: #3f86c4; }
+.dg-drip { animation: dgdrip 1.6s ease-in infinite; }
+@keyframes dgdrip { 0% { transform: translateY(-.3px); opacity: .55; } 40% { opacity: 1; } 100% { transform: translateY(.5px); opacity: .55; } }   /* SVG units are metres, not pixels */
+.dg-tank-glass { fill: #fff; fill-opacity: .22; stroke: rgba(33, 59, 79, .4); stroke-width: .08; }
+.dg-tank-water { fill: var(--water); fill-opacity: .8; transition: fill .6s; }
+.dg-waves path { fill: none; stroke: var(--action-deep); stroke-width: .18; stroke-linecap: round; opacity: 0; }
+.dg-waves.pulse path { animation: wave 1.6s ease-out; }
+.dg-waves.pulse path:nth-child(2) { animation-delay: .15s; } .dg-waves.pulse path:nth-child(3) { animation-delay: .3s; }
+@keyframes wave { 0% { opacity: 0; } 20% { opacity: 1; } 100% { opacity: 0; } }
+.only-narrow { display: none; }
+@media (max-width: 700px) { .only-wide { display: none; } .only-narrow { display: block; } }
+.tank.alert { background: var(--alert); }
+
+/* What each node measures */
+.sensors { margin-top: 24px; padding: 22px 26px; }
+.sensors ul { list-style: none; padding: 0; margin: 12px 0 0; display: grid; gap: 12px; }
+.sensors li { display: grid; grid-template-columns: 112px 1fr; gap: 14px; padding: 12px 14px; border-radius: 20px; background: var(--slab); box-shadow: var(--well-shadow); }
+.sensors b { font-family: var(--display); font-weight: 600; }
+.sensors b small { display: block; font-family: var(--body); font-weight: 700; color: var(--ink-soft); font-size: .8rem; }
+.sensors p { font-size: .92rem; }
+.sensors p span { color: var(--ink-soft); }
+@media (max-width: 520px) { .sensors li { grid-template-columns: 1fr; gap: 4px; } }
+
+/* Alarm: problems the gateway knows about, until they are fixed */
+.alarm { margin: 0 0 24px; padding: 20px 24px; border-radius: 30px; background: #fbe3e6;
+  box-shadow: 12px 14px 28px rgba(194, 68, 89, .22), inset -6px -8px 16px rgba(194, 68, 89, .14), inset 6px 8px 16px rgba(255, 255, 255, .8); }
+.alarm-head { display: flex; align-items: center; gap: 14px; }
+.alarm-head svg { width: 38px; height: 38px; flex: none; }
+.alarm.fresh .alarm-head svg { animation: ring .5s ease-in-out 4; transform-origin: 50% 10%; }
+@keyframes ring { 25% { transform: rotate(14deg); } 75% { transform: rotate(-14deg); } }
+.alarm ul { list-style: none; padding: 0; margin: 12px 0 0; display: grid; gap: 10px; }
+.alarm li { display: grid; grid-template-columns: 1fr auto; gap: 4px 16px; padding: 12px 16px; border-radius: 20px; background: rgba(255, 255, 255, .6); box-shadow: inset 3px 4px 8px rgba(194, 68, 89, .1); }
+.alarm li b { font-weight: 800; }
+.alarm li p { grid-column: 1; color: #6b3440; font-size: .93rem; }
+.alarm li time { grid-row: 1 / span 2; grid-column: 2; align-self: center; text-align: right; font-size: .85rem; font-weight: 700; color: #6b3440; }
+@media (max-width: 520px) { .alarm li { grid-template-columns: 1fr; } .alarm li time { grid-row: auto; grid-column: 1; text-align: left; } }
 
 /* Leak test */
 .picked { display: flex; align-items: baseline; gap: 10px; margin: 18px 0 14px; }
@@ -174,7 +244,7 @@ input[type=range]::-moz-range-thumb { width: 30px; height: 30px; border: 0; bord
   .flat .num { font-size: 1.05rem; } .flat .word { display: none; }
   .moments { grid-template-columns: 1fr; }
 }
-@media (prefers-reduced-motion: reduce) { .drip svg { animation: none; } * { transition: none !important; } }
+@media (prefers-reduced-motion: reduce) { .drip svg, .dg-drip, .dg-buzz path, .alarm.fresh .alarm-head svg { animation: none; } * { transition: none !important; } }
 </style>
 </head>
 <body>
@@ -195,8 +265,17 @@ input[type=range]::-moz-range-thumb { width: 30px; height: 30px; border: 0; bord
       </select>
       <button class="btn" id="playpause">Pause</button>
       <button class="btn" id="reset">Start again</button>
+      <button class="btn" id="sound" aria-pressed="true">Sound on</button>
     </div>
   </header>
+
+  <section class="alarm" id="alarm" role="alert" hidden>
+    <div class="alarm-head">
+      <svg viewBox="0 0 40 40" aria-hidden="true"><path d="M20 4c-6 0-10 4.6-10 10.5V22l-3.5 5.5h27L30 22v-7.5C30 8.6 26 4 20 4z" fill="#e0475f"/><circle cx="20" cy="32.5" r="3.5" fill="#c24459"/><ellipse cx="15.5" cy="12" rx="2.2" ry="4" fill="#fff" opacity=".45"/></svg>
+      <h2 id="alarm-title">Needs attention</h2>
+    </div>
+    <ul id="alarm-list"></ul>
+  </section>
 
   <nav class="tabs" role="tablist">
     <button role="tab" aria-selected="true" data-tab="building">Building</button>
@@ -206,9 +285,12 @@ input[type=range]::-moz-range-thumb { width: 30px; height: 30px; border: 0; bord
   <main id="tab-building">
     <div class="grid">
       <section>
-        <div class="building clay" id="building" aria-label="Building B, pick a flat">
+        <div class="diagram clay only-wide">
+          <svg id="dg" aria-label="Building B cut open: click a flat, or a white dot on the down pipe, to pick where a leak goes"></svg>
+        </div>
+        <div class="building clay only-narrow" id="building" aria-label="Building B, pick a flat">
           <div class="roof">
-            <div class="tank" title="Water tank on the roof">
+            <div class="tank" id="tank-tile" title="Water tank on the roof">
               <div class="tank-window"><div class="tank-water" id="tank-water"></div></div>
               <div class="tank-label" id="tank-label">Tank<small>no report yet</small></div>
             </div>
@@ -217,22 +299,34 @@ input[type=range]::-moz-range-thumb { width: 30px; height: 30px; border: 0; bord
         </div>
         <ul class="legend">
           <li><span class="dot"></span>Normal</li>
-          <li><span class="dot alert"></span>Leak alert at the gateway</li>
+          <li><span class="dot alert"></span>Alert reached the gateway</li>
           <li><span class="dot silent"></span>Not heard for 45 min</li>
-          <li><svg viewBox="0 0 12 16" aria-hidden="true"><path d="M6 1C6 1 1 7 1 10.5a5 5 0 0 0 10 0C11 7 6 1 6 1z" fill="#4a90c8"/></svg>Leak running (simulated: the system has to find it)</li>
+          <li><svg viewBox="0 0 12 16" aria-hidden="true"><path d="M6 1C6 1 1 7 1 10.5a5 5 0 0 0 10 0C11 7 6 1 6 1z" fill="#4a90c8"/></svg>Leak running (the system has to find it)</li>
+          <li class="only-wide"><span class="dot" style="background:#e0475f"></span>Red light on a node: its own alarm, buzzer beeping, works even with the radio down</li>
+          <li class="only-wide"><span class="dot" style="background:#fff;box-shadow:inset 0 0 0 2px #3a76a8"></span>Spot on the main down pipe where you can start a leak</li>
+          <li class="only-wide"><span class="dot" style="background:#3a76a8"></span>Rising pipe, pump to tank <span class="dot" style="background:#79b4d8;margin-left:8px"></span>Down pipe, tank to flats</li>
         </ul>
+        <article class="card clay sensors">
+          <h2>What each node measures</h2>
+          <ul>
+            <li><b>Flat node<small>20, one per flat</small></b><p>Water flow meter and pressure sensor. <span>Raises: water running at night, water never stopped for 8 hours, much more water than usual.</span></p></li>
+            <li><b>Tank node<small>1, on the roof tank</small></b><p>Inflow and outflow meters, water level, pH, TDS (dissolved salts), turbidity (cloudiness) and temperature. <span>Raises: water leaving the tank much faster than usual, runoff or chemical in the water (small model on the node), supply running low.</span></p></li>
+            <li><b>Gateway<small>1, outside</small></b><p>No sensors. <span>Receives every message, compares the tank's outflow with all the flats' use to spot pipe leaks, and notices nodes that go quiet.</span></p></li>
+          </ul>
+        </article>
       </section>
 
       <section class="side">
         <article class="card clay" id="test-card">
           <h2>Add a leak</h2>
-          <p class="hint">Pick a flat on the building and choose how bad the leak is. Add as many as you like, and run time with Pause, Play and the speed menu at the top. Or fast-forward: the simulation runs ahead until the flat's alert reaches the gateway, then pauses.</p>
+          <p class="hint">Pick a flat, or a white dot on the down pipe, and choose how bad the leak is. Add as many as you like, and run time with Pause, Play and the speed menu at the top. Or fast-forward: the simulation runs ahead until the flat's alert reaches the gateway, then pauses.</p>
           <div id="start-box" hidden>
             <p class="hint" style="margin-top:14px">No simulation is running. Starting one takes about a minute: every flat first spends a simulated day learning what normal water use looks like.</p>
             <div class="stack"><button class="btn primary" id="start">Start simulation</button></div>
           </div>
           <div id="test-box">
             <div class="picked"><strong id="picked">Pick a flat</strong><span id="picked-floor"></span></div>
+            <p class="hint" id="picked-info" style="margin:-6px 0 16px"></p>
             <div class="sizes" role="group" aria-label="Leak size">
               <button class="btn" data-size="small" data-lps="0.05" aria-pressed="true">Small</button>
               <button class="btn" data-size="medium" data-lps="0.5" aria-pressed="false">Medium</button>
@@ -315,15 +409,22 @@ const $ = s => document.querySelector(s);
 const pad = n => String(n).padStart(2, "0");
 const when = t => `Day ${Math.floor(t / 86400) + 1}, ${pad(Math.floor(t % 86400 / 3600))}:${pad(Math.floor(t % 3600 / 60))}`;
 const mins = s => s < 90 * 60 ? `${Math.round(s / 60)} min` : `${(s / 3600).toFixed(1)} h`;
-const flatName = n => n === "B-TANK" ? "Tank" : n.startsWith("B-D") ? `the pipe down to floor ${n.slice(3)}` : "Flat " + n.slice(2);
+const flatName = n => n === "B-TANK" ? "Tank" : n.startsWith("B-D") ? `Down pipe, ${n[3] === "0" ? "ground floor" : "floor " + n[3]}` : "Flat " + n.slice(2);
+const nodeOf = n => n.startsWith("B-D") ? "B-TANK" : n;     // the down pipe is watched by the tank node
 const ALERTS = {
   LEAK_NIGHT_FLOW: "Water running at night", LEAK_CONTINUOUS_FLOW: "Water never stopped for 8 hours",
-  ABNORMAL_CONSUMPTION: "Much more water than usual", ABNORMAL_SUPPLY: "water leaving much faster than usual",
+  ABNORMAL_CONSUMPTION: "Much more water than usual", ABNORMAL_SUPPLY: "Water leaving the tank much faster than usual",
   QUALITY_RUNOFF: "Runoff in the tank water", QUALITY_CHEMICAL: "Chemical in the tank water", QUALITY_CLEARED: "Tank water clean again"};
 const QUALITY = {QUALITY_CLEARED: "Clean", QUALITY_RUNOFF: "Runoff in the water", QUALITY_CHEMICAL: "Chemical in the water"};
 const SIZES = {small: 0.05, medium: 0.5, large: 1.5};
+const ADVICE = {
+  LEAK_NIGHT_FLOW: "Check the flat's taps, toilet and pipes.", LEAK_CONTINUOUS_FLOW: "Check the flat's taps, toilet and pipes.",
+  ABNORMAL_CONSUMPTION: "Check the flat's taps, toilet and pipes.",
+  ABNORMAL_SUPPLY: "Look for a burst on the main down pipe or in a flat.",
+  QUALITY_RUNOFF: "Tell residents not to drink or cook with tap water. Check the tank lid and overflow for rainwater getting in.",
+  QUALITY_CHEMICAL: "Tell residents not to drink or cook with tap water until the tank node reports it clean. Find what got into the tank."};
 const LEARN_S = 86400;
-let S = null, picked = null, tab = "building", size = "small", lps = 0.05, startAt = "now", tiles = {};
+let S = null, picked = null, tab = "building", size = "small", lps = 0.05, startAt = "now", tiles = {}, dg = null;
 
 function describe(v) {
   const kind = v < 0.1 ? "about a running toilet" : v < 0.9 ? "a cracked pipe" : "a burst pipe";
@@ -353,12 +454,157 @@ function buildFloors(nodes) {
     floors.appendChild(row);
   }
 }
+/* Building cutaway. Real layout: square building 24 m a side, 4 flats per floor (01 front left, then
+   round: 02, 03, 04), floors 3 m, each node 1 m above its floor (drawn on the floor), tank node on the roof tank, gateway
+   outside (positions from ns3/positions.csv). Up is drawn 2.6 times taller so the floors don't overlap; the pipes run up a central shaft. */
+const W = 12, FL = {G: 0, 1: 1, 2: 2, 3: 3, 4: 4}, CORNER = [[-6, -6], [6, -6], [6, 6], [-6, 6]];
+const DOWN = [-0.6, 0.6], RISE = [0.6, -0.6], TANK = {x: 0, y: 0, z: 16, h: 2, r: 1.5}, GW = [16, -14], PUMP = [-7, -15];
+// Seen from the front, turned a little to the right, so all four flats of a floor stay apart
+const P = (x, y, z) => [x * 0.95 - y * 0.35, -(x * 0.12 + y * 0.3) - z * 2.6];
+const xy = ([x, y]) => `${x.toFixed(2)},${y.toFixed(2)}`;
+const pts = ps => ps.map(p => xy(P(...p))).join(" ");
+const poly = (cls, ps, more = "") => `<polygon class="${cls}" points="${pts(ps)}" ${more}/>`;
+const path = (cls, ps) => `<polyline class="${cls}" points="${pts(ps)}"/>`;
+const box = (cls, x0, x1, y0, y1, z) => poly(cls, [[x0, y0, z], [x1, y0, z], [x1, y1, z], [x0, y1, z]]);
+const wall = (cls, a, b, z0, z1) => poly(cls, [[...a, z0], [...b, z0], [...b, z1], [...a, z1]]);
+const DROP = "M0 -.95C0 -.95 -.62 -.1 -.62 .3a.62 .62 0 0 0 1.24 0C.62 -.1 0 -.95 0 -.95z";
+const SENSORS = {flat: "water flow meter, pressure sensor", tank: "inflow and outflow meters, water level, pH, TDS, turbidity, temperature"};
+
+function nodePill(id, label, [sx, sy], tip) {
+  return `<g class="dg-node" data-node="${id}" tabindex="0" role="button" aria-label="${tip}"><title>${tip}</title>
+    <rect x="${(sx - 2.4).toFixed(2)}" y="${(sy - .95).toFixed(2)}" width="4.8" height="1.9" rx=".95"/>
+    <circle class="dg-led" cx="${(sx - 1.55).toFixed(2)}" cy="${sy.toFixed(2)}" r=".48"/>
+    <text x="${(sx + .5).toFixed(2)}" y="${(sy + .45).toFixed(2)}" font-size="1.25" text-anchor="middle">${label}</text>
+    <g class="dg-buzz" hidden><path d="M${(sx + 2.9).toFixed(2)} ${(sy - .7).toFixed(2)}q.55 .7 0 1.4"/><path d="M${(sx + 3.6).toFixed(2)} ${(sy - 1.15).toFixed(2)}q.9 1.15 0 2.3"/></g>
+    <g class="dg-drip" hidden><path transform="translate(${(sx - 2.9).toFixed(2)} ${(sy + 1.2).toFixed(2)})" d="${DROP}"/></g></g>`;
+}
+function tankShape(cls, top) {
+  const [bx, by] = P(TANK.x, TANK.y, TANK.z), [, ty] = P(TANK.x, TANK.y, top), rx = 1.01 * TANK.r, ry = 0.32 * TANK.r;     // the round tank, drawn as an upright ellipse
+  return `<path class="${cls}" d="M${bx - rx} ${by}A${rx} ${ry} 0 0 0 ${bx + rx} ${by}L${bx + rx} ${ty}A${rx} ${ry} 0 0 1 ${bx - rx} ${ty}Z"/>` +
+         `<ellipse class="${cls}" cx="${bx}" cy="${ty}" rx="${rx}" ry="${ry}"/>`;
+}
+function buildDiagram(flats) {
+  let g = box("dg-ground", -14, 18, -18, 14, 0);
+  // Underground: sump and the buried pipe from the pump to the rising pipe
+  g += box("dg-buried", -9, -5, -17, -13, -3) + wall("dg-buried", [-9, -17], [-5, -17], -3, -1) + wall("dg-buried", [-9, -17], [-9, -13], -3, -1) + box("dg-buried", -9, -5, -17, -13, -1);
+  g += path("dg-pipe rise buried", [[...PUMP, 0], [...PUMP, -.6], [RISE[0], PUMP[1], -.6], [...RISE, -.6], [...RISE, 0]]);
+  const label = (text, [sx, sy], anchor = "middle") => `<text class="dg-label" x="${sx.toFixed(2)}" y="${sy.toFixed(2)}" font-size="1.1" text-anchor="${anchor}">${text}</text>`;
+  g += label("Sump (underground)", P(-7, -15, -3.6).map((v, i) => v + [0, 1.6][i]));
+  for (let f = 0; f < 5; f++) {
+    const z = 3 * f, zn = z + .3;        // nodes and branch pipes drawn on the floor, inside their room
+    g += wall("dg-wall back", [-W, W], [W, W], z, z + 3) + wall("dg-wall back", [W, -W], [W, W], z, z + 3);
+    g += box("dg-slab", -W, W, -W, W, z);
+    flats.filter(n => FL[n[2]] === f).forEach(n => {
+      const [cx, cy] = CORNER[+n.slice(-1) - 1];
+      g += box(`dg-room`, cx - 5.6, cx + 5.6, cy - 5.6, cy + 5.6, z + .02).replace("<polygon", `<polygon data-node="${n}"`);
+      g += path("dg-pipe branch", [[...DOWN, zn], [cx, 0, zn], [cx, cy, zn]]);
+    });
+    g += wall("dg-wall inner", [0, -W], [0, W], z, z + 3) + wall("dg-wall inner", [-W, 0], [W, 0], z, z + 3);
+    g += wall("dg-wall", [-W, -W], [W, -W], z, z + 3) + wall("dg-wall", [-W, -W], [-W, W], z, z + 3);
+    g += label(f ? `Floor ${f}` : "Ground", P(-W, W, zn).map((v, i) => v + [-0.8, 0][i]), "end");
+  }
+  g += box("dg-slab", -W, W, -W, W, 15);
+  // Pipes: rising pipe up to the tank, down pipe from the tank through every floor
+  g += path("dg-pipe rise", [[...RISE, 0], [...RISE, TANK.z]]);
+  g += path("dg-pipe", [[...DOWN, TANK.z], [...DOWN, .3]]);
+  const [px, py] = P(...PUMP, 0);
+  g += `<circle cx="${px}" cy="${py}" r=".8" fill="#3a76a8"/>` + label("Pump", [px, py - 1.4]);
+  // Tank on the roof: glass walls, the water inside shows the level and the water quality
+  g += `<path class="dg-pipe" d="M${xy(P(TANK.x - 1, 0, 15))}L${xy(P(TANK.x - 1, 0, TANK.z))}M${xy(P(TANK.x + 1, 0, 15))}L${xy(P(TANK.x + 1, 0, TANK.z))}" style="stroke:#9fb3c1"/>`;
+  g += `<g id="dg-water"></g>` + tankShape("dg-tank-glass", TANK.z + TANK.h);
+  // Leak spots on the down pipe, one per floor (where each floor's branch pipes split off)
+  for (let f = 4; f >= 0; f--) {
+    const [sx, sy] = P(...DOWN, 3 * f + .3);
+    g += `<g data-node="B-D${f}" tabindex="0" role="button" aria-label="${flatName("B-D" + f)}"><title>${flatName("B-D" + f)}: start a leak here</title><circle class="dg-site" cx="${sx}" cy="${sy}" r=".55"/>` +
+         `<g class="dg-drip" hidden><path transform="translate(${sx + .9} ${sy + 1})" d="${DROP}"/></g></g>`;
+  }
+  // Gateway outside, with the waves it shows when an alert arrives
+  const [gx, gy0] = P(...GW, 0), [, gy] = P(...GW, 2.4);
+  g += `<path class="dg-pipe" d="M${gx} ${gy0}L${gx} ${gy}" style="stroke:#7d93a3;stroke-width:.3"/>`;
+  g += `<g><title>Gateway: no sensors; receives every message and checks the water balance</title><rect x="${gx - 3}" y="${gy - 2.2}" width="6" height="2.2" rx="1.1" fill="var(--clay)" stroke="rgba(33,59,79,.4)" stroke-width=".08"/>` +
+       `<text class="dg-label" x="${gx}" y="${gy - .75}" font-size="1.15" text-anchor="middle" style="fill:var(--ink)">Gateway</text>` +
+       `<path d="M${gx + 1.8} ${gy - 2.2}L${gx + 1.8} ${gy - 4.4}" stroke="#7d93a3" stroke-width=".2"/></g>`;
+  g += `<g class="dg-waves" id="dg-waves">${[1, 2, 3].map(i => `<path d="M${gx + 1.8 - i * .9} ${gy - 4.4 - i * .7}q${i * .9} ${-i * .6} ${i * 1.8} 0"/>`).join("")}</g>`;
+  // Nodes last, so they stay on top and easy to click
+  flats.forEach(n => { const [cx, cy] = CORNER[+n.slice(-1) - 1]; g += nodePill(n, n.slice(2), P(cx, cy, 3 * FL[n[2]] + .3), `${flatName(n)} node: ${SENSORS.flat}`); });
+  const [tx, ty] = P(TANK.x, TANK.y, TANK.z + .9);
+  g += nodePill("B-TANK", "Tank", [tx, ty + 0.32 * TANK.r + .4], `Tank node: ${SENSORS.tank}`);
+  const svg = $("#dg");
+  svg.innerHTML = g;
+  const bb = svg.getBBox();
+  if (!bb.width) return;                   // hidden (phone layout): measure once it is shown
+  svg.setAttribute("viewBox", `${(bb.x - 1).toFixed(1)} ${(bb.y - 1).toFixed(1)} ${(bb.width + 2).toFixed(1)} ${(bb.height + 2).toFixed(1)}`);
+  svg.querySelectorAll("[data-node]").forEach(el => {
+    if (el.dataset.node === "B-TANK") return;
+    el.addEventListener("click", () => pick(el.dataset.node));
+    el.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(el.dataset.node); } });
+  });
+  dg = {count: flats.length, feedTop: null};
+}
+function renderDiagram() {
+  if (!dg) return;
+  const c = S.clock, live = S.running && c, leaks = live && c.leaks || {};
+  document.querySelectorAll("#dg [data-node]").forEach(el => {
+    const n = el.dataset.node, st = live ? S.status[n] || "ok" : "off";
+    if (el.classList.contains("dg-room")) { el.setAttribute("class", `dg-room ${st}${n === picked ? " sel" : ""}`); return; }
+    if (n.startsWith("B-D")) {
+      el.querySelector(".dg-site").setAttribute("class", `dg-site${n in leaks ? " leak" : ""}${n === picked ? " sel" : ""}`);
+      el.querySelector(".dg-drip").toggleAttribute("hidden", !(n in leaks)); return;
+    }
+    const led = live ? S.led[n] || "green" : "off";
+    el.setAttribute("class", `dg-node${n === picked ? " sel" : ""}`);
+    el.querySelector(".dg-led").setAttribute("class", `dg-led ${led}`);
+    el.querySelector(".dg-buzz").toggleAttribute("hidden", led !== "red");
+    el.querySelector(".dg-drip").toggleAttribute("hidden", !(n in leaks));
+  });
+  const lv = S.levels.length ? S.levels[S.levels.length - 1][1] : 0;
+  $("#dg-water").innerHTML = lv ? tankShape("dg-tank-water", TANK.z + Math.min(TANK.h, lv)) : "";
+  $("#dg-water").querySelectorAll("path, ellipse").forEach(e => e.style.fill = S.quality === "QUALITY_RUNOFF" ? "var(--runoff)" : S.quality === "QUALITY_CHEMICAL" ? "var(--chemical)" : "");
+  const top = S.feed[0] && JSON.stringify(S.feed[0]);
+  if (dg.feedTop !== null && top && top !== dg.feedTop) {          // a new alert or event reached the gateway
+    const w = $("#dg-waves"); w.classList.remove("pulse"); void w.getBBox(); w.classList.add("pulse");
+  }
+  dg.feedTop = top || "";
+}
+
 function pick(n) {
   picked = n;
   for (const [k, b] of Object.entries(tiles)) b.setAttribute("aria-pressed", k === n ? "true" : "false");
   $("#picked").textContent = flatName(n);
-  $("#picked-floor").textContent = n[2] === "G" ? "ground floor" : `floor ${n[2]}`;
+  const pipe = n.startsWith("B-D");
+  $("#picked-floor").textContent = pipe ? "" : n[2] === "G" ? "ground floor" : `floor ${n[2]}`;
+  $("#picked-info").textContent = pipe ? "No node on the pipe itself: the tank node's outflow meter and the gateway's water balance have to catch it."
+    : `This flat's node has a ${SENSORS.flat}.`;
+  if (S) renderDiagram();
   renderControls();
+}
+
+/* Alarm: what the gateway knows is wrong right now, with what to do. Beeps for each new one. */
+let sound = true, audio = null, heard = null;
+try { sound = localStorage.getItem("aqua-sound") !== "off"; } catch {}
+function beep() {
+  if (!sound) return;
+  try {
+    audio = audio || new AudioContext(); audio.resume();
+    const t0 = audio.currentTime;
+    [0, .3, .6].forEach((d, i) => {
+      const o = audio.createOscillator(), g = audio.createGain();
+      o.frequency.value = i === 1 ? 660 : 880;
+      g.gain.setValueAtTime(.0001, t0 + d); g.gain.exponentialRampToValueAtTime(.2, t0 + d + .02); g.gain.exponentialRampToValueAtTime(.0001, t0 + d + .25);
+      o.connect(g).connect(audio.destination); o.start(t0 + d); o.stop(t0 + d + .26);
+    });
+  } catch {}
+}
+function renderAlarm() {
+  const list = S.running ? S.active || [] : [], box = $("#alarm");
+  box.hidden = !list.length;
+  $("#alarm-title").textContent = list.length === 1 ? "Needs attention" : `${list.length} problems need attention`;
+  $("#alarm-list").innerHTML = list.map(m => `<li><b>${flatName(m.n)}: ${ALERTS[m.a] || m.a}</b>` +
+    `<p>${ADVICE[m.a] || ""}${S.led[m.n] === "red" ? " The node's buzzer is beeping." : ""}</p>` +
+    `<time>Gateway heard it<br>${when(m.rx)}</time></li>`).join("");
+  const keys = list.map(m => m.n + m.a + m.rx), fresh = heard && keys.some(k => !heard.has(k));
+  if (fresh) { beep(); box.classList.remove("fresh"); void box.offsetWidth; box.classList.add("fresh"); }
+  heard = new Set(keys);
 }
 
 function render() {
@@ -380,6 +626,9 @@ function render() {
     b.querySelector(".drip").hidden = !(live && c.leaks && n in c.leaks);
     b.setAttribute("aria-label", `${flatName(n)}, ${st === "alert" ? "leak alert" : st === "silent" ? "not heard" : "normal"}${live && c.leaks && n in c.leaks ? ", leak running" : ""}`);
   }
+  if (flats.length && (!dg || dg.count !== flats.length)) buildDiagram(flats);
+  $("#tank-tile").classList.toggle("alert", !!live && S.status["B-TANK"] === "alert");
+  renderDiagram(); renderAlarm();
   renderTank(); renderControls(); renderResult(); renderFeed();
   if (tab === "radio" && S.radio) renderRadio();
 }
@@ -496,8 +745,8 @@ async function startLeak(ff) {
   if (startAt === "hour") { at = Math.floor(t / 86400) * 86400 + +$("#hour").value * 3600; if (at <= t) at += 86400; }
   const leak = {do: "leak", where: picked, size: size || lps};
   if (at > t) leak.at_s = at;
-  if (!await send(leak) || (ff && !await send({do: "until_alert", node: picked, from_s: at}))) return;
-  toast(at > t ? `Leak in ${flatName(picked)} set for ${when(at)}` : `Leak started in ${flatName(picked)}`);
+  if (!await send(leak) || (ff && !await send({do: "until_alert", node: nodeOf(picked), from_s: at}))) return;
+  toast(at > t ? `Leak set for ${when(at)}: ${flatName(picked)}` : `Leak started: ${flatName(picked)}`);
 }
 $("#go").onclick = () => startLeak(false);
 $("#go-ff").onclick = () => startLeak(true);
@@ -507,6 +756,12 @@ $("#reset").onclick = async () => {
   if (await post("/api/reset")) toast("Starting again: about a minute of learning first");
   b.disabled = false; b.textContent = "Start again";
 };
+$("#sound").onclick = () => {
+  sound = !sound; $("#sound").textContent = sound ? "Sound on" : "Sound off"; $("#sound").setAttribute("aria-pressed", String(sound));
+  try { localStorage.setItem("aqua-sound", sound ? "on" : "off"); } catch {}
+  if (sound) beep();
+};
+$("#sound").textContent = sound ? "Sound on" : "Sound off"; $("#sound").setAttribute("aria-pressed", String(sound));
 $("#start").onclick = () => post("/api/start").then(ok => ok && toast("Starting the simulation"));
 $("#playpause").onclick = () => send({do: S.clock.paused ? "resume" : "pause"});
 $("#speed").onchange = e => send({do: "speed", delay_s: +e.target.value});

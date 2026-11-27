@@ -63,6 +63,11 @@ class NetHAL:
         return msgs
 
     def led(self, colour):
+        """The node's own alarm: red also beeps the buzzer on a real node (pi_hal.py). Logged on
+        change so the dashboard can show it, even when the radio is down."""
+        if colour != self.colour:
+            with open(os.path.join(RUN, "leds.jsonl"), "a") as f:
+                f.write(json.dumps({"t": self.t, "n": self.name, "led": colour}) + "\n")
         self.colour = colour
 
 
