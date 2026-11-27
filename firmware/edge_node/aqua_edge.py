@@ -236,10 +236,13 @@ class Node:
         self.key = hal.key(node_id)
         self.base = {k: Baseline() for k in self.sensors}
         self.base_path = hal.storage_path and os.path.splitext(hal.storage_path)[0] + "_baseline.json"
+        self.learn_until = None        # end of the learning day: set on first step, saved to SD
         if self.base_path and os.path.exists(self.base_path):    # restart after a power cut: keep what was learned
             with open(self.base_path) as f:
-                for k, d in json.load(f).items():
-                    self.base[k].__dict__.update(d)
+                saved = json.load(f)
+            self.learn_until = saved.pop("learn_until", None)
+            for k, d in saved.items():
+                self.base[k].__dict__.update(d)
         self.hour = None
         self.clean = True              # no alert so far in the hour now running
         self.alerts = {}               # active alert type -> last time its condition was seen
@@ -401,13 +404,15 @@ class Node:
     def step(self):
         now, r = self.hal.now(), self.hal.read()
         self.receive(now)
-        hour = int(now % DAY // HOUR)
+        if self.learn_until is None:       # very first start: learn for one day from now
+            self.learn_until = now + LEARN_S
+        hour = int((now + getattr(self.hal, "utc_offset_s", 0)) % DAY // HOUR)
         if hour != self.hour:              # once an hour: update the baseline, keep it on the SD card
             for b in self.base.values():
                 b.blend(self.hour, self.clean)
             self.hour, self.clean = hour, True
             self.save_baseline()
-        if now < LEARN_S:
+        if now < self.learn_until:
             for k in self.sensors:
                 v = r.get(k)
                 if v is not None and not math.isnan(v):
@@ -427,7 +432,8 @@ class Node:
 
     def save_baseline(self):
         if self.base_path:
-            save_atomic(self.base_path, json.dumps({k: b.__dict__ for k, b in self.base.items()}))
+            save_atomic(self.base_path, json.dumps({"learn_until": self.learn_until,
+                                                    **{k: b.__dict__ for k, b in self.base.items()}}))
 
     def summarise(self, now, r):
         i = int(now // SUMMARY_S)
@@ -884,4 +890,13 @@ if __name__ == "__main__":
     command(16, "SUPPLY_UNCERTAIN", 400)
     command(17, "LEAK_TANK_DRAIN", 410)
     assert list(n.remote) == ["LEAK_TANK_DRAIN"]
+
+    # Real clock: UTC Unix seconds, India +5:30 offset (20:00 UTC = 01:30 IST -> hour 1)
+    utc_midnight = 1_764_000_000 // DAY * DAY
+    hal_utc = FakeHAL(None, use)
+    hal_utc.t, hal_utc.utc_offset_s = utc_midnight + 20 * HOUR, 19800
+    n_utc = FlatNode("B-202", hal_utc)
+    n_utc.step()
+    assert n_utc.hour == 1, n_utc.hour
+    assert sum(n_utc.base["flow_lps"].n) == 1, "first reading must be learned, not checked"
     print("node self-check passed")
