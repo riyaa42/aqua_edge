@@ -1,29 +1,43 @@
-"""Aqua Edge gateway program (one per building). Runs on the laptop; a LoRa module on an ESP32
-board bridges the radio to the laptop over USB serial.
+"""Aqua Edge gateway program (one per building). Runs on the laptop; an ESP8266 board on USB
+serial is only the interface to the LoRa module.
+
+Nodes decide on their own what they can see. The gateway combines the data of many nodes, which
+some detections need (a pipe leak shows only when every flat's litres are set against the tank's).
 
 Same hardware layer as the nodes (hal.now / send / receive). Jobs:
   1. Acknowledge every node message (so nodes can delete it from their SD queue) and log it.
      Every ACK carries the gateway time ("gt") for setting node clocks (a job for the hardware
      layer; so far only the live simulation does it).
   2. Building check, the mass balance (Ali et al. [6], supply vs branch flows): water leaving
-     the tank minus water used by all flats, per 15-minute summary; above 10% for 2 blocks means
-     a leak in the pipes between the tank and the flats (a leak inside a flat is after its
-     meter, so the flat's own checks catch it). Re-arms after 2 normal blocks.
+     the tank minus water used by all flats, per 15-minute summary; above 10% for 2 blocks next
+     to each other in time means a leak in the pipes between the tank and the flats (a leak
+     inside a flat is after its meter, so the flat's own checks catch it). Re-arms after 2
+     normal blocks in a row. Summaries may arrive in any order; an earlier leak that only
+     becomes known later is logged as PIPE_LEAK_PAST.
   3. Silent nodes: a node not heard for 45 min (3 missed summaries) gives NODE_SILENT, and
-     NODE_BACK when it is heard again. While any node is silent the building check cannot be
-     done honestly (its litres would look "missing"), so BALANCE_PAUSED says so; the late
-     summaries are still checked when they arrive (store-and-forward).
+     NODE_BACK when it is heard again. A repeated or replayed packet does not count as heard
+     (a captured packet the gateway never received still counts once). While any node is silent
+     the building check cannot be done honestly (its litres would look "missing"), so
+     BALANCE_PAUSED says so; the late summaries are checked when they arrive.
   4. Supply event: the tank node reports its level far below normal (pump or power problem).
   5. Repeat check: nodes send a fresh alert every time a problem comes back; the gateway
      marks each one NEW_ALERT or REPEAT_ALERT (same node and alert type as before). A flat's
      LEAK_PRESSURE_DROP stamped during an active pipe leak also gets possible_cause=PIPE_LEAK
      (lower building pressure plus the flat's own heavy use can trigger it). Nothing is hidden.
-  6. Clock check: a message stamped more than 1 min in the future means that node's clock is
-     wrong (CLOCK_SKEW). An old stamp is normal: the message waited on the SD card.
-  7. Packet check (packet.py): a packet with a wrong signature is dropped (BAD_PACKET), and a
+  6. Recovery: a problem is closed only when the node says it is over (*_CLEARED,
+     SUPPLY_RECOVERED), never because nothing more was heard. A recovery closes only what is
+     older than itself, and an older alert arriving late does not reopen it. The pipe leak is
+     closed by the building check, silence by NODE_BACK.
+  7. Clock check: a message stamped more than 1 min in the future means that node's clock is
+     wrong (CLOCK_SKEW), until a message stamped within 1 min of gateway time (CLOCK_OK). An
+     old stamp is normal: the message waited on the SD card.
+  8. Packet check (packet.py): a packet with a wrong signature is dropped (BAD_PACKET), and a
      (node, counter) pair already seen is a duplicate or a replay: acknowledged, not used again.
-     The pairs seen are saved to disk, so a gateway restart does not reopen the door to replays.
      ACKs are signed with the node's key, so a fake ACK cannot make a node delete its messages.
+  9. Ranking of open problems for the dashboard: gateway_analytics.py.
+What the checks need is saved to one state file before any ACK is sent, so a restart keeps the
+open problems and pipe check, and does not reopen the door to replays. Not saved: the in-memory
+message log and event list. The gateway clock must carry on across a restart.
 How the leak checks fit together: leak_detection/README.md.
 """
 import json
@@ -37,7 +51,7 @@ for _d in (_GW_DIR, os.path.join(_FW_DIR, "edge_node"), os.path.join(_FW_DIR, "c
         sys.path.append(_d)
 
 from aqua_edge import SUMMARY_S, iso_utc, save_atomic
-from gateway_analytics import GatewayAnalytics
+from gateway_analytics import FLAT_LEAK_ALERTS, GatewayAnalytics, category_of
 from packet import pack, unpack
 
 SUPPLY_WINDOW_S = 900          # a SUPPLY_LOW flag from the tank counts for this long
@@ -46,26 +60,20 @@ MASS_BALANCE_INTERVALS = 2     # blocks in a row above threshold before alerting
 MIN_SUPPLY_L = 5.0             # ignore near-empty blocks (division by tiny numbers)
 SILENT_S = 2700                # nothing heard from a node for 3 summary periods = silent
 CLOCK_AHEAD_S = 60             # message time this far ahead of the gateway clock = bad node clock
+KEEP_BLOCKS = 7 * 86400 // SUMMARY_S    # per-block data kept: 7 days, for late summaries
+# saved to disk as they are; the others need converting for JSON (save_state / load_state)
+SAVED = ("seen_floor", "alert_history_list", "tank_low_t", "tank_low_recv_t", "supply_active_until",
+         "tank_drain_reported", "tank_abnormal_supply_recv_t", "flat_leak_recv_t", "tank_abnormal_supply_t",
+         "flat_leak_t", "last_tank_inflow", "supply_cleared_t", "p_base", "p_mean_base", "last_pair",
+         "pipe_first", "pipe_alerted", "pipe_since", "balance_paused", "last_seen", "silent")
+BY_BLOCK = ("sums", "p_sums", "p_mean_sums", "verdicts")     # {block number: value}
 
 
 class Gateway:
     def __init__(self, hal, flat_ids, tank_id):
         self.hal, self.flats, self.tank = hal, set(flat_ids), tank_id
-        path = getattr(hal, "storage_path", None)
-        self.seen_path = path and os.path.splitext(path)[0] + "_seen.json"
         self.seen_floor = {}        # node -> highest contiguous seq received (1..floor)
         self.seen_above = {}        # node -> set of out-of-order seq > floor
-        if self.seen_path and os.path.exists(self.seen_path):
-            with open(self.seen_path) as f:
-                data = json.load(f)
-                for n, v in data.items():
-                    if isinstance(v, dict):
-                        self.seen_floor[n] = int(v.get("floor", 0))
-                        self.seen_above[n] = set(v.get("above", []))
-                    else:
-                        # legacy list format compatibility
-                        self.seen_floor[n] = 0
-                        self.seen_above[n] = set(v)
         self.log = []               # every unique message received, with receive time
         self.events = []            # gateway's own decisions
         self.alert_history = {}     # (node, alert) -> (time of latest, how many so far)
@@ -79,13 +87,68 @@ class Gateway:
         self.p_base = {}            # flat -> clean baseline p_min (EWMA)
         self.p_mean_sums = {}       # interval -> {flat: p_mean}
         self.p_mean_base = {}       # flat -> clean baseline p_mean (EWMA)
-        self.balance_done, self.balance_run, self.balance_ok = set(), 0, 0
+        self.supply_cleared_t = -1e9    # tank time of the latest SUPPLY_RECOVERED
+        self.balance_done = set()
+        self.verdicts = {}          # interval -> (leaking, error %) of each block balanced
+        self.reported = set()       # leaking blocks already covered by a PIPE_LEAK(_PAST)
+        self.last_pair = -1         # first block of the newest pair of equal verdicts
         self.pipe_alerted = self.balance_paused = False
-        self.pipe_since = None      # start time of the first block of the active pipe leak
+        self.pipe_first = None      # first block of the active pipe leak
+        self.pipe_since = None      # its start time
         self.last_seen = None       # node -> time last heard (set on the first step)
         self.silent = {}            # node -> time last heard before it went silent
         self.skewed = set()
         self.analytics = GatewayAnalytics(self.flats, self.tank)
+        # Everything above except log and events survives a restart. The state file replaces
+        # the older _seen.json, which is still read if it is all there is.
+        path = getattr(hal, "storage_path", None)
+        base = path and os.path.splitext(path)[0]
+        self.state_path = base and base + "_state.json"
+        self.resumed = False
+        if self.state_path and os.path.exists(self.state_path):
+            with open(self.state_path) as f:
+                self.load_state(json.load(f))
+        elif base and os.path.exists(base + "_seen.json"):
+            with open(base + "_seen.json") as f:
+                self._load_old_seen(json.load(f))
+
+    def _load_old_seen(self, data):
+        for n, v in data.items():
+            if isinstance(v, dict):
+                self.seen_floor[n] = int(v.get("floor", 0))
+                self.seen_above[n] = set(v.get("above", []))
+            else:                   # oldest format: a plain list
+                self.seen_floor[n] = 0
+                self.seen_above[n] = set(v)
+
+    @property
+    def alert_history_list(self):
+        return [[*key, *value] for key, value in self.alert_history.items()]
+
+    @alert_history_list.setter
+    def alert_history_list(self, rows):
+        self.alert_history = {(n, a): (t, count) for n, a, t, count in rows}
+
+    def save_state(self):
+        if not self.state_path:
+            return
+        state = {name: getattr(self, name) for name in SAVED}
+        state.update({name: getattr(self, name) for name in BY_BLOCK})
+        state.update(seen_above={n: sorted(v) for n, v in self.seen_above.items()},
+                     balance_done=sorted(self.balance_done), reported=sorted(self.reported),
+                     skewed=sorted(self.skewed), analytics=self.analytics.to_state())
+        save_atomic(self.state_path, json.dumps(state))
+
+    def load_state(self, state):
+        for name in SAVED:
+            setattr(self, name, state[name])
+        for name in BY_BLOCK:                       # JSON turned the block numbers into text
+            setattr(self, name, {int(i): v for i, v in state[name].items()})
+        self.seen_above = {n: set(v) for n, v in state["seen_above"].items()}
+        self.balance_done, self.reported = set(state["balance_done"]), set(state["reported"])
+        self.skewed = set(state["skewed"])
+        self.analytics.load_state(state["analytics"])
+        self.resumed = True
 
     def _is_seen_and_record(self, node, seq):
         """Return True if seq was already seen; otherwise record it (advancing contiguous floor)."""
@@ -100,21 +163,16 @@ class Gateway:
         self.seen_floor[node] = fl
         return False
 
-    def _save_seen(self):
-        if self.seen_path:
-            payload = {
-                n: {"floor": self.seen_floor.get(n, 0), "above": sorted(self.seen_above.get(n, set()))}
-                for n in set(self.seen_floor) | set(self.seen_above)
-            }
-            save_atomic(self.seen_path, json.dumps(payload))
-
     def step(self):
         now = self.hal.now()
         utc_fn = getattr(self.hal, "utc_now", None)
         utc_s = utc_fn()[0] if utc_fn else now
         if self.last_seen is None:
             self.last_seen = {n: now for n in self.flats | {self.tank}}
-        bad = 0
+        if self.resumed:            # the gateway was down, not the nodes: restart their silence timers
+            self.resumed = False
+            self.last_seen.update({n: now for n in self.flats | {self.tank} if n not in self.silent})
+        bad, acks, events_before = 0, [], len(self.events)
         for raw in self.hal.receive():
             m = unpack(raw, self.hal.key)
             if m is None:
@@ -122,25 +180,27 @@ class Gateway:
                 continue
             if m["k"] not in ("ALERT", "FLAG", "SUM"):
                 continue
-            self.last_seen[m["n"]] = now
-            is_dup = self._is_seen_and_record(m["n"], m["s"])
-            if not is_dup:
-                # Persist seen state BEFORE sending ACK so a node never deletes unpersisted data
-                self._save_seen()
+            if not self._is_seen_and_record(m["n"], m["s"]):
+                self.last_seen[m["n"]] = now    # a repeated or replayed packet is no sign of life
                 self.log.append({**m, "rx": now, "rx_utc": round(utc_s), "rx_iso": iso_utc(utc_s)})
                 self.analytics.on_packet(now, m)
                 self.check_clock(now, m)
                 if m["k"] == "ALERT" and not m["a"].endswith("_CLEARED"):
                     self.check_repeat(m)
-                    if m["a"] == "ABNORMAL_SUPPLY":
+                    if self.analytics.is_stale(m["n"], category_of(m["a"]), m["t"]):
+                        pass                    # already over: not evidence about the tank now
+                    elif m["a"] == "ABNORMAL_SUPPLY":
                         self.tank_abnormal_supply_t = m["t"]
                         self.tank_abnormal_supply_recv_t = now
-                    elif m["a"] in ("LEAK_NIGHT_FLOW", "LEAK_CONTINUOUS_FLOW", "LEAK_PRESSURE_DROP"):
+                    elif m["a"] in FLAT_LEAK_ALERTS:
                         self.flat_leak_t = m["t"]
                         self.flat_leak_recv_t = now
                 elif m["k"] == "FLAG" and m["n"] == self.tank:
-                    self.tank_low_t = m["t"]
-                    self.tank_low_recv_t = now
+                    if m["f"] == "SUPPLY_RECOVERED":
+                        self.supply_recovered(now, m)
+                    elif m["t"] > self.supply_cleared_t:
+                        self.tank_low_t = m["t"]
+                        self.tank_low_recv_t = now
                     if "inflow" in m:
                         self.last_tank_inflow = m["inflow"]
                 elif m["k"] == "SUM":
@@ -152,13 +212,27 @@ class Gateway:
                         self.p_sums.setdefault(m["i"], {})[m["n"]] = m["p_min"]
                         if "p_mean" in m:
                             self.p_mean_sums.setdefault(m["i"], {})[m["n"]] = m["p_mean"]
-            ack = {"k": "ACK", "n": m["n"], "s": m["s"], "gt": now}       # gt: nodes sync their clock
-            self.hal.send(pack(ack, self.hal.key(m["n"])))
+            acks.append((m["n"], m["s"]))
         if bad:
             self.decide(now, "BAD_PACKET", count=bad)
         self.check_silence(now)
         self.supply_rule(now)
         self.mass_balance(now)
+        # Save first, then acknowledge: a node deletes a message once acknowledged, so its effect
+        # must already be on disk. (If the save fails, the node sends it again.)
+        if acks or len(self.events) > events_before:
+            self.save_state()
+        for n, seq in acks:
+            ack = {"k": "ACK", "n": n, "s": seq, "gt": now}     # gt: nodes sync their clock
+            self.hal.send(pack(ack, self.hal.key(n)))
+
+    def supply_recovered(self, now, m):
+        if m["t"] < self.tank_low_t:
+            return                  # an old recovery arriving after a newer low-tank flag
+        self.supply_rule(now)       # a low flag delivered together with this still gets decided
+        self.supply_cleared_t = m["t"]
+        self.tank_low_recv_t, self.supply_active_until, self.tank_drain_reported = -1e9, -1, False
+        self.decide(now, "SUPPLY_RECOVERED", event_t=m["t"])
 
     def decide(self, now, kind, **info):
         ev = {"t": now, "event": kind, **info}
@@ -190,8 +264,9 @@ class Gateway:
         if ahead > CLOCK_AHEAD_S and m["n"] not in self.skewed:
             self.skewed.add(m["n"])
             self.decide(now, "CLOCK_SKEW", node=m["n"], ahead_s=round(ahead))
-        elif ahead <= CLOCK_AHEAD_S:
+        elif abs(ahead) <= CLOCK_AHEAD_S and m["n"] in self.skewed:     # fresh and on time
             self.skewed.discard(m["n"])
+            self.decide(now, "CLOCK_OK", node=m["n"])
 
     def check_silence(self, now):
         for n, t in self.last_seen.items():
@@ -301,18 +376,58 @@ class Gateway:
                     self.p_base[f] = p_v if f not in self.p_base else 0.9 * self.p_base[f] + 0.1 * p_v
                 for f, p_v in self.p_mean_sums.get(i, {}).items():
                     self.p_mean_base[f] = p_v if f not in self.p_mean_base else 0.9 * self.p_mean_base[f] + 0.1 * p_v
-            self.balance_run, self.balance_ok = (self.balance_run + 1, 0) if leaking else (0, self.balance_ok + 1)
-            if self.balance_run >= MASS_BALANCE_INTERVALS and not self.pipe_alerted:
-                self.pipe_alerted = True
-                self.pipe_since = (i - MASS_BALANCE_INTERVALS + 1) * SUMMARY_S
-                drops = self._cross_floor_drops(i)
-                suspected, floor_range, conf = self._localize_floor(drops)
-                self.decide(now, "PIPE_LEAK", interval=i, error_pct=round(err, 1),
-                            suspected_floor=suspected, suspected_range=floor_range,
-                            localization_confidence=conf, floor_drops=drops)
-            elif self.balance_ok >= MASS_BALANCE_INTERVALS:
+            self.verdicts[i] = (leaking, round(err, 1))
+            self._extend_leak_back()
+            # Only two blocks next to each other in time decide anything, in whatever order
+            # their summaries arrived
+            for first in (i - 1, i):
+                if first in self.verdicts and first + 1 in self.verdicts \
+                        and self.verdicts[first][0] == self.verdicts[first + 1][0]:
+                    self._judge_pair(now, first, self.verdicts[first][0])
+        self._forget_old_blocks()
+
+    def _extend_leak_back(self):
+        """Late summaries can show that the active leak began earlier than first known."""
+        if not self.pipe_alerted:
+            return
+        while self.verdicts.get(self.pipe_first - 1, (False,))[0]:
+            self.pipe_first -= 1
+            self.reported.add(self.pipe_first)
+        self.pipe_since = self.pipe_first * SUMMARY_S
+
+    def _judge_pair(self, now, first, leaking):
+        newest = first >= self.last_pair
+        self.last_pair = max(first, self.last_pair)
+        if not leaking:
+            if newest and self.pipe_alerted:
                 self.pipe_alerted = False                   # re-arm: a later leak alerts again
                 self.analytics.clear_pipe_leak(t_resolved=now)
+            return
+        pair, error_pct = {first, first + 1}, self.verdicts[first + 1][1]
+        if newest and not self.pipe_alerted:
+            self.pipe_alerted, self.pipe_first = True, first
+            self.reported |= pair
+            self._extend_leak_back()
+            drops = self._cross_floor_drops(first + 1)
+            suspected, floor_range, conf = self._localize_floor(drops)
+            self.decide(now, "PIPE_LEAK", interval=first + 1, error_pct=error_pct,
+                        suspected_floor=suspected, suspected_range=floor_range,
+                        localization_confidence=conf, floor_drops=drops)
+            return
+        if not newest and not pair & self.reported:         # an earlier leak, known only now
+            self.decide(now, "PIPE_LEAK_PAST", interval=first + 1, error_pct=error_pct,
+                        began_t=first * SUMMARY_S)
+        self.reported |= pair
+
+    def _forget_old_blocks(self):
+        if not self.sums:
+            return
+        oldest = max(self.sums) - KEEP_BLOCKS
+        for data in (self.sums, self.p_sums, self.p_mean_sums, self.verdicts):
+            for i in [i for i in data if i < oldest]:
+                del data[i]
+        self.balance_done = {i for i in self.balance_done if i >= oldest}
+        self.reported = {i for i in self.reported if i >= oldest}
 
 
 if __name__ == "__main__":

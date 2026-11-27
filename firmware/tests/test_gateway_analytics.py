@@ -45,12 +45,6 @@ class TestHAL:
     def send(self, pkt):
         self.sent.append(pkt)
 
-    def load_seen(self):
-        return {}
-
-    def save_seen(self, d):
-        pass
-
 
 def _make_gw():
     td = tempfile.mkdtemp(prefix="gw_analytics_")
@@ -121,9 +115,9 @@ def test_mass_balance_rearm_and_pipe_correlation():
             _send(gw, hal, {"k": "SUM", "n": f, "t": t, "s": seq[f], "i": blk, "vol_l": 50.0})
             seq[f] += 1
         if blk == 1:
-            _send(gw, hal, {"k": "ALERT", "n": "B-301", "t": t + 15, "s": seq["B-301"],
-                            "a": "ABNORMAL_SUPPLY", "flow": 0.0}, rx=t + 17)
-            seq["B-301"] += 1
+            _send(gw, hal, {"k": "ALERT", "n": TANK, "t": t + 15, "s": seq[TANK],
+                            "a": "ABNORMAL_SUPPLY", "flow": 2.0}, rx=t + 17)
+            seq[TANK] += 1
 
     # Pressure drop arriving while pipe_alerted is active is correlated as secondary symptom
     _send(gw, hal, {"k": "ALERT", "n": "B-401", "t": 2 * SUMMARY_S + 10, "s": seq["B-401"],
@@ -137,7 +131,7 @@ def test_mass_balance_rearm_and_pipe_correlation():
     assert pipe_incs[0]["target"] == "B-RISER"
     # Correlated secondary symptoms grouped into the single PIPE_LEAK incident
     assert "B-401:FLAT_LEAK" in pipe_incs[0]["symptoms"]
-    assert "B-301:ABNORMAL_SUPPLY" in pipe_incs[0]["symptoms"]
+    assert f"{TANK}:ABNORMAL_SUPPLY" in pipe_incs[0]["symptoms"]
     assert snap["leakage"]["last_balance_pct"] == 70.0
 
     # Two balanced intervals re-arm pipe_alerted and clear PIPE_LEAK
@@ -267,12 +261,210 @@ def test_review_edge_cases():
     assert json.loads(json.dumps(s_a)) == s_a
 
 
+class _Node:
+    """Numbers and sends messages the way real nodes do."""
+
+    def __init__(self, gw, hal):
+        self.gw, self.hal, self.seq = gw, hal, {}
+
+    def __call__(self, node, t, kind="ALERT", rx=None, **fields):
+        self.seq[node] = self.seq.get(node, 0) + 1
+        msg = {"k": kind, "n": node, "s": self.seq[node], "t": t, **fields}
+        _send(self.gw, self.hal, msg, rx=t + 1 if rx is None else rx)
+        return msg
+
+    def block(self, i, flat_litres, rx=None):
+        """All summaries of block i: the tank lets out 600 L, each flat uses flat_litres."""
+        t = (i + 1) * SUMMARY_S
+        for n in [TANK] + FLATS:
+            self(n, t, "SUM", rx=rx, i=i, vol_l=600.0 if n == TANK else flat_litres)
+
+
+TIGHT, LEAK = 100.0, 50.0          # litres per flat: all water accounted for / half of it missing
+
+
+def _open(gw):
+    """Open problems, leaving out NODE_SILENT (these short tests leave most nodes unheard)."""
+    return {key for key in gw.analytics.incidents if key[1] != "NODE_SILENT"}
+
+
+def test_recovery_clears_only_what_is_older():
+    gw, hal, _ = _make_gw()
+    send = _Node(gw, hal)
+    cases = [("B-401", "LEAK_CONTINUOUS_FLOW", "FLAT_LEAK", "FLAT_LEAK_CLEARED"),
+             ("B-301", "ABNORMAL_CONSUMPTION", "ABNORMAL_CONSUMPTION", "CONSUMPTION_CLEARED"),
+             ("B-201", "PROLONGED_ZERO_FLOW", "PROLONGED_ZERO_FLOW", "ZERO_FLOW_CLEARED"),
+             (TANK, "ABNORMAL_SUPPLY", "ABNORMAL_SUPPLY", "SUPPLY_FLOW_CLEARED")]
+    for node, alert, _, _ in cases:
+        send(node, 1000, a=alert)
+    assert _open(gw) == {(node, cat) for node, _, cat, _ in cases}
+    for node, _, cat, cleared in cases:
+        send(node, 2000, a=cleared)
+        assert (node, cat) not in _open(gw), cleared
+    assert len(gw.snapshot()["incident_history"]) == 4
+    assert not any(e.get("alert", "").endswith("_CLEARED") for e in gw.events)
+    # an alert from before the recovery, delivered late, does not reopen the problem
+    send("B-401", 1500, rx=3000, a="LEAK_NIGHT_FLOW")
+    assert _open(gw) == set() and gw.flat_leak_t == 1000
+    # a newer alert does, and an older recovery does not end it
+    send("B-401", 4000, a="LEAK_NIGHT_FLOW")
+    send("B-401", 3500, rx=4100, a="FLAT_LEAK_CLEARED")
+    assert _open(gw) == {("B-401", "FLAT_LEAK")}
+
+
+def test_supply_recovery_and_clock_ok():
+    gw, hal, _ = _make_gw()
+    send = _Node(gw, hal)
+    send(TANK, 1000, "FLAG", f="SUPPLY_LOW", level=0.4, inflow=0.0)
+    assert gw.snapshot()["supply"]["state"] == "SUPPLY_EVENT"
+    send(TANK, 2000, "FLAG", f="SUPPLY_RECOVERED", level=1.8, inflow=0.4)
+    assert gw.snapshot()["supply"]["state"] == "NORMAL" and _open(gw) == set()
+    send(TANK, 1500, "FLAG", rx=2500, f="SUPPLY_LOW", level=0.4, inflow=0.0)    # old flag, late
+    assert gw.snapshot()["supply"]["state"] == "NORMAL" and _open(gw) == set()
+    # low and recovered arriving together after an outage: still recorded, and closed
+    hal.t = 9000
+    for s, (t, flag) in enumerate([(5000, "SUPPLY_LOW"), (6000, "SUPPLY_RECOVERED")], 100):
+        hal.inbox.append(pack({"k": "FLAG", "n": TANK, "s": s, "t": t, "f": flag, "inflow": 0.0}, sim_key(TANK)))
+    gw.step()
+    supply = [e["event"] for e in gw.events if e["event"].startswith("SUPPLY")]
+    assert supply == ["SUPPLY_EVENT", "SUPPLY_RECOVERED"] * 2, gw.events
+    assert _open(gw) == set()
+    # clock: an old stored message proves nothing; a fresh on-time one clears the skew
+    send("B-101", 10300, "SUM", rx=10000, i=11, vol_l=1.0)
+    send("B-101", 9000, "SUM", rx=10100, i=9, vol_l=1.0)
+    assert "B-101" in gw.skewed
+    send("B-101", 10200, "SUM", rx=10201, i=10, vol_l=1.0)
+    assert gw.skewed == set() and ("B-101", "CLOCK_SKEW") not in _open(gw)
+
+
+def test_replay_is_no_sign_of_life():
+    gw, hal, _ = _make_gw()
+    old = pack(_Node(gw, hal)("B-401", 100, "SUM", i=0, vol_l=1.0), sim_key("B-401"))
+    sent = len(hal.sent)
+    for t in range(600, SILENT_S + 900, 600):
+        hal.t, hal.inbox = t, [old]
+        gw.step()
+    assert "B-401" in gw.silent and len(gw.log) == 1
+    assert len(hal.sent) > sent, "a repeat is still acknowledged: it may be a real retry"
+
+
+def _pipe_events(gw):
+    return [(e["event"], e["interval"]) for e in gw.events if e["event"].startswith("PIPE_LEAK")]
+
+
+def test_pipe_blocks_must_be_adjacent():
+    gw, hal, _ = _make_gw()
+    send = _Node(gw, hal)
+    send.block(1, LEAK)
+    send.block(40, LEAK)                                    # far apart: two single blocks
+    assert _pipe_events(gw) == []
+    send.block(41, LEAK)
+    assert _pipe_events(gw) == [("PIPE_LEAK", 41)] and gw.pipe_since == 40 * SUMMARY_S
+    send.block(43, TIGHT)
+    send.block(45, TIGHT)                                   # not next to each other: no re-arm
+    assert gw.pipe_alerted
+    send.block(46, TIGHT)
+    assert not gw.pipe_alerted
+    # an earlier leak that only becomes known now: reported once, current state untouched
+    for i in (20, 21, 22):
+        send.block(i, LEAK, rx=47 * SUMMARY_S + i)
+    assert _pipe_events(gw)[1:] == [("PIPE_LEAK_PAST", 21)] and not gw.pipe_alerted
+
+    # newest blocks first, then the earlier ones of the same leak: one alert, earlier start
+    gw, hal, _ = _make_gw()
+    send = _Node(gw, hal)
+    for i in (7, 8):
+        send.block(i, LEAK)
+    for i in (5, 6):
+        send.block(i, LEAK, rx=10 * SUMMARY_S + i)
+    assert _pipe_events(gw) == [("PIPE_LEAK", 8)] and gw.pipe_since == 5 * SUMMARY_S
+    # late tight blocks from before the leak do not re-arm the active alert
+    for i in (1, 2):
+        send.block(i, TIGHT, rx=11 * SUMMARY_S + i)
+    assert gw.pipe_alerted
+
+
+def test_possible_cause_follows_newest_alert():
+    gw, hal, _ = _make_gw()
+    send = _Node(gw, hal)
+    label = lambda: gw.analytics.incidents[("B-401", "FLAT_LEAK")]["evidence"].get("possible_cause")
+    send.block(1, LEAK)
+    send.block(2, LEAK)
+    send("B-401", 3 * SUMMARY_S + 20, a="LEAK_PRESSURE_DROP")
+    assert label() == "PIPE_LEAK"
+    send.block(3, TIGHT)
+    send.block(4, TIGHT)
+    send("B-401", 6 * SUMMARY_S, a="LEAK_PRESSURE_DROP")
+    assert label() is None
+
+
+def test_restart_restores_state():
+    gw, hal, td = _make_gw()
+    hal.storage_path = os.path.join(td, "GATEWAY.jsonl")
+    gw = Gateway(hal, FLATS, TANK)
+    send = _Node(gw, hal)
+    send.block(1, LEAK)
+    leak = send("B-401", 2 * SUMMARY_S + 20, a="LEAK_NIGHT_FLOW", flow=0.1)
+    queue = gw.snapshot(now=3000)["maintenance_queue"]
+    hal.t = 20000                                           # gateway was off for hours
+    send.gw = gw = Gateway(hal, FLATS, TANK)
+    assert gw.snapshot(now=3000)["maintenance_queue"] == queue
+    gw.step()
+    assert gw.silent == {} and gw.events == [], "its own downtime must not make nodes silent"
+    _send(gw, hal, leak)                                    # same packet again: ignored
+    assert gw.log == [] and gw.events == []
+    send.block(2, LEAK, rx=20001)                           # the leaking pair spans the restart
+    assert _pipe_events(gw) == [("PIPE_LEAK", 2)]
+    send.gw = gw = Gateway(hal, FLATS, TANK)
+    assert gw.pipe_alerted and gw.pipe_since == SUMMARY_S
+    send("B-401", 20100, a="LEAK_NIGHT_FLOW")
+    assert gw.events[-1]["event"] == "REPEAT_ALERT" and gw.events[-1]["count"] == 2
+    send("B-401", 20200, a="FLAT_LEAK_CLEARED")
+    assert ("B-401", "FLAT_LEAK") not in _open(gw)
+
+    # power cut during the save: no acknowledgement, so the node still has the message
+    msg = {"k": "ALERT", "n": "B-301", "s": 900, "t": 20300, "a": "LEAK_NIGHT_FLOW"}
+    acked, real_replace = len(hal.sent), os.replace
+
+    def power_cut(*_):
+        raise OSError("power cut")
+
+    os.replace = power_cut
+    try:
+        _send(gw, hal, msg, rx=20301)
+        raise AssertionError("the save should have failed")
+    except OSError:
+        pass
+    finally:
+        os.replace = real_replace
+    assert len(hal.sent) == acked
+    gw = Gateway(hal, FLATS, TANK)
+    _send(gw, hal, msg, rx=20400)                           # the node sends it again
+    assert ("B-301", "FLAT_LEAK") in _open(gw) and len(hal.sent) == acked + 1
+
+
+def test_old_seen_file_is_still_read():
+    gw, hal, td = _make_gw()
+    with open(os.path.join(td, "GATEWAY_seen.json"), "w") as f:
+        json.dump({"B-401": {"floor": 5, "above": [8]}}, f)
+    hal.storage_path = os.path.join(td, "GATEWAY.jsonl")
+    gw = Gateway(hal, FLATS, TANK)
+    assert gw._is_seen_and_record("B-401", 8) and not gw._is_seen_and_record("B-401", 6)
+
+
 def main():
     test_lifecycle_and_autoclear()
     test_mass_balance_rearm_and_pipe_correlation()
     test_risk_ranking_and_floor_impact()
     test_latency_outage_recovery_and_json_snapshot()
     test_review_edge_cases()
+    test_recovery_clears_only_what_is_older()
+    test_supply_recovery_and_clock_ok()
+    test_replay_is_no_sign_of_life()
+    test_pipe_blocks_must_be_adjacent()
+    test_possible_cause_follows_newest_alert()
+    test_restart_restores_state()
+    test_old_seen_file_is_still_read()
     print("GATEWAY ANALYTICS TESTS PASSED")
 
 

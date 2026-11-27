@@ -1,6 +1,6 @@
 """Aqua Edge node firmware.
 
-Runs unchanged in Webots and on the Raspberry Pi 4. It never touches hardware
+Runs unchanged in Webots; meant for the Raspberry Pi 3B. It never touches hardware
 directly; everything goes through a small hardware layer `hal` with these methods:
 
     hal.now()                 -> current time in seconds; every message is stamped with it ("t").
@@ -79,8 +79,11 @@ ALERT_CLEAR_S = 600           # an alert re-arms after its condition has been no
                               # the gateway decides whether a new alert is a repeat
 QUALITY_MIN, QUALITY_CLEAR_MIN = 3, 10
 SUPPLY_SIGMAS, SUPPLY_MARGIN_LPS, SUPPLY_MIN = 4.0, 0.5, 15
+FLAT_LEAK_RULES = {"LEAK_NIGHT_FLOW", "LEAK_CONTINUOUS_FLOW", "LEAK_PRESSURE_DROP"}
+CONSUMPTION_RULES = {"ABNORMAL_CONSUMPTION", "UNUSUAL_NIGHT_CONSUMPTION", "SUDDEN_CONSUMPTION_CHANGE"}
+RECOVERABLE = FLAT_LEAK_RULES | CONSUMPTION_RULES | {"PROLONGED_ZERO_FLOW", "ABNORMAL_SUPPLY"}
 
-PRIORITY = {"ALERT": 0, "FLAG": 1, "SUM": 2}       # FLAG: only the tank's SUPPLY_LOW now
+PRIORITY = {"ALERT": 0, "FLAG": 1, "SUM": 2}       # FLAG: the tank's SUPPLY_LOW and SUPPLY_RECOVERED
 
 
 def save_atomic(path, text):
@@ -206,6 +209,14 @@ class Node:
         self.hour = None
         self.clean = True              # no alert so far in the hour now running
         self.alerts = {}               # active alert type -> last time its condition was seen
+        # Problems reported and not yet reported recovered (alert names, and SUPPLY_LOW). Kept
+        # on the SD card, so a rebooted node can still send the recovery.
+        self.open = set()
+        self.open_path = hal.storage_path and os.path.splitext(hal.storage_path)[0] + "_open.json"
+        if self.open_path and os.path.exists(self.open_path):
+            with open(self.open_path) as f:
+                self.open = set(json.load(f))
+        self.ok_minutes = {}           # recovery message -> minutes in a row its problem looked over
         self.interval, self.acc = None, {}
 
     # --- messaging ---
@@ -219,9 +230,29 @@ class Node:
 
     def alert(self, kind, **payload):
         """Called every minute the condition holds; sends once per episode."""
+        if kind in RECOVERABLE:
+            self.set_open(self.open | {kind})      # saved before the alert is queued
         if kind not in self.alerts:
             self.emit("ALERT", a=kind, **payload)
         self.alerts[kind] = self.hal.now()
+
+    def set_open(self, problems):
+        if problems != self.open:
+            self.open = problems
+            if self.open_path:
+                save_atomic(self.open_path, json.dumps(sorted(problems)))
+
+    def recover(self, message, rules, looks_over):
+        """Called every minute. Sends `message` once the open problems among `rules` have looked
+        over for ALERT_CLEAR_S of readings in a row. Silence or a missing reading never clears."""
+        mine = self.open & rules
+        self.ok_minutes[message] = self.ok_minutes.get(message, 0) + 1 if mine and looks_over(mine) else 0
+        if self.ok_minutes[message] >= ALERT_CLEAR_S // 60:
+            self.emit("ALERT", a=message)          # queued first: a power cut here only repeats it
+            for kind in mine:
+                self.alerts.pop(kind, None)
+            self.set_open(self.open - mine)
+            self.ok_minutes[message] = 0
 
     # --- main loop, called once per minute ---
     def step(self):
@@ -314,12 +345,13 @@ class EdgeRuntime(Node):
         if mode in ("flat", "combined"):
             self.night_run = self.high_run = self.cont_run = self.p_leak_run = 0
             self.cmon = StatisticalZeroFlowDetector()
+            self.flow_returned = False
         if mode in ("tank", "combined"):
             self.qmon = QualityMonitor(
                 QUALITY_MODEL, temporal_model=TEMPORAL_MODEL, window=3, confirm_n=QUALITY_MIN, clear_n=QUALITY_CLEAR_MIN
             )
             self.supply_run = self.low_run = self.ok_run = 0
-            self.low_flagged = False
+            self.low_flagged = "SUPPLY_LOW" in self.open
             self.min_level = None
             self._day1_levels = []
             self.prev_level = None
@@ -335,6 +367,7 @@ class EdgeRuntime(Node):
         flow = r.get("flow_lps")
         if not _finite(flow):       # a missing reading breaks every "minutes in a row" count
             self.night_run = self.cont_run = self.high_run = self.p_leak_run = 0
+            self.ok_minutes.clear()
             return
         at_night = NIGHT_START_H <= hour < NIGHT_END_H
         self.night_run = self.night_run + 1 if at_night and flow > NIGHT_FLOW_LPS else 0
@@ -362,6 +395,18 @@ class EdgeRuntime(Node):
         for ev_type, _ in self.cmon.step(now, flow):
             if ev_type != "UNUSUAL_HIGH_CONSUMPTION":
                 self.alert(ev_type, flow=round(flow, 4))
+
+        # Recovery. A flat leak needs the water to be off: 05:00 passing or the pressure coming
+        # back does not mean the leak stopped.
+        self.recover("FLAT_LEAK_CLEARED", FLAT_LEAK_RULES, lambda _: flow <= CONT_FLOW_LPS)
+        still = self.cmon.holding | ({"ABNORMAL_CONSUMPTION"} if flow > limit else set())
+        self.recover("CONSUMPTION_CLEARED", CONSUMPTION_RULES, lambda mine: not mine & still)
+        if "PROLONGED_ZERO_FLOW" not in self.open:
+            self.flow_returned = False
+        elif flow > 0.002:                          # the detector's "no flow" limit
+            self.flow_returned = True
+        self.recover("ZERO_FLOW_CLEARED", {"PROLONGED_ZERO_FLOW"},
+                     lambda _: self.flow_returned and self.cmon.zero_run < self.cmon.active_zero_min)
 
     def _check_tank(self, now, hour, r):
         """Tank-side water quality & outflow/level checks. Skips missing/NaN streams safely."""
@@ -400,8 +445,10 @@ class EdgeRuntime(Node):
             self.supply_run = self.supply_run + 1 if high else 0
             if self.supply_run >= SUPPLY_MIN:
                 self.alert("ABNORMAL_SUPPLY", flow=round(outflow, 3))
+            self.recover("SUPPLY_FLOW_CLEARED", {"ABNORMAL_SUPPLY"}, lambda _: not high)
         else:
             self.supply_run = 0
+            self.ok_minutes["SUPPLY_FLOW_CLEARED"] = 0
 
         lvl = r.get("level_m")
         if _finite(lvl):
@@ -415,9 +462,12 @@ class EdgeRuntime(Node):
             inflow_v = inflow if _finite(inflow) else 0.0
             if self.low_run >= PRESSURE_MIN and not self.low_flagged:
                 self.low_flagged = True
+                self.set_open(self.open | {"SUPPLY_LOW"})
                 self.emit("FLAG", f="SUPPLY_LOW", level=round(lvl, 3), inflow=round(inflow_v, 3))
-            elif self.ok_run >= PRESSURE_MIN:
+            elif self.ok_run >= PRESSURE_MIN and self.low_flagged:
                 self.low_flagged = False
+                self.emit("FLAG", f="SUPPLY_RECOVERED", level=round(lvl, 3), inflow=round(inflow_v, 3))
+                self.set_open(self.open - {"SUPPLY_LOW"})
         else:
             self.low_run = self.ok_run = 0
 
@@ -539,6 +589,53 @@ if __name__ == "__main__":
     n = FlatNode("B-103", FakeHAL(None, gap))
     run(n, 2 * DAY)
     assert not any(m["k"] == "ALERT" and m["a"] == "LEAK_CONTINUOUS_FLOW" for m in n.store.queue)
+
+    # Recovery: a leak running past 05:00 stays open; turning the water off for 10 minutes clears
+    # it, also after a reboot; a missing reading restarts the 10 minutes
+    leak = {"on": True}
+    flow = lambda t: 0.05 if leak["on"] and t >= DAY + HOUR else (math.nan if t == leak.get("gap") else 0.0)
+    path = os.path.join(tmp, "B-301.jsonl")
+    n = FlatNode("B-301", FakeHAL(path, flow))
+    sent = lambda node: [m["a"] for m in node.store.queue if m["k"] == "ALERT"]
+    run(n, DAY + 7 * HOUR)
+    assert "LEAK_NIGHT_FLOW" in sent(n) and "FLAT_LEAK_CLEARED" not in sent(n), sent(n)
+    n = FlatNode("B-301", FakeHAL(path, flow))                          # power cut
+    n.hal.t, leak["on"], leak["gap"] = DAY + 7 * HOUR, False, DAY + 7 * HOUR + 5 * 60
+    run(n, DAY + 7 * HOUR + 15 * 60)
+    assert "FLAT_LEAK_CLEARED" not in sent(n), "the gap restarted the count"
+    run(n, DAY + 7 * HOUR + 17 * 60)
+    assert sent(n).count("FLAT_LEAK_CLEARED") == 1 and not n.open & FLAT_LEAK_RULES, sent(n)
+
+    # High use, then back to normal: cleared. A day without water, then water again: cleared
+    start = DAY + 10 * HOUR
+    n = FlatNode("B-302", FakeHAL(None, lambda t: 0.3 if start <= t < start + 2 * HOUR else use(t)))
+    run(n, start + 2 * HOUR)
+    assert "ABNORMAL_CONSUMPTION" in sent(n) and "CONSUMPTION_CLEARED" not in sent(n), sent(n)
+    run(n, start + 9 * HOUR)                      # the 6-hour average has to come down too
+    assert "CONSUMPTION_CLEARED" in sent(n) and not n.open & CONSUMPTION_RULES, (sent(n), n.open)
+    away = lambda t: 0.0 if DAY <= t < 2 * DAY + 2 * HOUR else use(t)
+    n = FlatNode("B-303", FakeHAL(None, away))
+    run(n, 2 * DAY + 2 * HOUR)
+    assert "PROLONGED_ZERO_FLOW" in sent(n) and "ZERO_FLOW_CLEARED" not in sent(n), sent(n)
+    run(n, 2 * DAY + 9 * HOUR)
+    assert "ZERO_FLOW_CLEARED" in sent(n), sent(n)
+
+    # Tank: abnormal outflow and low level are both reported over, also by a rebooted node
+    class TankHAL(FakeHAL):
+        def read(self):
+            bad = start <= self.t < start + HOUR
+            return {"outflow_lps": 1.5 if bad else 0.1, "level_m": 0.5 if bad else 2.0, "inflow_lps": 0.0}
+
+    path = os.path.join(tmp, "B-TANK.jsonl")
+    n = TankNode("B-TANK", TankHAL(path, None))
+    run(n, start + HOUR)
+    reports = lambda node: [m.get("a") or m.get("f") for m in node.store.queue if m["k"] in ("ALERT", "FLAG")]
+    assert reports(n) == ["SUPPLY_LOW", "ABNORMAL_SUPPLY"], reports(n)
+    n = TankNode("B-TANK", TankHAL(path, None))                         # power cut
+    assert n.low_flagged
+    n.hal.t = start + HOUR
+    run(n, start + HOUR + 20 * 60)
+    assert sorted(reports(n)[2:]) == ["SUPPLY_FLOW_CLEARED", "SUPPLY_RECOVERED"] and not n.open, reports(n)
 
     # EWMA: habits that change are learned (about 2 weeks), a leak while alerting is not
     more = lambda t: use(t) * (2 if t >= DAY else 1)                  # mornings and evenings double

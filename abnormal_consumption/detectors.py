@@ -179,6 +179,9 @@ class StatisticalBaselineDetector(BaseConsumptionDetector):
         self.night_run = 0
         self.win_6h = deque(maxlen=360)
         self.day_mean_6h = 0.0
+        # Event types whose condition is true now, or cannot be judged yet. Events have a
+        # cooldown, so "no new event" does not mean the condition ended.
+        self.holding = set()
 
     def _on_gap(self, gap_s):
         self.high_run = self.night_run = 0      # "for N minutes" means N consecutive readings
@@ -210,10 +213,14 @@ class StatisticalBaselineDetector(BaseConsumptionDetector):
 
         # 3. SUDDEN_CONSUMPTION_CHANGE (rolling 6h mean vs same-time-of-day 6h baseline)
         self.win_6h.append(flow_lps)
+        self.holding = {name for name, true_now in (("UNUSUAL_HIGH_CONSUMPTION", flow_lps > limit),
+                                                    ("UNUSUAL_NIGHT_CONSUMPTION", at_night and flow_lps > night_lim),
+                                                    ("SUDDEN_CONSUMPTION_CHANGE", len(self.win_6h) < 360)) if true_now}
         if len(self.win_6h) == 360:
             m6 = sum(self.win_6h) / 360.0
             expected_6h = sum(self.base.mean((hour - k) % 24) for k in range(6)) / 6.0
             if m6 > max(2.2 * expected_6h, 0.025):
+                self.holding.add("SUDDEN_CONSUMPTION_CHANGE")
                 ev = self._emit_once("SUDDEN_CONSUMPTION_CHANGE", t_s, cooldown_s=6 * 3600, mean_6h=round(m6, 4))
                 if ev:
                     out.append(ev)

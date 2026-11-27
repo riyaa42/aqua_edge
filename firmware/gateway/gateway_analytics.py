@@ -19,6 +19,19 @@ QUALITY_ALERTS = {
     "QUALITY_TEMPORAL_ANOMALY",
 }
 SUPPLY_EVENTS = {"SUPPLY_EVENT", "LEAK_TANK_DRAIN", "SUPPLY_UNCERTAIN"}
+# recovery message from a node -> the incident category it ends
+RECOVERIES = {
+    "FLAT_LEAK_CLEARED": ("FLAT_LEAK",),
+    "CONSUMPTION_CLEARED": ("ABNORMAL_CONSUMPTION",),
+    "ZERO_FLOW_CLEARED": ("PROLONGED_ZERO_FLOW",),
+    "SUPPLY_FLOW_CLEARED": ("ABNORMAL_SUPPLY",),
+    "QUALITY_CLEARED": ("QUALITY_CHEMICAL", "QUALITY_RUNOFF", "QUALITY_LIMIT_VIOLATION"),
+    "QUALITY_TEMPORAL_CLEARED": ("QUALITY_TEMPORAL_ANOMALY",),
+}
+# counters and latest values that survive a gateway restart (incidents and cleared_at: see to_state)
+SAVED = ("resolved_history", "last_sum", "last_quality", "last_supply", "last_balance_pct", "pipe_leak_info",
+         "bad_packets", "skewed_packets", "online_alerts", "offline_alerts", "buffered_recovered",
+         "delay_count", "delay_sum", "delay_max")
 
 CORRELATION_WINDOW_S = 1800  # 30 min window for grouping co-occurring root-cause symptoms
 MAX_HISTORY = 200
@@ -65,6 +78,15 @@ ACTIONS = {
 }
 
 
+def category_of(alert):
+    """The incident category an alert name belongs to."""
+    if alert in FLAT_LEAK_ALERTS:
+        return "FLAT_LEAK"
+    if alert in CONSUMPTION_ALERTS:
+        return "PROLONGED_ZERO_FLOW" if alert == "PROLONGED_ZERO_FLOW" else "ABNORMAL_CONSUMPTION"
+    return alert
+
+
 def _severity_label(score):
     if score >= 70:
         return "CRITICAL"
@@ -107,7 +129,30 @@ class GatewayAnalytics:
         self.online_alerts = 0
         self.offline_alerts = 0
         self.buffered_recovered = 0
-        self.delays_s = []
+        self.delay_count, self.delay_sum, self.delay_max = 0, 0.0, 0.0
+        self.cleared_at = {}       # (target, category) -> node time of its latest recovery
+
+    def to_state(self):
+        return {**{name: getattr(self, name) for name in SAVED},
+                "incidents": list(self.incidents.values()),
+                "cleared_at": [[*key, t] for key, t in self.cleared_at.items()]}
+
+    def load_state(self, state):
+        for name in SAVED:
+            setattr(self, name, state[name])
+        self.incidents = {(it["target"], it["category"]): it for it in state["incidents"]}
+        self.cleared_at = {(target, cat): t for target, cat, t in state["cleared_at"]}
+
+    def is_stale(self, target, category, t_event):
+        """True for something that happened before a recovery already received (late delivery)."""
+        return t_event <= self.cleared_at.get((target, category), float("-inf"))
+
+    def _clear(self, target, category, t_clear, reason):
+        """A recovery ends only what is older than itself."""
+        key = (target, category)
+        self.cleared_at[key] = max(t_clear, self.cleared_at.get(key, t_clear))
+        if key in self.incidents and self.incidents[key]["t_last"] <= t_clear:
+            self._resolve(target, category, t_resolved=t_clear, reason=reason)
 
     def _floor_of(self, flat):
         part = flat.split("-")[1]
@@ -125,6 +170,8 @@ class GatewayAnalytics:
         return max(cnt, 1)
 
     def _upsert(self, target, category, t_event, rx, **evidence):
+        if self.is_stale(target, category, t_event):
+            return
         key = (target, category)
         cur = self.incidents.get(key)
         if cur is None:
@@ -166,7 +213,9 @@ class GatewayAnalytics:
         raw_delay = float(rx) - float(m["t"])
         valid_delay = raw_delay >= 0.0
         if valid_delay:
-            self.delays_s.append(raw_delay)
+            self.delay_count += 1
+            self.delay_sum += raw_delay
+            self.delay_max = max(self.delay_max, raw_delay)
             if raw_delay >= 60.0:
                 self.buffered_recovered += 1
         else:
@@ -199,16 +248,16 @@ class GatewayAnalytics:
                 self.offline_alerts += 1
 
         a = m["a"]
-        if a == "QUALITY_CLEARED":
-            self.last_quality["class"] = "NORMAL"
-            self.last_quality["compliant"] = True
-            self.last_quality["viol_mask"] = 0
-            for qcat in ("QUALITY_CHEMICAL", "QUALITY_RUNOFF", "QUALITY_LIMIT_VIOLATION"):
-                self._resolve(n, qcat, t_resolved=m["t"], reason="QUALITY_CLEARED")
+        if a in RECOVERIES:
+            for category in RECOVERIES[a]:
+                self._clear(n, category, m["t"], a)
+            still_open = any((n, category) in self.incidents for category in RECOVERIES[a])
+            if a == "QUALITY_CLEARED" and not still_open:
+                self.last_quality.update({"class": "NORMAL", "compliant": True, "viol_mask": 0})
+            elif a == "QUALITY_TEMPORAL_CLEARED" and not still_open:
+                self.last_quality["temporal_anomaly"] = False
             return
-        if a == "QUALITY_TEMPORAL_CLEARED":
-            self.last_quality["temporal_anomaly"] = False
-            self._resolve(n, "QUALITY_TEMPORAL_ANOMALY", t_resolved=m["t"], reason="QUALITY_TEMPORAL_CLEARED")
+        if self.is_stale(n, category_of(a), m["t"]):
             return
 
         if a in QUALITY_ALERTS:
@@ -228,8 +277,7 @@ class GatewayAnalytics:
         elif a in FLAT_LEAK_ALERTS:
             self._upsert(n, "FLAT_LEAK", m["t"], rx, rule=a, flow=m.get("flow"), p_min=m.get("p_min"))
         elif a in CONSUMPTION_ALERTS:
-            cat = "PROLONGED_ZERO_FLOW" if a == "PROLONGED_ZERO_FLOW" else "ABNORMAL_CONSUMPTION"
-            self._upsert(n, cat, m["t"], rx, rule=a, flow=m.get("flow"))
+            self._upsert(n, category_of(a), m["t"], rx, rule=a, flow=m.get("flow"))
         elif a == "ABNORMAL_SUPPLY":
             self._upsert(n, "ABNORMAL_SUPPLY", m["t"], rx, flow=m.get("flow"))
 
@@ -244,6 +292,12 @@ class GatewayAnalytics:
             self._resolve(ev["node"], "NODE_SILENT", t_resolved=t_ev, reason="NODE_BACK")
         elif kind == "CLOCK_SKEW":
             self._upsert(ev["node"], "CLOCK_SKEW", t_ev, rx, ahead_s=ev.get("ahead_s"))
+        elif kind == "CLOCK_OK":
+            self._resolve(ev["node"], "CLOCK_SKEW", t_resolved=t_ev, reason="CLOCK_OK")
+        elif kind == "SUPPLY_RECOVERED":
+            for s in SUPPLY_EVENTS:
+                self._clear(self.tank, s, ev["event_t"], kind)
+            self.last_supply.update({"state": "NORMAL", "t": ev["event_t"]})
         elif kind == "PIPE_LEAK":
             fl = ev.get("suspected_floor")
             tgt = f"B-D{'0' if fl == 'G' else fl}" if fl else "B-RISER"
@@ -264,16 +318,20 @@ class GatewayAnalytics:
                 floor_drops=self.pipe_leak_info["floor_drops"],
             )
         elif kind in SUPPLY_EVENTS:
+            t_ev = ev.get("event_t", t_ev)      # when the tank saw it, to compare with a recovery
             self.last_supply["state"] = kind
             self.last_supply["t"] = t_ev
             for s in SUPPLY_EVENTS:
                 if s != kind:
                     self._resolve(self.tank, s, t_resolved=t_ev, reason=f"superseded_by_{kind}")
             self._upsert(self.tank, kind, t_ev, rx, inflow_lps=ev.get("inflow_lps"))
-        elif kind in ("NEW_ALERT", "REPEAT_ALERT") and ev.get("possible_cause") == "PIPE_LEAK":
+        elif kind in ("NEW_ALERT", "REPEAT_ALERT") and ev.get("alert") in FLAT_LEAK_ALERTS:
             cur = self.incidents.get((ev["node"], "FLAT_LEAK"))
-            if cur:
-                cur["evidence"]["possible_cause"] = "PIPE_LEAK"
+            if cur and t_ev >= cur["t_last"]:   # only the newest alert decides the label
+                if ev.get("possible_cause"):
+                    cur["evidence"]["possible_cause"] = ev["possible_cause"]
+                else:
+                    cur["evidence"].pop("possible_cause", None)
 
     def correlate_incidents(self, now):
         """Group co-occurring symptoms into root-cause incidents."""
@@ -403,8 +461,8 @@ class GatewayAnalytics:
         top_sev = queue[0]["severity"] if queue else "NORMAL"
         flat_leaks = [it for it in queue if it["category"] == "FLAT_LEAK"]
         consumption = [it for it in queue if it["category"] in ("ABNORMAL_CONSUMPTION", "PROLONGED_ZERO_FLOW")]
-        mean_delay = round(sum(self.delays_s) / len(self.delays_s), 2) if self.delays_s else 0.0
-        max_delay = round(max(self.delays_s), 2) if self.delays_s else 0.0
+        mean_delay = round(self.delay_sum / self.delay_count, 2) if self.delay_count else 0.0
+        max_delay = round(self.delay_max, 2)
         nodes = {}
         for n in sorted(self.flats | {self.tank}):
             nodes[n] = {

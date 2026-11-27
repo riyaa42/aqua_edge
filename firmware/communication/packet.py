@@ -27,8 +27,9 @@ NAMES = ["GATEWAY", "B-TANK"] + [f"B-{floor}{flat:02d}" for floor in "G1234" for
 ALERTS = ["LEAK_NIGHT_FLOW", "LEAK_CONTINUOUS_FLOW", "LEAK_PRESSURE_DROP", "ABNORMAL_CONSUMPTION", "ABNORMAL_SUPPLY",
           "QUALITY_RUNOFF", "QUALITY_CHEMICAL", "QUALITY_LIMIT_VIOLATION", "QUALITY_CLEARED",
           "QUALITY_TEMPORAL_ANOMALY", "QUALITY_TEMPORAL_CLEARED",
-          "UNUSUAL_NIGHT_CONSUMPTION", "PROLONGED_ZERO_FLOW", "SUDDEN_CONSUMPTION_CHANGE"]
-FLAGS = ["SUPPLY_LOW"]
+          "UNUSUAL_NIGHT_CONSUMPTION", "PROLONGED_ZERO_FLOW", "SUDDEN_CONSUMPTION_CHANGE",
+          "FLAT_LEAK_CLEARED", "CONSUMPTION_CLEARED", "ZERO_FLOW_CLEARED", "SUPPLY_FLOW_CLEARED"]   # append only
+FLAGS = ["SUPPLY_LOW", "SUPPLY_RECOVERED"]                      # append only
 VIOLATIONS = ["pH", "TDS", "TURBIDITY"]     # "viol" is a bit mask of broken limits
 # field name -> how its value is packed; its number on air is its position here; "B" = index into ALERTS/FLAGS
 FIELDS = {"a": "B", "f": "B", "i": ">I", "vol_l": ">f", "p_min": ">f", "in_l": ">f", "level_m": ">f",
@@ -105,6 +106,8 @@ if __name__ == "__main__":
             {"n": "B-TANK", "s": 5, "t": 180, "k": "FLAG", "f": "SUPPLY_LOW", "level": 0.312, "inflow": 0.0},
             {"n": "B-TANK", "s": 6, "t": 240, "k": "SUM", "i": 5, "vol_l": 300.5, "in_l": 0.0, "level_m": 1.4991},
             {"k": "ACK", "n": "B-203", "s": 8, "gt": 93720}]
+    msgs[-1:-1] = [{"n": "B-203", "s": 10, "t": 300, "k": "ALERT", "a": "FLAT_LEAK_CLEARED"},
+                   {"n": "B-TANK", "s": 11, "t": 360, "k": "FLAG", "f": "SUPPLY_RECOVERED", "level": 1.5}]
     for m in msgs:
         raw = pack(m, keys(m["n"]))
         assert unpack(raw, keys) == m, (unpack(raw, keys), m)          # same message back

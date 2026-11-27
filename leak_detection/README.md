@@ -2,25 +2,25 @@
 
 This document explains, step by step, how Aqua Edge finds water leaks in building B: which sensors are used, where each decision is made, the simple math behind every check, how the results reach the gateway, how well it worked in testing, and what still needs fixing.
 
-All numbers below come from the code in `../firmware/aqua_edge.py` (the node firmware) and `../firmware/gateway.py` (the gateway).
+All numbers below come from the code in `../firmware/edge_node/aqua_edge.py` (the node firmware) and `../firmware/gateway/gateway.py` (the gateway).
 
 ### Where the code is
 
 | What | File | Where in it |
 |---|---|---|
-| Learning "normal" (hourly average and spread) | `../firmware/aqua_edge.py` | `class Baseline` |
-| All settings (limits, waits) | `../firmware/aqua_edge.py`, `../firmware/gateway.py` | Constants at the top of each file |
-| Night check, continuous-flow check, pressure-assisted leak check, too-much check (every flat node) | `../firmware/aqua_edge.py` | `FlatNode.check` |
-| Litres, `p_min`, and `p_mean` per 15 minutes sent to the gateway (flat node) | `../firmware/aqua_edge.py` | `FlatNode.accumulate` |
-| Tank outflow check, tank level flag (tank node) | `../firmware/aqua_edge.py` | `TankNode.check` |
-| Building check (water in = water out) | `../firmware/gateway.py` | `Gateway.mass_balance` |
-| Supply-event rule | `../firmware/gateway.py` | `Gateway.supply_rule` |
-| Silent nodes, clock check | `../firmware/gateway.py` | `Gateway.check_silence`, `Gateway.check_clock` |
-| New vs repeat alert | `../firmware/gateway.py` | `Gateway.check_repeat` |
+| Learning "normal" (hourly average and spread) | `../firmware/edge_node/aqua_edge.py` | `class Baseline` |
+| All settings (limits, waits) | `../firmware/edge_node/aqua_edge.py`, `../firmware/gateway/gateway.py` | Constants at the top of each file |
+| Night check, continuous-flow check, pressure-assisted leak check, too-much check (every flat node) | `../firmware/edge_node/aqua_edge.py` | `FlatNode.check` |
+| Litres, `p_min`, and `p_mean` per 15 minutes sent to the gateway (flat node) | `../firmware/edge_node/aqua_edge.py` | `FlatNode.accumulate` |
+| Tank outflow check, tank level flag (tank node) | `../firmware/edge_node/aqua_edge.py` | `TankNode.check` |
+| Building check (water in = water out) | `../firmware/gateway/gateway.py` | `Gateway.mass_balance` |
+| Supply-event rule | `../firmware/gateway/gateway.py` | `Gateway.supply_rule` |
+| Silent nodes, clock check | `../firmware/gateway/gateway.py` | `Gateway.check_silence`, `Gateway.check_clock` |
+| New vs repeat alert | `../firmware/gateway/gateway.py` | `Gateway.check_repeat` |
 | Flow vs pressure comparison | `compare_leaks.py` (this folder) | |
 | Live test scenario | `../simulation/live/scenarios/flow_leaks.jsonl` | |
 
-The same firmware files run in the simulation now and are meant to run on the Raspberry Pi 4 nodes and the gateway laptop later.
+The same firmware files run in the simulation now and are meant to run on the Raspberry Pi 3B nodes and the gateway laptop later.
 
 ---
 
@@ -153,7 +153,7 @@ limit = the bigger of (3 x average flow for this hour) and 0.05 L/s
 
 This is the mass balance idea from Ali et al. [6, for comparing the tank supply against the flats to find pipe leaks].
 
-> **Rule:** every 15 minutes, compare water leaving the tank with water arriving at all flats. If more than **10%** goes missing for **2 blocks in a row** (30 minutes), raise `PIPE_LEAK`.
+> **Rule:** every 15 minutes, compare water leaving the tank with water arriving at all flats. If more than **10%** goes missing for **2 blocks in a row** (two blocks next to each other in time, 30 minutes), raise `PIPE_LEAK`.
 
 ```
 missing % = (tank out - (flat 1 + flat 2 + ... + flat 20)) / tank out x 100
@@ -164,6 +164,7 @@ missing % = (tank out - (flat 1 + flat 2 + ... + flat 20)) / tank out x 100
 - **Example from testing:** a large burst on downtake B-D1. The tank sent out water, but 69.9% of it never reached any flat, so the gateway raised `PIPE_LEAK`.
 - **Why 10%:** cheap meters are never perfect. Each can be up to 2% off. Worst case, the tank reads 2% high and all flats read 2% low: (1.02 - 0.98) / 1.02 = 3.9%. So 10% leaves a safe gap.
 - **Why 2 blocks in a row:** one odd block (a glitch) is not enough.
+- **Order of arrival does not matter:** a block that is missing or skipped breaks the pair. Two normal blocks next to each other re-arm the check. If summaries delivered late show an earlier leak that the check has already moved past, it is logged as `PIPE_LEAK_PAST` and the current state stays as it is; if they show the active leak began earlier, only its start time moves back.
 - **Blocks under 5 litres are skipped:** at night the tank might send out half a litre. A tiny meter error would then look like a huge percentage.
 - **What it cannot see:** a leak inside a flat. That water passes through the flat's meter first, so it counts as "used". The flat's own checks (5.1, 5.2 and 5.5) catch those.
 
@@ -210,6 +211,8 @@ A node that sends nothing at all (no alarms, no summaries) may have lost power, 
 2. raises `BALANCE_PAUSED`, naming the silent nodes, so it is clear the building check is not running,
 3. raises `NODE_BACK` when the node is heard again, and checks the late blocks from the summaries that waited on its SD card.
 
+Only a message the gateway has not seen before counts as "heard": a repeated or replayed packet is acknowledged but is no sign of life. (A captured packet that never reached the gateway would still count once.)
+
 This follows common practice for LoRa networks: track when each device was last heard and alert after 2 to 3 missed sends, instead of guessing its numbers.
 
 ---
@@ -224,6 +227,8 @@ This follows common practice for LoRa networks: track when each device was last 
 6. **The gateway labels it.** The first alarm of a type from a node is `NEW_ALERT`. If the same problem comes back later, it is `REPEAT_ALERT`, with a count and the minutes since last time.
 
 **One alarm per problem:** while a problem continues, the node does not repeat the alarm every minute. Once the condition has been normal for 10 minutes (`ALERT_CLEAR_S`), the alarm re-arms and can fire again if the problem returns.
+
+**Recovery:** silence never closes a problem. The node sends a recovery message when the problem has looked over for 10 minutes of readings in a row, and the gateway then moves the problem to its history. A flat leak counts as over only when the water is off (flow at most `0.005 L/s`), not when the night check's hours end or the pressure recovers. A recovery closes only what is older than itself, and recovery messages are not counted as new or repeat alerts or as leak evidence. The table of rules, and what survives a restart of a node or of the gateway, is in [`../firmware/README.md`](../firmware/README.md#recovery-and-restarts).
 
 **Summaries:** every 15 minutes, each node also sends a summary (litres used, lowest pressure). These go out in the node's own time slot, so they do not collide. The building check is built from these.
 
@@ -279,7 +284,8 @@ The whole system ran for 48 simulated hours: real firmware on 22 nodes, the real
 | Medium leak in flat B-402 at 10:00 | Pressure-assisted check on B-402, 10:10; too-much check 11:00; continuous-flow check 13:00 | 10:11 |
 | Large burst on downtake B-D1 at 18:00 | Tank outflow check 18:14; gateway building check 18:31 (69.9% missing) | 18:15 / 18:31 |
 
-- 4,034 of 4,034 radio messages got through (signed binary packets), with no collisions or re-sends.
+- 4,041 of 4,041 radio messages got through (signed binary packets): 2 collisions, both re-sent.
+- Recovery messages: the flat-leak problems of B-203 and B-402 and the tank outflow problem from the downtake burst stayed open, as those leaks are never fixed. B-203's night-use report was cleared at 03:54, when its flow fell back under that rule's limit, although the leak went on (the leak itself stayed open). Before the burst, the tank's `ABNORMAL_SUPPLY` cleared and returned several times (cleared 10:49, 13:29, 14:14, 15:39, 16:19) while the flat leaks continued. The tank reported low at 11:09 and recovered at 11:57.
 - `check_comms.py` passes, including "no alerts from nodes with no event". It does not check the gateway's supply events or the tank's alerts, and this run has two false ones: a `QUALITY_TEMPORAL_ANOMALY` at 00:16 with no water-quality event, and a `SUPPLY_EVENT` at 11:10 while only the B-402 flat leak (and the older B-203 one) was active.
 - The flats with leaks also raise consumption alerts (`../abnormal_consumption/`). The tank also repeats `ABNORMAL_SUPPLY` several times before the downtake burst, while only the flat leaks are active.
 
@@ -344,9 +350,10 @@ For full benchmark numbers, confusion matrices, and multi-dataset results, see [
 | Meter error allowed for | up to 2% per meter | Building check |
 | Tank level low | below the Day-1 floor (10th percentile - 0.03 m) and below the hourly average - 0.3 m, for 10 min | Supply event |
 | Silent node | nothing heard for 45 min | Gateway |
-| Building check re-arm | 2 normal blocks in a row | Gateway |
+| Building check re-arm | 2 normal blocks next to each other in time | Gateway |
 | Clock skew | message time over 1 min in the future | Gateway |
 | Alarm re-arm | after 10 min back to normal | All flat and tank alarms |
+| Recovery message | after 10 min of readings in a row showing the problem is over | Flat leak, consumption, zero use, tank outflow |
 | Re-send if no reply | after about 2 min, doubling to 15 min (alarms) or 30 min (others), ±15% | All messages |
 | Summary period | 15 min | Building check |
 
@@ -362,7 +369,8 @@ From the repository root (using the root `uv` environment). The two data validat
 ```
 sh simulation/live/run_local.sh --scenario simulation/live/scenarios/flow_leaks.jsonl   # full live system, three leaks
 python3 simulation/live/check_comms.py                                                  # PASS/FAIL report for that run
-python3 firmware/gateway.py                                                             # gateway self-check (re-arm, silent node, clock)
+python3 firmware/gateway/gateway.py                                                             # gateway self-check (re-arm, silent node, clock)
+uv run python firmware/tests/test_gateway_analytics.py                                  # recovery, replay, block order, restart
 uv run python leak_detection/compare_leaks.py                                           # flow vs pressure, 35 runs (~5 min; see note in the file)
 uv run python leak_detection/compare_leaks.py --check                                   # self-check of the scoring
 uv run python leak_detection/test_regression.py          # 8 leak and supply scenarios
