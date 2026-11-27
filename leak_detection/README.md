@@ -146,13 +146,18 @@ limit = the bigger of (3 x average flow for this hour) and 0.05 L/s
 
 ### 5.4 Building check (gateway)
 
-This is the mass balance idea from Ali et al. [6, for comparing the tank supply against the flats to find pipe leaks], done once a night at the quietest hours, the way water companies check for leaks with the "minimum night flow".
+This is the mass balance idea from Ali et al. [6, for comparing the tank supply against the flats to find pipe leaks], done per floor. The down pipe has a flow meter at the top (tank node) and one above each lower floor, wired to the node of flat 301, 201, 101 or G01, so no new radios.
 
-> **Rule:** add up the water that left the tank and the water that reached all flats from **02:00 to 04:00**. If more than **20 litres** went missing, raise `PIPE_LEAK`.
+> **Rule, per floor's stretch of pipe:** water in at its top meter, minus water on to the next meter, minus that floor's 4 flats = water lost on that floor. More than **30 litres** in one 15-minute block (**fast check**, any hour) or more than **20 litres** from **02:00 to 04:00** (**night check**) raises `PIPE_LEAK` naming the floor.
 
 ```
-missing litres = tank out - (flat 1 + flat 2 + ... + flat 20), over 02:00-04:00
+lost on floor 2 = meter above floor 2 - meter above floor 1 - (flats 201 + 202 + 203 + 204)
 ```
+
+- **Why the floor can be named:** pressure alone could not do it (measured: a 0.5 L/s leak on floor 4 drops every floor's pressure by the same 4.5 cm). Meters split the pipe into stretches.
+- **Meters:** 25 mm ultrasonic meters on the lower stretches (they count from 0.0015 L/s; at night only a few floors draw through them, below what a 50 mm meter counts). With 50 mm meters there, clean nights read up to 32 L "lost", so the night check would false-alarm.
+- **Measured limits (3 clean simulated days):** no clean block lost more than 2.3 L on any floor (a floor next to a burst reads up to 9 L from meter error), so the fast check uses 30 L: leaks from about 0.035 L/s are found within 15 minutes. Clean nights: -3.2 to +1.0 L per floor; a 0.005 L/s leak loses 33-36 L on its own floor and under 1.3 L on the others, so 20 L finds leaks from about 0.003 L/s at the next night.
+- **Fallback:** without the pipe meters' numbers (offline data, or one of those 4 flats silent) the gateway checks the whole pipe at night: tank out minus all flats.
 
 - **Idea:** water cannot vanish. Like sending 100 rupees and only 85 arriving: someone along the way took 15.
 - **How it gets the numbers:** every 15 minutes, each node sends a short summary ("I used X litres"). The gateway waits for all of them, then does the subtraction.

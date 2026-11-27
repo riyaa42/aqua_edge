@@ -18,7 +18,7 @@
   --watch: #f5d28a; --watch-deep: #b98a2a;    /* not heard */
   --alert: #f08a94; --alert-deep: #c24459;    /* leak alert */
   --action: #7c93f2; --action-deep: #4a5fc4;  /* things you press */
-  --water: #8ccbe8; --runoff: #c9b28a; --chemical: #c7a6e8;
+  --water: #8ccbe8; --runoff: #c9b28a; --chemical: #c7a6e8; --hot: #f2a68a;
   --shade: 48, 78, 104;
   --clay-shadow: 14px 16px 32px rgba(var(--shade), .2), inset -8px -10px 18px rgba(var(--shade), .1), inset 8px 10px 18px rgba(255, 255, 255, .85);
   --well-shadow: inset 5px 6px 12px rgba(var(--shade), .16), inset -5px -6px 12px rgba(255, 255, 255, .8);
@@ -214,7 +214,6 @@ select { border: 0; border-radius: 16px; padding: 10px 14px; background: var(--s
 /* Leak test */
 .picked { display: flex; align-items: baseline; gap: 10px; margin: 14px 0 4px; }
 .picked strong { font-family: var(--display); font-size: 2rem; font-weight: 600; line-height: 1.1; }
-#picked-info { margin-bottom: 12px; }
 .picked span { color: var(--ink-soft); font-weight: 700; }
 .sizes { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 8px; }
 .sizes input[type=range] { flex: 1 1 140px; margin: 0 0 0 6px; }
@@ -362,12 +361,10 @@ input[type=range]::-moz-range-thumb { width: 30px; height: 30px; border: 0; bord
       <article class="card clay" id="test-card">
         <h2>Add a leak</h2>
         <div id="start-box" hidden>
-          <p class="hint" style="margin-top:14px">No simulation is running. Starting one takes about a minute: every flat first spends a simulated day learning what normal water use looks like.</p>
           <div class="stack"><button class="btn primary" id="start">Start simulation</button></div>
         </div>
         <div id="test-box">
           <div class="picked"><strong id="picked">Pick a flat</strong><span id="picked-floor"></span></div>
-          <p class="hint" id="picked-info"></p>
           <div class="sizes" role="group" aria-label="Leak size">
             <button class="btn" data-size="small" data-lps="0.05" aria-pressed="true">Small</button>
             <button class="btn" data-size="medium" data-lps="0.5" aria-pressed="false">Medium</button>
@@ -386,7 +383,7 @@ input[type=range]::-moz-range-thumb { width: 30px; height: 30px; border: 0; bord
           </div>
           <p class="hint" id="go-note"></p>
           <div class="learning" id="learning" hidden>
-            <p class="hint">The flats are learning what normal water use looks like (simulated day 1). Leaks can be added once they're done, so a leak isn't learned as normal.</p>
+            <p class="hint">Learning normal water use (day 1)</p>
             <div class="bar"><i id="learn-bar" style="width:0"></i></div>
           </div>
         </div>
@@ -399,6 +396,7 @@ input[type=range]::-moz-range-thumb { width: 30px; height: 30px; border: 0; bord
         <div class="events">
           <button class="btn" data-cmd='{"do":"quality","kind":"runoff","minutes":60}'>Send runoff into the tank, 1 h</button>
           <button class="btn" data-cmd='{"do":"quality","kind":"chemical","minutes":45}'>Send a chemical in, 45 min</button>
+          <button class="btn" data-cmd='{"do":"quality","kind":"hot","minutes":30}'>Heat the tank water to 38 &deg;C, 30 min</button>
         </div>
         <div class="tank-row">
           <p class="big" id="tank-level">No report<small></small></p>
@@ -421,7 +419,7 @@ input[type=range]::-moz-range-thumb { width: 30px; height: 30px; border: 0; bord
         <ol class="leaks" id="leaks" hidden></ol>
       </article>
       <article class="card clay grow" id="feed-card">
-        <div class="card-head"><h2>What the gateway heard</h2><span class="hint">Newest first</span></div>
+        <div class="card-head"><h2>What the gateway heard</h2></div>
         <ol class="feed" id="feed"></ol>
       </article>
     </section>
@@ -432,9 +430,9 @@ input[type=range]::-moz-range-thumb { width: 30px; height: 30px; border: 0; bord
     <article class="card clay sensors">
       <h2>What each node measures</h2>
       <ul>
-        <li><b>Flat node<small>20, one per flat</small></b><p>Water flow meter and pressure sensor. <span>Raises: water running at night, water never stopped for 8 hours, much more water than usual.</span></p></li>
-        <li><b>Tank node<small>1, on the roof tank</small></b><p>Inflow and outflow meters, water level, pH, TDS (dissolved salts), turbidity (cloudiness) and temperature. <span>Raises: water leaving the tank much faster than usual, runoff or chemical in the water (small model on the node), supply running low.</span></p></li>
-        <li><b>Gateway<small>1, outside</small></b><p>No sensors. <span>Receives every message, notices nodes that go quiet, and every night from 2 to 4 am compares the water that left the tank with what all the flats used: anything missing is leaking from the pipes.</span></p></li>
+        <li><b>Flat node<small>20, one per flat</small></b><p>Water flow meter and pressure sensor. Flats 301, 201, 101 and G01 also read the down pipe meter above their floor. <span>Raises: water running at night, water never stopped for 8 hours, much more water than usual.</span></p></li>
+        <li><b>Tank node<small>1, on the roof tank</small></b><p>Inflow and outflow meters, water level, pH, TDS (dissolved salts), turbidity (cloudiness) and temperature. <span>Raises: water leaving the tank much faster than usual, runoff or chemical in the water (small model on the node), water above 35 &deg;C, supply running low.</span></p></li>
+        <li><b>Gateway<small>1, outside</small></b><p>No sensors. <span>Receives every message, notices nodes that go quiet, and for each floor's stretch of down pipe compares the water in, the water on to the next floor and what the 4 flats used: more than 30 L missing in 15 minutes, or 20 L between 2 and 4 am, is a leak on that floor.</span></p></li>
       </ul>
     </article>
     <article class="card clay" id="key">
@@ -449,12 +447,12 @@ input[type=range]::-moz-range-thumb { width: 30px; height: 30px; border: 0; bord
         <li><span class="dot" style="background:#fff;box-shadow:inset 0 0 0 2px #3a76a8"></span>Spot on the down pipe where you can start a leak; red once the leak is found</li>
         <li><span class="dot" style="background:#3a76a8"></span>Rising pipe, pump to tank</li>
         <li><span class="dot" style="background:#79b4d8"></span>Down pipe, tank to flats</li>
+        <li><span class="dot" style="background:#213b4f;border-radius:3px"></span>Flow meter on the down pipe, one above each floor</li>
         <li>Heights are drawn 2.6 times taller than real so the floors don't hide each other</li>
       </ul>
     </article>
     <article class="card clay radio" id="radio">
       <h2>Radio</h2>
-      <p class="hint">Every packet is encrypted (AES-128) and signed.</p>
       <div class="tiles">
         <div class="tile"><p>Through first time, radio up</p><p class="big" id="r-ok">-</p></div>
         <div class="tile"><p>Lost to two nodes talking at once</p><p class="big" id="r-col">-</p></div>
@@ -464,7 +462,6 @@ input[type=range]::-moz-range-thumb { width: 30px; height: 30px; border: 0; bord
         <div class="tile"><p>Gateway replies delivered</p><p class="big" id="r-ack">-</p></div>
       </div>
       <h3>Delivery per node</h3>
-      <p class="hint">Share of each node's attempts that reached the gateway, leaving out radio cuts.</p>
       <div class="nodes" id="nodes"></div>
     </article>
   </div>
@@ -481,17 +478,19 @@ const nodeOf = n => n.startsWith("B-D") ? "B-TANK" : n;     // the down pipe is 
 const ALERTS = {
   LEAK_NIGHT_FLOW: "Water running at night", LEAK_CONTINUOUS_FLOW: "Water never stopped for 8 hours",
   ABNORMAL_CONSUMPTION: "Much more water than usual", ABNORMAL_SUPPLY: "Water leaving the tank much faster than usual",
-  PIPE_LEAK: "Water went missing between the tank and the flats overnight",
-  QUALITY_RUNOFF: "Runoff in the tank water", QUALITY_CHEMICAL: "Chemical in the tank water", QUALITY_CLEARED: "Tank water clean again"};
-const QUALITY = {QUALITY_CLEARED: "Clean", QUALITY_RUNOFF: "Runoff in the water", QUALITY_CHEMICAL: "Chemical in the water"};
+  PIPE_LEAK: "Water going missing from the down pipe",
+  QUALITY_RUNOFF: "Runoff in the tank water", QUALITY_CHEMICAL: "Chemical in the tank water", QUALITY_HOT: "Tank water too warm", QUALITY_CLEARED: "Tank water clean again"};
+const QUALITY = {QUALITY_CLEARED: "Clean", QUALITY_RUNOFF: "Runoff in the water", QUALITY_CHEMICAL: "Chemical in the water", QUALITY_HOT: "Water too warm"};
+const QCOLOR = {QUALITY_RUNOFF: "var(--runoff)", QUALITY_CHEMICAL: "var(--chemical)", QUALITY_HOT: "var(--hot)"};
 const SIZES = {small: 0.05, medium: 0.5, large: 1.5};
 const ADVICE = {
   LEAK_NIGHT_FLOW: "Check the flat's taps, toilet and pipes.", LEAK_CONTINUOUS_FLOW: "Check the flat's taps, toilet and pipes.",
   ABNORMAL_CONSUMPTION: "Check the flat's taps, toilet and pipes.",
   ABNORMAL_SUPPLY: "Look for a burst on the main down pipe or in a flat.",
-  PIPE_LEAK: "Check the down pipe and its joints on every floor, and the branch pipes before each flat's meter.",
+  PIPE_LEAK: "Check this stretch of down pipe and its joints, and the branch pipes before each flat's meter.",
   QUALITY_RUNOFF: "Tell residents not to drink or cook with tap water. Check the tank lid and overflow for rainwater getting in.",
-  QUALITY_CHEMICAL: "Tell residents not to drink or cook with tap water until the tank node reports it clean. Find what got into the tank."};
+  QUALITY_CHEMICAL: "Tell residents not to drink or cook with tap water until the tank node reports it clean. Find what got into the tank.",
+  QUALITY_HOT: "Tell residents not to drink tap water: bacteria such as Legionella grow fast in stored water this warm. Shade the tank and flush it once it cools."};
 const LEARN_S = 86400;
 let S = null, R = null, polls = 0, picked = null, size = "small", lps = 0.05, startAt = "now", tiles = {}, dg = null;
 
@@ -587,6 +586,11 @@ function buildDiagram(flats) {
     g += `<g data-node="B-D${f}" tabindex="0" role="button" aria-label="${flatName("B-D" + f)}"><title>${flatName("B-D" + f)}: start a leak here</title><circle class="dg-site" cx="${sx}" cy="${sy}" r=".55"/>` +
          `<g class="dg-drip" hidden><path transform="translate(${sx + .9} ${sy + 1})" d="${DROP}"/></g></g>`;
   }
+  // Flow meters on the down pipe, one above floors 3, 2, 1 and ground, read by the flat x01 just below
+  for (let f = 3; f >= 0; f--) {
+    const [mx, my] = P(...DOWN, 3 * f + 1.8), by = f ? `${f}01` : "G01";
+    g += `<rect x="${mx - .45}" y="${my - .3}" width=".9" height=".6" rx=".15" fill="#213b4f"><title>Down pipe flow meter, read by flat ${by}'s node</title></rect>`;
+  }
   // Gateway outside, with the waves it shows when an alert arrives
   const [gx, gy0] = P(...GW, 0), [, gy] = P(...GW, 2.4);
   g += `<path class="dg-pipe" d="M${gx} ${gy0}L${gx} ${gy}" style="stroke:#7d93a3;stroke-width:.3"/>`;
@@ -629,7 +633,7 @@ function renderDiagram() {
   });
   const lv = S.levels.length ? S.levels[S.levels.length - 1][1] : 0;
   $("#dg-water").innerHTML = lv ? tankShape("dg-tank-water", TANK.z + Math.min(TANK.h, lv)) : "";
-  $("#dg-water").querySelectorAll("path, ellipse").forEach(e => e.style.fill = S.quality === "QUALITY_RUNOFF" ? "var(--runoff)" : S.quality === "QUALITY_CHEMICAL" ? "var(--chemical)" : "");
+  $("#dg-water").querySelectorAll("path, ellipse").forEach(e => e.style.fill = QCOLOR[S.quality] || "");
   const top = S.feed[0] && JSON.stringify(S.feed[0]);
   if (dg.feedTop !== null && top && top !== dg.feedTop) {          // a new alert or event reached the gateway
     const w = $("#dg-waves"); w.classList.remove("pulse"); void w.getBBox(); w.classList.add("pulse");
@@ -643,8 +647,6 @@ function pick(n) {
   $("#picked").textContent = flatName(n);
   const pipe = n.startsWith("B-D");
   $("#picked-floor").textContent = pipe ? "" : n[2] === "G" ? "ground floor" : `floor ${n[2]}`;
-  $("#picked-info").textContent = pipe ? "No node on the pipe itself. The tank node catches a big burst in about 15 minutes; a smaller leak is found by the gateway's night check (2 to 4 am), so it can take until the next morning."
-    : `This flat's node has a ${SENSORS.flat}.`;
   if (S) renderDiagram();
   renderControls();
 }
@@ -670,7 +672,7 @@ function renderAlarm() {
   box.classList.toggle("calm", !list.length);
   $("#alarm-title").textContent = !list.length ? "Nothing needs attention" : list.length === 1 ? "Needs attention" : `${list.length} problems need attention`;
   $("#alarm-list").innerHTML = list.map(m => `<li><b>${flatName(m.n)}: ${ALERTS[m.a] || m.a}</b>` +
-    `<p>${m.missing_l ? `${m.missing_l} litres did not reach any flat between 2 and 4 am. ` : ""}${ADVICE[m.a] || ""}${S.led[m.n] === "red" ? " The node's buzzer is beeping." : ""}</p>` +
+    `<p>${m.missing_l ? `${m.missing_l} litres lost ${m.check === "fast" ? "in 15 minutes" : "between 2 and 4 am"}. ` : ""}${ADVICE[m.a] || ""}${S.led[m.n] === "red" ? " The node's buzzer is beeping." : ""}</p>` +
     `<time>Gateway heard it<br> ${when(m.rx)}</time></li>`).join("") ||
     `<li>Problems the gateway knows about show up here, with what to do, until they are fixed.</li>`;
   const keys = list.map(m => m.n + m.a + m.rx), fresh = heard && keys.some(k => !heard.has(k));
@@ -708,7 +710,7 @@ function renderTank() {
   const lv = S.levels, last = lv.length ? lv[lv.length - 1][1] : null;
   const water = $("#tank-water");
   water.style.height = last == null ? "0%" : Math.min(100, Math.max(4, last / 2 * 100)) + "%";
-  water.style.background = S.quality === "QUALITY_RUNOFF" ? "var(--runoff)" : S.quality === "QUALITY_CHEMICAL" ? "var(--chemical)" : "var(--water)";
+  water.style.background = QCOLOR[S.quality] || "var(--water)";
   $("#tank-label").innerHTML = last == null ? "Tank<small>no report yet</small>" : `${last.toFixed(2)} m<small>${QUALITY[S.quality]}</small>`;
   $("#tank-level").innerHTML = last == null ? "No report<small></small>" : `${last.toFixed(2)} m <small>of water</small>`;
   renderWater();
@@ -721,7 +723,7 @@ function renderTank() {
 
 /* Water quality: the tank node's small model judges pH, dissolved salts and cloudiness every minute and only
    radios when the water turns bad or clean again, so the readings shown are the ones sent with the last bad-water alert */
-const LIMITS = {ph: [6.5, 8.5], tds: [0, 500]};   // IS 10500, the limits the model was trained on
+const LIMITS = {ph: [6.5, 8.5], tds: [0, 500], temp: [0, 35]};   // IS 10500 (the model's limits); temperature: the node's plain limit
 function renderWater() {
   const live = S.running && S.clock, bad = S.quality !== "QUALITY_CLEARED", heard = S.levels.length || S.quality_since != null;
   $("#tank-quality").textContent = QUALITY[S.quality]; $("#tank-quality").classList.toggle("bad", bad);
@@ -729,17 +731,18 @@ function renderWater() {
   $("#verdict-text").textContent = !heard ? "No report yet" : bad ? `${QUALITY[S.quality]}: not safe to drink` : "Clean, safe to drink";
   $("#verdict-sub").textContent = bad ? `Raised by the tank node, gateway heard it ${when(S.quality_since)}. What to do is under Needs attention.`
     : S.quality_since != null ? `Reported clean again ${when(S.quality_since)}. Checked every minute on the tank node.`
-    : "Checked every minute on the tank node: pH, dissolved salts (TDS) and cloudiness.";
+    : "Checked every minute on the tank node: pH, dissolved salts (TDS), cloudiness and temperature.";
   const b = S.quality_bad, val = (k, v, unit) => {
     const [lo, hi] = LIMITS[k], out = v < lo || v > hi;
-    return `<b class="${out ? "out" : ""}">${k === "ph" ? "pH" : "TDS"} ${v}${unit}</b>${out ? (v < lo ? " (too low)" : " (too high)") : ""}`;
+    return `<b class="${out ? "out" : ""}">${{ph: "pH ", tds: "TDS ", temp: ""}[k]}${v}${unit}</b>${out ? (v < lo ? " (too low)" : " (too high)") : ""}`;
   };
-  $("#q-reading").innerHTML = (b && b.ph != null ? `Readings sent with the ${bad ? "" : "last "}alert: ${val("ph", b.ph, "")}, ${val("tds", b.tds, " ppm")}. ` : "")
-    + "Safe (IS 10500): pH 6.5 to 8.5, TDS up to 500 ppm, cloudiness up to 5 NTU.";
+  $("#q-reading").innerHTML = (b && b.ph != null ? `Readings sent with the ${bad ? "" : "last "}alert: ${val("ph", b.ph, "")}, ${val("tds", b.tds, " ppm")}`
+      + (b.temp != null ? `, ${val("temp", b.temp, " &deg;C")}` : "") + ". " : "")
+    + "Safe: pH 6.5 to 8.5, TDS up to 500 ppm, cloudiness up to 5 NTU (IS 10500), up to 35 &deg;C.";
   const q = S.quality_test, box = $("#q-test"), t = S.clock ? S.clock.t : 0;
   box.hidden = !q;
   if (!q) return;
-  const hm = x => when(x).split(", ")[1], name = q.kind === "runoff" ? "Runoff" : "Chemical", a = q.alert;
+  const hm = x => when(x).split(", ")[1], name = {runoff: "Runoff", chemical: "Chemical", hot: "Hot water"}[q.kind], a = q.alert;
   const step = (n, cls, head, sub) => `<li class="${cls}"><span class="n">${n}</span><span><b>${head}</b><span>${sub}</span></span></li>`;
   box.innerHTML = step(1, "done", `${name} in ${hm(q.start)}`, t < q.end ? `test runs until ${hm(q.end)}` : `for ${mins(q.end - q.start)}`)
     + (a ? step(2, "hit", `Caught ${hm(a.t)}`, `${mins(a.t - q.start)} later, gateway ${hm(a.rx)}`)
@@ -779,10 +782,10 @@ function renderResult() {
     const status = x.fixed != null ? `<span class="chip">Fixed ${when(x.fixed)}</span>` : x.replaced != null ? `<span class="chip">Size changed ${when(x.replaced)}</span>`
       : `<span class="chip on">Leaking</span><button class="btn" data-fix="${x.where}">Fix</button>`;
     const notYet = racing ? "Fast-forwarding" : end != null ? "Not noticed before it ended" : upTo - x.start >= LEARN_S && x.node === x.where ? "Not noticed in 24 hours"
-      : `Not yet, ${mins(upTo - x.start)} so far${x.node === x.where ? "" : ". Small pipe leaks wait for the night check, 2 to 4 am"}`;
+      : `Not yet, ${mins(upTo - x.start)} so far${x.node === x.where ? "" : ". Very small pipe leaks wait for the night check, 2 to 4 am"}`;
     return `<li class="leak"><div class="leak-head"><span class="what">${flatName(x.where)}<small>${amount(lpsOf(x.size))}</small></span><span class="leak-status">${status}</span></div><ol class="moments">` +
       moment(1, "done", "Started", x.start, when(x.start).split(", ")[0]) +
-      (a ? moment(2, "hit", "Noticed", a.t, `${ALERTS[a.a]}, ${mins(a.t - x.start)} after it started${a.a === "PIPE_LEAK" ? " (gateway's night check)" : x.node === x.where ? "" : " (seen by the tank)"}`) : moment(2, "wait", "Noticed", null, notYet)) +
+      (a ? moment(2, "hit", "Noticed", a.t, `${ALERTS[a.a]}, ${mins(a.t - x.start)} after it started${a.a === "PIPE_LEAK" ? " (gateway's pipe check)" : x.node === x.where ? "" : " (seen by the tank)"}`) : moment(2, "wait", "Noticed", null, notYet)) +
       (a ? moment(3, "done", "Gateway knew", a.rx, `${mins(a.rx - a.t)} after that`) : moment(3, "wait", "Gateway knew", null, "Not yet")) + "</ol></li>";
   });
   box.innerHTML = waiting.join("") + done.join("");
@@ -794,7 +797,7 @@ function feedText(e) {
   switch (e.event) {
     case "NEW_ALERT": return [e.alert === "QUALITY_CLEARED" ? "ok" : "alert", `${flatName(e.node)}: ${ALERTS[e.alert] || e.alert}`];
     case "REPEAT_ALERT": return ["alert", `${flatName(e.node)}: ${ALERTS[e.alert] || e.alert}, again (${ord(e.count)} time)`];
-    case "PIPE_LEAK": return ["alert", `Night check: ${e.missing_l} L went missing between the tank and the flats (a leak of about ${e.lps} L/s)`];
+    case "PIPE_LEAK": return ["alert", `${e.check === "fast" ? "Fast" : "Night"} check: ${e.missing_l} L lost ${e.where ? "on the " + flatName(e.where).toLowerCase() : "between the tank and the flats"} (about ${e.lps} L/s)`];
     case "NODE_SILENT": return ["silent", `${flatName(e.node)} not heard for ${e.last_heard_min} min`];
     case "NODE_BACK": return ["ok", `${flatName(e.node)} heard again after ${e.silent_min} min`];
     case "SUPPLY_EVENT": return ["silent", "Water supply problem: the tank is running low"];

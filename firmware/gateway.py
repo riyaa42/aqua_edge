@@ -7,14 +7,18 @@ Same hardware layer as the nodes (hal.now / send / receive). Jobs:
      inside the sender's own time slot, after its packets (borrowed from LoRaWAN Class A), so a
      reply never lands in another node's slot: our gateway is one radio and cannot hear while
      it sends. hal.slots = {node: (index, count)}, the same table the nodes got at installation.
-  2. Down pipe check, once a night (the mass balance of Ali et al. [6], supply vs branch flows,
-     done at the quietest hours, like a water company's minimum night flow check): litres that
-     left the tank minus litres that reached all flats from 02:00 to 04:00. More than
-     NIGHT_MISSING_L missing means a leak in the pipes between the tank and the flats (a leak
-     inside a flat is after its meter, so the flat's own checks catch it). At night the flows
-     are smallest, so meter errors are a few litres and a small leak stands out; in the day the
-     same leak hides inside the meters' 2-5% error. Bursts are found sooner by the tank node.
-     Alerts once; re-arms after a night with nothing missing.
+  2. Down pipe checks, per stretch (the mass balance of Ali et al. [6], supply vs branch flows).
+     The down pipe has a meter at the top (tank node) and one above each lower floor (read by
+     flats 301, 201, 101, G01, PIPE_METERS). For each floor's stretch: litres in at its top meter,
+     minus litres on to the next meter, minus that floor's 4 flats = litres lost in that stretch,
+     so a leak gets a floor (a leak inside a flat is after its meter: the flat's own checks).
+     - Night check, 02:00 to 04:00 (like a water company's minimum night flow check): flows are
+       smallest, so meter errors are a few litres and a small leak stands out. More than
+       NIGHT_MISSING_L lost in a stretch gives PIPE_LEAK {where, check: "night"}.
+     - Fast check, every 15-minute block at any hour: more than FAST_MISSING_L lost in one block
+       gives PIPE_LEAK {where, check: "fast"} at once (medium leaks and bursts, with a floor).
+     One alert per stretch; a clean night re-arms it. Without the pipe meters' numbers (offline
+     data, or one of those flats silent) the whole pipe is checked at night: tank minus all flats.
   3. Silent nodes: a node not heard for 45 min (3 missed summaries) gives NODE_SILENT, and
      NODE_BACK when it is heard again. While any node is silent the building check cannot be
      done honestly (its litres would look "missing"), so BALANCE_PAUSED says so; the late
@@ -38,11 +42,17 @@ from packet import pack, unpack
 
 SUPPLY_WINDOW_S = 900          # a SUPPLY_LOW flag from the tank counts for this long
 NIGHT_HOURS = (2, 4)           # down pipe check window, local time: the quietest hours
-NIGHT_MISSING_L = 20.0         # litres missing over the window that meter error cannot explain
-# Measured with the simulation's realistic meters (live/water.py): clean nights -4 to +5 L; a 0.005 L/s
-# pipe leak 36-42 L, 0.01 L/s 72-81 L. So 20 L (4x the worst clean night) finds leaks from ~0.003 L/s.
+NIGHT_MISSING_L = 20.0         # litres lost in one stretch over the window that meter error cannot explain
+# Measured with the simulation's realistic meters (live/water.py), 3 clean days: clean nights -3.2 to +1.0 L
+# per stretch (whole pipe -4 to +5 L); a 0.005 L/s leak loses 33-36 L in its own stretch, under 1.3 L in the others.
+# So 20 L finds leaks from ~0.003 L/s and names the floor.
 # ponytail: one fixed limit; on a real building measure a few clean nights first, since real night use
 # comes in bursts (a flush, a glass of water) and our simulated use is smooth
+FAST_MISSING_L = 30.0          # litres lost in one stretch in one 15-minute block, any hour
+# Measured: no clean block lost more than 2.3 L; a stretch next to a burst reads up to 9 L (meter error on the big
+# flow); 0.05 L/s loses 45 L a block, 0.5 L/s 455 L, 1.5 L/s 1330 L. So 30 L finds leaks from ~0.035 L/s in 15 min.
+PIPE_METERS = {"B-301": "3", "B-201": "2", "B-101": "1", "B-G01": "G"}   # flat whose node reads the meter above floor
+# ponytail: building B's table, like packet.NAMES; at installation it comes with the slot table
 SILENT_S = 2700                # nothing heard from a node for 3 summary periods = silent
 CLOCK_AHEAD_S = 60             # message time this far ahead of the gateway clock = bad node clock
 ACK_AT_S = 1.5                 # seconds into the sender's slot: its own packets start at 0.2 s
@@ -52,8 +62,10 @@ SEEN_WINDOW = 1000             # counters this far below a node's newest are ref
 
 
 class Gateway:
-    def __init__(self, hal, flat_ids, tank_id):
+    def __init__(self, hal, flat_ids, tank_id, pipe_meters=PIPE_METERS):
         self.hal, self.flats, self.tank = hal, set(flat_ids), tank_id
+        self.pipe_meters = {n: f for n, f in pipe_meters.items() if n in self.flats}
+        self.floors = sorted({n[2] for n in self.flats}, key=lambda f: -1 if f == "G" else int(f), reverse=True)   # top first
         path = getattr(hal, "storage_path", None)
         self.seen_path = path and os.path.splitext(path)[0] + "_seen.json"
         self.seen = {}              # node -> counters already received
@@ -65,8 +77,11 @@ class Gateway:
         self.alert_history = {}     # (node, alert) -> (time of latest, how many so far)
         self.tank_low_t, self.supply_active_until = -1e9, -1
         self.sums = {}              # interval -> {node: volume}
+        self.pipe = {}              # interval -> {flat: down pipe litres}, from the flats with a pipe meter
         self.nights_done = set()    # nights (local day numbers) already checked
-        self.pipe_alerted = self.balance_paused = False
+        self.fast_done = set()      # 15-minute blocks already fast-checked
+        self.pipe_alerted = set()   # stretches ("3", "G"; "all" for the whole pipe) with an open alert
+        self.balance_paused = False
         self.last_seen = None       # node -> time last heard (set on the first step)
         self.silent = {}            # node -> time last heard before it went silent
         self.skewed = set()
@@ -102,6 +117,8 @@ class Gateway:
                 self.tank_low_t = m["t"]
             elif m["k"] == "SUM":
                 self.sums.setdefault(m["i"], {})[m["n"]] = m["vol_l"]
+                if "pipe_l" in m:
+                    self.pipe.setdefault(m["i"], {})[m["n"]] = m["pipe_l"]
         if bad:
             self.decide(now, "BAD_PACKET", count=bad)
         if new and self.seen_path:
@@ -146,30 +163,62 @@ class Gateway:
                 self.decide(now, "SUPPLY_EVENT", tank_low=True)
             self.supply_active_until = now + SUPPLY_WINDOW_S
 
+    def stretch_lost(self, i):
+        """Litres lost in each stretch of down pipe in block i ({floor: litres}), or None without
+        every pipe meter's number."""
+        g, p = self.sums[i], self.pipe.get(i, {})
+        if not self.pipe_meters or any(n not in p for n in self.pipe_meters):
+            return None
+        into = {self.floors[0]: g[self.tank], **{f: p[n] for n, f in self.pipe_meters.items()}}
+        if set(into) != set(self.floors):
+            return None
+        below = dict(zip(self.floors, self.floors[1:]))
+        return {f: into[f] - into.get(below.get(f), 0) - sum(g[n] for n in self.flats if n[2] == f) for f in self.floors}
+
+    def pipe_leak(self, now, stretch, lost, seconds, check):
+        if stretch in self.pipe_alerted:
+            return
+        self.pipe_alerted.add(stretch)
+        where = {} if stretch == "all" else {"where": "B-D" + ("0" if stretch == "G" else stretch)}
+        self.decide(now, "PIPE_LEAK", **where, missing_l=round(lost), lps=round(lost / seconds, 3), check=check)
+
     def night_check(self, now):
         if self.silent and not self.balance_paused:
             self.balance_paused = True
             self.decide(now, "BALANCE_PAUSED", silent=sorted(self.silent))
         elif not self.silent:
             self.balance_paused = False
+        complete = [i for i, g in self.sums.items() if self.tank in g and self.flats <= set(g)]
+        # Fast check: every complete block, any hour
+        for i in sorted(set(complete) - self.fast_done):
+            self.fast_done.add(i)
+            for f, lost in (self.stretch_lost(i) or {}).items():
+                if lost > FAST_MISSING_L:
+                    self.pipe_leak(now, f, lost, SUMMARY_S, "fast")
+        # Night check, 02:00 to 04:00 local
         off, (h0, h1) = getattr(self.hal, "utc_offset_s", 0), NIGHT_HOURS
         nights = {}
-        for i, got in self.sums.items():
+        for i in self.sums:
             local = i * SUMMARY_S + off
             if h0 <= local % DAY // HOUR < h1:
-                nights.setdefault(local // DAY, []).append(got)
+                nights.setdefault(local // DAY, []).append(i)
         for d in sorted(nights):
             blocks = nights[d]
-            if d in self.nights_done or len(blocks) < (h1 - h0) * HOUR // SUMMARY_S or \
-                    any(self.tank not in g or not self.flats <= set(g) for g in blocks):
+            if d in self.nights_done or len(blocks) < (h1 - h0) * HOUR // SUMMARY_S or not set(blocks) <= set(complete):
                 continue                                    # wait until every node's summaries arrived
             self.nights_done.add(d)
-            missing = sum(g[self.tank] - sum(g[n] for n in self.flats) for g in blocks)
-            if missing > NIGHT_MISSING_L and not self.pipe_alerted:
-                self.pipe_alerted = True
-                self.decide(now, "PIPE_LEAK", missing_l=round(missing), lps=round(missing / ((h1 - h0) * HOUR), 3))
-            elif missing <= NIGHT_MISSING_L:
-                self.pipe_alerted = False                   # re-arm: a later leak alerts again
+            per = [self.stretch_lost(i) for i in blocks]
+            if all(per):
+                lost = {f: sum(x[f] for x in per) for f in self.floors}
+            else:                                           # no pipe meter numbers: the whole pipe
+                lost = {"all": sum(self.sums[i][self.tank] - sum(self.sums[i][n] for n in self.flats) for i in blocks)}
+            for f, litres in lost.items():
+                if litres > NIGHT_MISSING_L:
+                    self.pipe_leak(now, f, litres, (h1 - h0) * HOUR, "night")
+                else:
+                    self.pipe_alerted.discard(f)            # re-arm: a later leak alerts again
+                    if f != "all":
+                        self.pipe_alerted.discard("all")
 
 
 if __name__ == "__main__":
@@ -194,11 +243,12 @@ if __name__ == "__main__":
             self.sent.append(raw)
             self.at.append(at_s)
 
-    def block(gw, i, vols):
-        """Deliver one 15-minute block of summaries {node: litres}, then step the gateway 15 times."""
+    def block(gw, i, vols, pipe={}):
+        """Deliver one 15-minute block of summaries {node: litres} (pipe: {flat: down pipe litres}),
+        then step the gateway 15 times."""
         for n, v in vols.items():
             gw.hal.seq += 1
-            m = {"k": "SUM", "n": n, "s": gw.hal.seq, "t": gw.hal.t, "i": i, "vol_l": v}
+            m = {"k": "SUM", "n": n, "s": gw.hal.seq, "t": gw.hal.t, "i": i, "vol_l": v, **({"pipe_l": pipe[n]} if n in pipe else {})}
             gw.hal.box.append(pack(m, sim_key(n)))
         for _ in range(15):
             gw.step()
@@ -216,6 +266,28 @@ if __name__ == "__main__":
             block(gw, i, v)
     assert events(gw) == ["PIPE_LEAK", "PIPE_LEAK"], events(gw)
     assert gw.events[0]["missing_l"] == 80 and gw.nights_done == {0, 1, 2, 3, 4}
+    # Without pipe meter numbers the whole pipe is checked (above); with them, each stretch on its own.
+    # Floors 2 and 1; B-101 reads the meter above floor 1. Stretch 2 = tank - that meter - floor 2 flats,
+    # stretch 1 = that meter - floor 1 flats.
+    F21, F22, F11, F12 = "B-201", "B-202", "B-101", "B-102"
+    def pb(gw, i, tank, meter, lost_lower=0):      # every flat uses 10 L; lost_lower: litres lost in stretch 1
+        block(gw, i, {T: tank + lost_lower, F21: 10, F22: 10, F11: 10, F12: 10}, pipe={F11: meter + lost_lower})
+    gw = Gateway(FakeHAL(), [F21, F22, F11, F12], T, {F11: "1"})
+    pb(gw, 60, 140, 20)                                              # 15:00: 100 L lost in stretch 2 in one block
+    assert [(e["where"], e["check"], e["missing_l"]) for e in gw.events] == [("B-D2", "fast", 100)], gw.events
+    pb(gw, 61, 140, 20)                                              # still leaking: no second alert
+    for i in night(1):                                               # stretch 2 still leaks, stretch 1 starts: 5 L x 8
+        pb(gw, i, 140, 20, lost_lower=5)
+    assert [(e["where"], e["check"]) for e in gw.events] == [("B-D2", "fast"), ("B-D1", "night")], gw.events
+    assert gw.events[1]["missing_l"] == 40
+    for i in night(2):                                               # both fixed: a clean night re-arms them
+        pb(gw, i, 40, 20)
+    pb(gw, 300, 40, 20, lost_lower=40)                               # later a burst below the floor 1 meter
+    assert [(e["where"], e["check"]) for e in gw.events][-1] == ("B-D1", "fast") and len(gw.events) == 3, gw.events
+    gw = Gateway(FakeHAL(), [F21, F22, F11, F12], T, {F11: "1"})
+    for i in list(range(60, 70)) + night(0):                         # clean day and night: nothing
+        pb(gw, i, 40, 20)
+    assert gw.events == [], gw.events
     # F2 goes silent for 4 blocks (60 min) of the night: alert and pause; it comes back with its
     # stored summaries and the night is checked then
     gw = Gateway(FakeHAL(), [F1, F2], T)

@@ -8,7 +8,7 @@ have run their firmware, pass what they sent through the radio model, then step 
 Commands are lines of JSON appended to run/commands.jsonl, e.g.
     {"do": "leak", "where": "B-203", "size": "small"}           size: small | medium | large | L/s
     {"do": "fix", "where": "B-203"}
-    {"do": "quality", "kind": "runoff", "minutes": 60}          kind: runoff | chemical
+    {"do": "quality", "kind": "runoff", "minutes": 60}          kind: runoff | chemical | hot
     {"do": "radio_cut", "who": "all", "minutes": 210}           who: a node name or "all"
     {"do": "speed", "delay_s": 0.5}     {"do": "pause"}     {"do": "resume"}     {"do": "stop"}
     {"do": "until_alert", "node": "B-203", "from_s": 93600}

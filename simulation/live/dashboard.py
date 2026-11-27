@@ -86,12 +86,15 @@ def state(run=RUN, radio=False):
     for m in alerts:
         if m["rx"] > calm_since.get((m["n"], kind(m["a"])), -1):
             status[m["n"]], latest[m["n"], kind(m["a"])] = "alert", m
-    # The gateway's own night check of the down pipe (no node sends this one)
-    pipe = [{"n": "PIPE", "a": "PIPE_LEAK", "t": e["t"], "rx": e["t"], "missing_l": e.get("missing_l")}
-            for e in gw if e["event"] == "PIPE_LEAK"]
-    pipe_fixed = max((e["t"] for e in applied if e["do"] == "fix" and e["where"].startswith("B-D")), default=-1)
+    # The gateway's own down pipe checks (no node sends these): n is the floor's pipe spot ("B-D3"),
+    # or "PIPE" when the gateway could only check the whole pipe
+    pipe = [{"n": e.get("where", "PIPE"), "a": "PIPE_LEAK", "t": e["t"], "rx": e["t"], "missing_l": e.get("missing_l"),
+             "check": e.get("check", "night")} for e in gw if e["event"] == "PIPE_LEAK"]
+    fixed = lambda n: max((e["t"] for e in applied if e["do"] == "fix" and e["where"].startswith("B-D")
+                           and n in ("PIPE", e["where"])), default=-1)
     # Problems the gateway knows about and nobody has fixed yet, newest first (the alarm banner)
-    active = [{k: m[k] for k in ("n", "a", "t", "rx")} for m in latest.values()] + [m for m in pipe[-1:] if m["rx"] > pipe_fixed]
+    open_pipe = {m["n"]: m for m in pipe if m["rx"] > fixed(m["n"])}
+    active = [{k: m[k] for k in ("n", "a", "t", "rx")} for m in latest.values()] + list(open_pipe.values())
     active.sort(key=lambda m: -m["rx"])
     led = {e["n"]: e["led"] for e in jsonl(run, "leds.jsonl")}   # each node's own LED (red = buzzer on)
 
@@ -105,7 +108,8 @@ def state(run=RUN, radio=False):
         end = next((f for f in applied[i + 1:] if f["do"] in ("leak", "fix") and f["where"] == e["where"]), None)
         until = end["t"] if end else float("inf")
         if e["where"].startswith("B-D"):   # down pipe: the tank node finds bursts, the night check smaller leaks
-            found_by = [m for m in alerts if m["n"] == node and m["a"] == "ABNORMAL_SUPPLY"] + pipe
+            found_by = [m for m in alerts if m["n"] == node and m["a"] == "ABNORMAL_SUPPLY"] + \
+                       [m for m in pipe if m["n"] in ("PIPE", e["where"])]
         else:
             found_by = [m for m in alerts if m["n"] == node]
         hit = min((m for m in found_by if e["t"] <= m["t"] <= until), key=lambda m: m["t"], default=None)
@@ -135,7 +139,7 @@ def state(run=RUN, radio=False):
     out = {"running": running, "clock": clock, "nodes": nodes, "sites": lines(run, "leak_sites.txt"),
            "status": status, "active": active, "led": led, "leaks": leaks[::-1], "later": later, "feed": feed, "levels": levels[-96:], "quality": quality,
            "quality_since": qalerts[-1]["rx"] if qalerts else None,
-           "quality_bad": bad and {k: bad[-1].get(k) for k in ("a", "ph", "tds", "t", "rx")}, "quality_test": qtest,
+           "quality_bad": bad and {k: bad[-1].get(k) for k in ("a", "ph", "tds", "temp", "t", "rx")}, "quality_test": qtest,
            "messages": len(log)}
     if radio:
         out["radio"] = radio_stats(run, log)
@@ -172,7 +176,7 @@ def valid(c, sites, nodes):
     when = lambda: "at_s" not in c or num("at_s", 0, 1e8)
     rules = {"leak": lambda: c.get("where") in sites and (c.get("size") in SIZES or num("size", 0.001, 5)),
              "fix": lambda: c.get("where") in sites,
-             "quality": lambda: c.get("kind") in ("runoff", "chemical") and num("minutes", 1, 600),
+             "quality": lambda: c.get("kind") in ("runoff", "chemical", "hot") and num("minutes", 1, 600),
              "radio_cut": lambda: (c.get("who") == "all" or c.get("who") in nodes) and num("minutes", 1, 600),
              "speed": lambda: num("delay_s", 0, 60),
              "until_alert": lambda: c.get("node") in nodes and num("from_s", 0, 1e8),
@@ -293,14 +297,16 @@ def check():
     with open(os.path.join(run, "gateway_log.jsonl"), "a") as f:
         f.write(json.dumps({"k": "ALERT", "n": "B-TANK", "s": 9, "t": 98000, "a": "QUALITY_RUNOFF", "rx": 98060}) + "\n")
     with open(os.path.join(run, "gateway_events.jsonl"), "a") as f:
-        f.write(json.dumps({"t": 100860, "event": "PIPE_LEAK", "missing_l": 360, "lps": 0.05}) + "\n")
-    s = state(run)
+        f.write(json.dumps({"t": 99900, "event": "PIPE_LEAK", "where": "B-D3", "missing_l": 45, "lps": 0.05, "check": "fast"}) + "\n")
+        f.write(json.dumps({"t": 100860, "event": "PIPE_LEAK", "where": "B-D1", "missing_l": 360, "lps": 0.05, "check": "night"}) + "\n")
+    s = state(run)          # the floor 3 alarm is not credited to the floor 1 leak, but shows in the banner
     assert s["leaks"][0]["where"] == "B-D1" and s["leaks"][0]["alert"] == {"a": "PIPE_LEAK", "t": 100860, "rx": 100860}, s["leaks"][0]
-    assert s["active"][0] == {"n": "PIPE", "a": "PIPE_LEAK", "t": 100860, "rx": 100860, "missing_l": 360}, s["active"]
+    assert s["active"][0] == {"n": "B-D1", "a": "PIPE_LEAK", "t": 100860, "rx": 100860, "missing_l": 360, "check": "night"}, s["active"]
+    assert [m["n"] for m in s["active"]].count("B-D3") == 1
     with open(os.path.join(run, "events_applied.jsonl"), "a") as f:
         f.write(json.dumps({"t": 101000, "do": "fix", "where": "B-D1"}) + "\n")
     s = state(run)
-    assert [m["a"] for m in s["active"] if m["n"] in ("PIPE", "B-TANK")] == ["QUALITY_RUNOFF"], s["active"]
+    assert [m["n"] for m in s["active"] if m["n"] in ("B-D1", "B-D3", "B-TANK")] == ["B-D3", "B-TANK"], s["active"]   # only floor 1 fixed
     # Water quality card: a runoff test, caught by the tank node, then reported clean again
     with open(os.path.join(run, "events_applied.jsonl"), "a") as f:
         f.write(json.dumps({"t": 102000, "do": "quality", "kind": "runoff", "minutes": 60}) + "\n")
@@ -308,7 +314,7 @@ def check():
         f.write(json.dumps({"k": "ALERT", "n": "B-TANK", "s": 10, "t": 102180, "a": "QUALITY_RUNOFF", "ph": 6.4, "tds": 52, "rx": 102240}) + "\n")
     s = state(run)
     assert s["quality_test"] == {"kind": "runoff", "start": 102000, "end": 105600, "alert": {"a": "QUALITY_RUNOFF", "t": 102180, "rx": 102240}, "clean": None}, s["quality_test"]
-    assert s["quality_bad"] == {"a": "QUALITY_RUNOFF", "ph": 6.4, "tds": 52, "t": 102180, "rx": 102240} and s["quality_since"] == 102240
+    assert s["quality_bad"] == {"a": "QUALITY_RUNOFF", "ph": 6.4, "tds": 52, "temp": None, "t": 102180, "rx": 102240} and s["quality_since"] == 102240
     with open(os.path.join(run, "gateway_log.jsonl"), "a") as f:
         f.write(json.dumps({"k": "ALERT", "n": "B-TANK", "s": 11, "t": 106200, "a": "QUALITY_CLEARED", "rx": 106260}) + "\n")
     s = state(run)

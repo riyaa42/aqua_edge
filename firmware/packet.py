@@ -37,11 +37,12 @@ KINDS = ["", "ALERT", "FLAG", "SUM", "ACK"]
 # ponytail: node table for building B; at installation it comes from the same file as the keys
 NAMES = ["GATEWAY", "B-TANK"] + [f"B-{floor}{flat:02d}" for floor in "G1234" for flat in range(1, 5)]
 ALERTS = ["LEAK_NIGHT_FLOW", "LEAK_CONTINUOUS_FLOW", "ABNORMAL_CONSUMPTION", "ABNORMAL_SUPPLY",
-          "QUALITY_RUNOFF", "QUALITY_CHEMICAL", "QUALITY_CLEARED"]
+          "QUALITY_RUNOFF", "QUALITY_CHEMICAL", "QUALITY_CLEARED", "QUALITY_HOT"]
 FLAGS = ["SUPPLY_LOW"]
 # field name -> how its value is packed; its number on air is its position here; "B" = index into ALERTS/FLAGS
 FIELDS = {"a": "B", "f": "B", "i": ">I", "vol_l": ">f", "p_min": ">f", "in_l": ">f", "level_m": ">f",
-          "flow": ">f", "ph": ">f", "tds": ">f", "level": ">f", "inflow": ">f"}
+          "flow": ">f", "ph": ">f", "tds": ">f", "level": ">f", "inflow": ">f",
+          "pipe_l": ">f", "temp": ">f"}                       # new fields go at the end, so old numbers keep their meaning
 FIELD_NAMES = list(FIELDS)
 CODES = {"a": ALERTS, "f": FLAGS}
 HEADER_KEYS = {"k", "n", "s", "t", "gt"}
@@ -129,9 +130,11 @@ if __name__ == "__main__":
     k203, k101 = sim_key("B-203"), sim_key("B-101")
     keys = lambda n: sim_key(n)
     msgs = [{"n": "B-203", "s": 7, "t": 93600, "k": "SUM", "i": 104, "vol_l": 12.3456, "p_min": 10.4321},
+            {"n": "B-301", "s": 9, "t": 93600, "k": "SUM", "i": 104, "vol_l": 8.25, "p_min": 7.9, "pipe_l": 40.5},
             {"n": "B-203", "s": 8, "t": 93660, "k": "ALERT", "a": "LEAK_NIGHT_FLOW", "flow": 0.0512},
             {"n": "B-TANK", "s": 3, "t": 60, "k": "ALERT", "a": "QUALITY_CHEMICAL", "ph": 9.12, "tds": 700},
             {"n": "B-TANK", "s": 4, "t": 120, "k": "ALERT", "a": "QUALITY_CLEARED"},
+            {"n": "B-TANK", "s": 10, "t": 300, "k": "ALERT", "a": "QUALITY_HOT", "ph": 7.6, "tds": 250, "temp": 38.5},
             {"n": "B-TANK", "s": 5, "t": 180, "k": "FLAG", "f": "SUPPLY_LOW", "level": 0.312, "inflow": 0.0},
             {"n": "B-TANK", "s": 6, "t": 240, "k": "SUM", "i": 5, "vol_l": 300.5, "in_l": 0.0, "level_m": 1.4991},
             {"k": "ACK", "n": "B-203", "s": 8, "gt": 93720}]
@@ -147,7 +150,7 @@ if __name__ == "__main__":
         print(f"{m['k']:5} {len(raw):3} bytes (JSON {len(json.dumps(m, separators=(',', ':'))):3})")
     # Nobody without the key can read the body: the packed flow value does not appear in the packet,
     # and the same message under another node's key gives different bytes
-    alert = msgs[1]
+    alert = next(m for m in msgs if m["k"] == "ALERT")
     assert struct.pack(">f", alert["flow"]) not in pack(alert, k203)
     assert pack(alert, k203)[HEADER.size:] != pack(alert, k101)[HEADER.size:]
     ack = pack(msgs[-1], k203)

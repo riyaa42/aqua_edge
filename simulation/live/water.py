@@ -19,11 +19,17 @@ STEP_S = 60
 LEAK_SIZES_LPS = {"small": 0.05, "medium": 0.5, "large": 1.5}   # running toilet / pipe crack / burst
 LEAK_CD = 0.75                                                  # orifice discharge coefficient
 G = 9.81
+HOT_C = 38.0             # "hot" test event: a rooftop tank in a heatwave (normal is 24-28 C here)
 # Flow meters as sold (ISO 4064 accuracy zones): nothing counted below the starting flow, up to +-5% off
 # between there and Q2, +-2% above Q2 (M.FLOW_GAIN_ERR). Typical class R160 meters, calibration knobs:
 METERS = {"flat": (0.0005, 0.007),    # 15 mm home meter: starts at ~2 L/hour, Q2 ~25 L/hour
-          "pipe": (0.005, 0.045)}     # 50 mm meter on the tank's down pipe and rising pipe
+          "pipe": (0.005, 0.045),     # 50 mm meter on the tank's down pipe and rising pipe
+          "stretch": (0.0015, 0.007)} # 25 mm ultrasonic meter (R400: Q1 = Q3/400 = 0.0044 L/s) on each lower stretch:
+                                      # at night only a few floors draw through it, below what a 50 mm meter counts
 LOW_FLOW_ERR = 0.05
+# Down pipe meters, one on each stretch between floors (the tank node's outflow meter is the top one):
+# each is wired to the node of the flat just below it, which adds its litres to its summary
+PIPE_METERS = {"B-301": "B-DT3", "B-201": "B-DT2", "B-101": "B-DT1", "B-G01": "B-DT0"}
 
 
 def read_meter(lps, start, q2, gain_low, gain_high, noise):
@@ -41,7 +47,7 @@ class Water:
         self.rng = np.random.default_rng(seed)
         self.flats = [n for n in self.wn.junction_name_list if n[-1].isdigit() and n[-2] == "0"]
         self.leak_sites = self.flats + [n for n in self.wn.junction_name_list if n.startswith("B-D")]
-        meters = [f"{f}-P" for f in self.flats] + ["B-DT4", "B-RISE"]
+        meters = [f"{f}-P" for f in self.flats] + ["B-DT4", "B-RISE"] + list(PIPE_METERS.values())
         self.gain = {m: (1 + self.rng.uniform(-LOW_FLOW_ERR, LOW_FLOW_ERR), 1 + self.rng.uniform(-M.FLOW_GAIN_ERR, M.FLOW_GAIN_ERR))
                      for m in meters}                    # each meter's own (low flow, normal flow) error
         self.water_quality, self.quality_until = "normal", -1
@@ -93,20 +99,23 @@ class Water:
     # --- what each node's sensors read right now ---
     def _meter(self, link):
         lps = 1000 * self._last("link", "flowrate", link)
-        start, q2 = METERS["flat" if link.endswith("-P") else "pipe"]
+        start, q2 = METERS["flat" if link.endswith("-P") else "stretch" if link in PIPE_METERS.values() else "pipe"]
         return read_meter(lps, start, q2, *self.gain[link], self.rng.normal(0, M.FLOW_NOISE_LPS))
 
     def readings(self):
         r = {f: {"flow_lps": self._meter(f"{f}-P"),
                  "pressure_m": self._last("node", "pressure", f) + self.rng.normal(0, M.PRESSURE_NOISE_M)}
              for f in self.flats}
-        q = {**M.QUALITY["normal"], **M.QUALITY[self.water_quality]}
+        for f, link in PIPE_METERS.items():
+            r[f]["pipe_lps"] = self._meter(link)
+        q = {**M.QUALITY["normal"], **M.QUALITY.get(self.water_quality, {})}      # "hot": only the temperature changes
         ph, tds, turb = (q[k][0] + self.rng.normal(0, q[k][1]) for k in ("ph", "tds", "turb"))
         tod = (self.t % M.DAY) / M.H
         r["B-TANK"] = {"outflow_lps": self._meter("B-DT4"), "inflow_lps": self._meter("B-RISE"),
                        "level_m": self._last("node", "pressure", "B-TANK") + self.rng.normal(0, M.LEVEL_NOISE_M),
                        "ph": ph, "tds_ppm": tds, "turbidity_ntu": turb,
-                       "temp_c": 26 + 2 * np.sin((tod - 9) / 24 * 2 * np.pi) + self.rng.normal(0, 0.1)}
+                       "temp_c": (HOT_C if self.water_quality == "hot" else 26 + 2 * np.sin((tod - 9) / 24 * 2 * np.pi))
+                                 + self.rng.normal(0, 0.1)}
         return r
 
 
@@ -144,9 +153,12 @@ if __name__ == "__main__":
     assert read_meter(0.0004, *METERS["flat"], 0.95, 1.01, 0) == 0
     assert read_meter(0.005, *METERS["flat"], 0.95, 1.01, 0) == 0.005 * 0.95
     assert read_meter(0.1, *METERS["flat"], 0.95, 1.01, 0) == 0.1 * 1.01
+    assert set(PIPE_METERS) <= set(w.readings()) and all("pipe_lps" in w.readings()[f] for f in PIPE_METERS)
     # 4. Quality event switches on and back off
     w.set_quality("chemical", 2)
     assert w.readings()["B-TANK"]["tds_ppm"] > 600
     w.step(); w.step()
     assert w.readings()["B-TANK"]["tds_ppm"] < 400
+    w.set_quality("hot", 1)
+    assert w.readings()["B-TANK"]["temp_c"] > 37 and w.readings()["B-TANK"]["tds_ppm"] < 400
     print("water self-check passed")

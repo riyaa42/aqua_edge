@@ -21,7 +21,7 @@ from gateway import Gateway  # noqa: E402
 from packet import peek, sim_key  # noqa: E402
 
 RUN = os.environ.get("AQUA_RUN", os.path.join(HERE, "run"))
-ADDRESS = (os.environ.get("AQUA_TIMEKEEPER", "localhost"), 6000)
+ADDRESS = (os.environ.get("AQUA_TIMEKEEPER", "localhost"), int(os.environ.get("AQUA_PORT", 6000)))
 AUTHKEY = b"aqua-edge"
 SEND_SPREAD_S = 59        # untimed packets go out at a random second of their minute
 CAD_SPREAD_S = 2          # listen-before-talk packets go out within this many seconds

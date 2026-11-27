@@ -60,6 +60,9 @@ LEVEL_SIGMAS, LEVEL_MARGIN_M, LEVEL_MIN = 4.0, 0.3, 10   # tank level check
 ALERT_CLEAR_S = 600           # an alert re-arms after its condition has been normal this long;
                               # the gateway decides whether a new alert is a repeat
 QUALITY_MIN, QUALITY_CLEAR_MIN = 3, 10
+TEMP_UNSAFE_C = 35.0     # tank water above this is unsafe: Legionella bacteria multiply between about 25 and 45 C,
+# fastest near 37 C (CDC; US National Academies 2020). Guidance asks for cold water below 20-25 C, which an Indian
+# rooftop tank passes most of the year, so we flag the fast-growth range. ponytail: one fixed limit, a knob per site
 SUPPLY_SIGMAS, SUPPLY_MARGIN_LPS, SUPPLY_MIN = 4.0, 0.5, 15
 
 PRIORITY = {"ALERT": 0, "FLAG": 1, "SUM": 2}       # FLAG: only the tank's SUPPLY_LOW now
@@ -281,6 +284,8 @@ class FlatNode(Node):
     def accumulate(self, r):
         self.acc["vol_l"] = self.acc.get("vol_l", 0.0) + r["flow_lps"] * 60
         self.acc["p_min"] = min(self.acc.get("p_min", 1e9), r["pressure_m"])
+        if "pipe_lps" in r:     # flats 301, 201, 101, G01 also read the down pipe meter just above their floor
+            self.acc["pipe_l"] = self.acc.get("pipe_l", 0.0) + r["pipe_lps"] * 60
 
 
 QUALITY_MODEL = QualityModel()    # 8-bit network, Sharma et al. [1]; trained by tinyml/train_quality.py
@@ -296,10 +301,14 @@ class TankNode(Node):
 
     def check(self, now, hour, r):
         q = QUALITY_MODEL.classify(r["ph"], r["tds_ppm"], r["turbidity_ntu"])
+        temp = r.get("temp_c")
+        if q == "NORMAL" and temp is not None and temp > TEMP_UNSAFE_C:
+            q = "HOT"                                   # plain limit, not the model: water too warm to store
         if q != "NORMAL":
             self.bad_run, self.good_run, self.bad_class = self.bad_run + 1, 0, q
             if self.bad_run >= QUALITY_MIN:
-                self.alert(f"QUALITY_{q}", ph=round(r["ph"], 2), tds=round(r["tds_ppm"]))
+                self.alert(f"QUALITY_{q}", ph=round(r["ph"], 2), tds=round(r["tds_ppm"]),
+                           **({"temp": round(temp, 1)} if temp is not None else {}))
                 self.quality_alerted = True
         else:
             self.bad_run, self.good_run = 0, self.good_run + 1
@@ -421,4 +430,11 @@ if __name__ == "__main__":
     n.step()
     assert n.hour == 1, n.hour
     assert sum(n.base["flow_lps"].n) == 1, "first reading must be learned, not checked"
+    # Tank water too warm: alert after 3 minutes above the limit, clean again after 10 cooler minutes
+    n = TankNode("B-TANK", FakeHAL(None, use))
+    water = {"ph": 7.6, "tds_ppm": 250, "turbidity_ntu": 1.0, "outflow_lps": 0.0, "inflow_lps": 0.0, "level_m": 1.5}
+    for k, temp in enumerate([30] * 5 + [38] * 5 + [30] * 12):
+        n.check(k * 60, 14, {**water, "temp_c": temp})
+    q = [(m["a"], m.get("temp")) for m in n.store.queue if m["k"] == "ALERT" and m["a"].startswith("QUALITY")]
+    assert q == [("QUALITY_HOT", 38), ("QUALITY_CLEARED", None)], q
     print("node self-check passed")
