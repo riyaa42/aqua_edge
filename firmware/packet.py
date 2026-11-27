@@ -17,6 +17,7 @@ section 3): a short signature (tag) on every packet, and a counter that never re
 """
 import hashlib
 import hmac
+import json
 import struct
 
 TAG_BYTES = 4                                   # LoRaWAN also uses a 4-byte check
@@ -36,8 +37,24 @@ HEADER_KEYS = {"k", "n", "s", "t", "gt"}
 
 
 def sim_key(name):
-    """Simulation only. A real node reads its key from a file on its SD card, never committed."""
+    """Simulation only: anyone who knows a node's name can work out its key. Real hardware
+    uses load_keys()."""
     return hashlib.sha256(b"aqua-edge-simulation:" + name.encode()).digest()[:16]
+
+
+def load_keys(path):
+    """Real nodes and gateway: secret keys from a JSON file on the SD card,
+    {"B-101": "<32 hex digits>", ...} -> {name: 16 bytes}. Never committed (*keys.json is in
+    .gitignore). Make the file once at installation:
+        python3 -c "import json,secrets,packet; print(json.dumps({n: secrets.token_hex(16) for n in packet.NAMES[1:]}))" > aqua_keys.json
+    The gateway gets the whole file; each node gets a file with only its own line, so one
+    stolen node does not give away the others' keys."""
+    with open(path) as f:
+        keys = {n: bytes.fromhex(h) for n, h in json.load(f).items()}
+    bad = sorted(n for n, k in keys.items() if n not in NAMES or len(k) != 16)
+    if bad:
+        raise ValueError(f"bad entries in {path}: {bad} (unknown node or key not 16 bytes)")
+    return keys
 
 
 def _tag(key, data):
@@ -85,7 +102,9 @@ def unpack(raw, key_for):
 
 
 if __name__ == "__main__":
-    import json
+    import os
+    import secrets
+    import tempfile
     k203, k101 = sim_key("B-203"), sim_key("B-101")
     keys = lambda n: sim_key(n)
     msgs = [{"n": "B-203", "s": 7, "t": 93600, "k": "SUM", "i": 104, "vol_l": 12.3456, "p_min": 10.4321},
@@ -106,4 +125,14 @@ if __name__ == "__main__":
     assert unpack(ack, lambda n: k101 if n == "B-203" else None) is None   # signed with the wrong key
     assert unpack(ack, lambda n: None) is None                           # not ours to read
     assert unpack(ack[:7], keys) is None                                 # cut short
+    # Key file: a good one loads; a short key or an unknown node is refused
+    path = os.path.join(tempfile.mkdtemp(), "aqua_keys.json")
+    good = {n: secrets.token_hex(16) for n in NAMES[1:]}
+    for content, ok in ((good, True), ({**good, "B-101": "abcd"}, False), ({"B-999": "00" * 16}, False)):
+        with open(path, "w") as f:
+            json.dump(content, f)
+        try:
+            assert load_keys(path)["B-101"] == bytes.fromhex(good["B-101"]) and ok
+        except ValueError:
+            assert not ok
     print("packet self-check passed")

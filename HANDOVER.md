@@ -155,7 +155,7 @@ Settled on 11 November 2026: nodes on mains power, gateway = LoRa + ESP32 + lapt
 | An alert can collide with the first slot at quarter-hour boundaries | Seen once (B-203 at 02:30:00.2 vs B-401's summary); recovered by the 2-minute re-send. |
 | Retry storm during long radio cuts | About 13,000 re-send attempts in 3.5 h; add backoff. |
 | No location for downtake leaks | Building check says "pipe leak", not which floor. |
-| Simulation-only parts | CAD, radio and clock setting are imitated; ns-3 uses EU868 (no Indian band in the module); one uplink channel modelled (IN865 has 3); keys are made from the node name (`sim_key`), real key files on the SD card are not built yet. |
+| Simulation-only parts | CAD, radio and clock setting are imitated; ns-3 uses EU868 (no Indian band in the module); one uplink channel modelled (IN865 has 3); keys are made from the node name (`sim_key`); real keys come from a key file on the SD card (`load_keys` in `firmware/packet.py`), to be wired into `pi_hal.py`. |
 | `matplotlib` is in `simulation/pyproject.toml` but nothing imports it directly | Can probably be removed. |
 
 ---

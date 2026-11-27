@@ -20,3 +20,6 @@ leak_detection/results/
 
 # Downloaded datasets (large, and licensed separately: see tinyml/README.md)
 tinyml/data/
+
+# Real radio keys (secret, one file per installation): see firmware/packet.py load_keys
+*keys.json

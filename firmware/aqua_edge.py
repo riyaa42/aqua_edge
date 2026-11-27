@@ -4,8 +4,10 @@ Runs unchanged in Webots and on the Raspberry Pi Zero 2 W. It never touches hard
 directly; everything goes through a small hardware layer `hal` with these methods:
 
     hal.now()                 -> current time in seconds; every message is stamped with it ("t").
-                                 Simulation: seconds since start. Real node: from the DS3231 RTC
-                                 (planned, to discuss next: UTC Unix seconds, ISO 8601 in logs).
+                                 Simulation: seconds since start (start = local midnight).
+                                 Real node: UTC Unix seconds from the DS3231 RTC.
+    hal.utc_offset_s          -> optional: seconds to add to hal.now() for local time, used for the
+                                 hour of the day (India: 19800 = 5 h 30 min). Simulation leaves it out.
     hal.read()                -> dict of sensor readings, e.g. {"flow_lps": 0.01, "pressure_m": 10.4}
     hal.send(packet: bytes, at_s=None, cad=False)
                               -> radio send (LoRa on the real node); may be lost silently.
@@ -25,8 +27,9 @@ Detection rules (all thresholds are calibration knobs at the top):
       Continuous night flow and abnormal consumption against its own learned daily pattern
       (idea of on-node anomaly detection from Babazadeh [3]). Pressure is still read, learned
       and sent in summaries, but raises no alarms.
-    Tank node: water quality class (Sharma et al. [1], 8-bit neural network on the device;
-      a rule-based stand-in for now) and abnormal supply flow (possible pipe burst).
+    Tank node: water quality class from an 8-bit neural network on the device (Sharma et al. [1],
+      trained by tinyml/train_quality.py, see tinyml/README.md) and abnormal supply flow
+      (possible pipe burst).
 Store-and-forward: every message is timestamped, kept until the gateway acknowledges it,
 alerts sent first (Mariadhason et al. [4], timestamped store-and-forward to SD card).
 """
@@ -37,7 +40,7 @@ from packet import pack, unpack
 from quality_model import QualityModel
 
 DAY, HOUR = 86400, 3600
-LEARN_S = DAY                 # first day: learn this node's normal pattern
+LEARN_S = DAY                 # first day after the node's first start: learn its normal pattern
 EWMA_A = 1 / 14               # after day 1, each clean hour moves the baseline 1/14 of the way to
                               # today's value: remembers about 2 weeks (Phyn learns in 21 days, Moen 7)
 SUMMARY_S = 900               # send a summary every 15 minutes
@@ -53,7 +56,7 @@ CONT_FLOW_LPS = 0.005         # below this the flat's water counts as "off"
 CONT_FLOW_MIN = 480           # water never off for 8 h in a row: leak alert, day or night
 # ponytail: 8 h because simulated demand is smooth (normal flats run up to 6 h 1 min nonstop);
 # real use comes in bursts with zero flow between, so retune (likely shorter) on Cache County data
-PRESSURE_SIGMAS, PRESSURE_MARGIN_M, PRESSURE_MIN = 4.0, 0.3, 10   # tank level check
+LEVEL_SIGMAS, LEVEL_MARGIN_M, LEVEL_MIN = 4.0, 0.3, 10   # tank level check
 ALERT_CLEAR_S = 600           # an alert re-arms after its condition has been normal this long;
                               # the gateway decides whether a new alert is a repeat
 QUALITY_MIN, QUALITY_CLEAR_MIN = 3, 10
@@ -166,10 +169,13 @@ class Node:
         self.key = hal.key(node_id)
         self.base = {k: Baseline() for k in self.sensors}
         self.base_path = hal.storage_path and os.path.splitext(hal.storage_path)[0] + "_baseline.json"
+        self.learn_until = None        # end of the learning day: set on the first step, kept on the SD card
         if self.base_path and os.path.exists(self.base_path):    # restart after a power cut: keep what was learned
             with open(self.base_path) as f:
-                for k, d in json.load(f).items():
-                    self.base[k].__dict__.update(d)
+                saved = json.load(f)
+            self.learn_until = saved.pop("learn_until", None)
+            for k, d in saved.items():
+                self.base[k].__dict__.update(d)
         self.hour = None
         self.clean = True              # no alert so far in the hour now running
         self.alerts = {}               # active alert type -> last time its condition was seen
@@ -192,13 +198,15 @@ class Node:
             m = unpack(raw, lambda n: self.key if n == self.id else None)   # None: not ours, or forged
             if m and m["k"] == "ACK":
                 self.store.ack(m["s"])
-        hour = int(now % DAY // HOUR)
+        if self.learn_until is None:       # very first start: learn for one day from now
+            self.learn_until = now + LEARN_S
+        hour = int((now + getattr(self.hal, "utc_offset_s", 0)) % DAY // HOUR)   # local hour of the day
         if hour != self.hour:              # once an hour: update the baseline, keep it on the SD card
             for b in self.base.values():
                 b.blend(self.hour, self.clean)
             self.hour, self.clean = hour, True
             self.save_baseline()
-        if now < LEARN_S:
+        if now < self.learn_until:
             for k in self.sensors:
                 self.base[k].add(hour, r[k])
         else:
@@ -226,7 +234,8 @@ class Node:
 
     def save_baseline(self):
         if self.base_path:
-            save_atomic(self.base_path, json.dumps({k: b.__dict__ for k, b in self.base.items()}))
+            save_atomic(self.base_path, json.dumps({"learn_until": self.learn_until,
+                                                    **{k: b.__dict__ for k, b in self.base.items()}}))
 
     def summarise(self, now, r):
         i = int(now // SUMMARY_S)
@@ -306,12 +315,12 @@ class TankNode(Node):
             self.alert("ABNORMAL_SUPPLY", flow=round(r["outflow_lps"], 3))
         # Tank level far below normal for this hour: every flat's pressure will sag (supply side)
         lb = self.base["level_m"]
-        low = r["level_m"] < lb.mean(hour) - max(PRESSURE_SIGMAS * lb.std(hour), PRESSURE_MARGIN_M)
+        low = r["level_m"] < lb.mean(hour) - max(LEVEL_SIGMAS * lb.std(hour), LEVEL_MARGIN_M)
         self.low_run, self.ok_run = (self.low_run + 1, 0) if low else (0, self.ok_run + 1)
-        if self.low_run >= PRESSURE_MIN and not self.low_flagged:
+        if self.low_run >= LEVEL_MIN and not self.low_flagged:
             self.low_flagged = True
             self.emit("FLAG", f="SUPPLY_LOW", level=round(r["level_m"], 3), inflow=round(r["inflow_lps"], 3))
-        elif self.ok_run >= PRESSURE_MIN:
+        elif self.ok_run >= LEVEL_MIN:
             self.low_flagged = False
 
     def accumulate(self, r):
@@ -402,4 +411,14 @@ if __name__ == "__main__":
     hal.receive = lambda: [pack(ack, sim_key("B-104"))]
     n.step()
     assert all(m["s"] != 1 for m in n.store.queue), "real ACK deletes it"
+
+    # Real clock: UTC Unix seconds (not 0 at start), India 5 h 30 min ahead. 20:00 UTC is
+    # 01:30 in India, so the hour is 1 (night check window); the first day is still learned
+    utc_midnight = 1_764_000_000 // DAY * DAY
+    hal = FakeHAL(None, use)
+    hal.t, hal.utc_offset_s = utc_midnight + 20 * HOUR, 19800
+    n = FlatNode("B-202", hal)
+    n.step()
+    assert n.hour == 1, n.hour
+    assert sum(n.base["flow_lps"].n) == 1, "first reading must be learned, not checked"
     print("node self-check passed")
