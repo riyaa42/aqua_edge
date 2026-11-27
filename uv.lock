@@ -45,13 +45,14 @@ wheels = [
 [[package]]
 name = "aqua-edge"
 version = "0.1.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "matplotlib" },
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "numpy", version = "2.5.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "pandas" },
     { name = "scikit-learn" },
+    { name = "six" },
     { name = "streamlit" },
     { name = "wntr" },
 ]
@@ -62,6 +63,7 @@ requires-dist = [
     { name = "numpy", specifier = ">=2.0" },
     { name = "pandas", specifier = ">=2.0" },
     { name = "scikit-learn", specifier = ">=1.9.1" },
+    { name = "six", specifier = ">=1.17" },
     { name = "streamlit", specifier = ">=1.66.1" },
     { name = "wntr", specifier = ">=1.5" },
 ]

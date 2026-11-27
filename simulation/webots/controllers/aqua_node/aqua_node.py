@@ -5,12 +5,11 @@ import sys
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path[:0] = [
     ROOT,
-    os.path.join(ROOT, "..", "..", "firmware", "edge_node"),
-    os.path.join(ROOT, "..", "..", "firmware", "communication"),
+    os.path.join(ROOT, "..", ".."),
 ]
 
 from controller import Robot  # noqa: E402
-from aqua_edge import FlatNode, TankNode  # noqa: E402
+from edge.aqua_edge import FlatNode, TankNode  # noqa: E402
 from simlink import STEP_S  # noqa: E402
 from webots_hal import WebotsHAL, TIME_STEP_MS  # noqa: E402
 

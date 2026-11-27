@@ -19,7 +19,7 @@ The earlier offline test fed every node a pre-made 48-hour file of sensor values
 | Water engine | `live/water.py` | Runs the building B water network (WNTR) one minute at a time and gives each node its readings |
 | Timekeeper | `live/timekeeper.py` | The clock of the whole simulation: steps the water, applies commands, passes messages through the radio model |
 | Nodes and gateway | `live/node.py` | One process (or container) per node, running the real firmware |
-| Firmware | `../firmware/aqua_edge.py`, `gateway.py` | Detection rules, alerts, sending, re-sending, SD card storage, gateway analysis |
+| Firmware | `../edge/aqua_edge.py`, `../gateway/core.py` | Detection rules, alerts, sending, re-sending, SD card storage, gateway analysis |
 | Radio model | `live/radio.py` | Decides which packets arrive: airtime, collisions, radio cuts, weak links |
 | Control panel | `live/control_panel.py` | Streamlit web page to trigger events and watch alerts |
 | Checker | `live/check_comms.py` | Scores a finished run with PASS/FAIL lines |
@@ -46,7 +46,7 @@ The timekeeper waits for every node before moving on (this is called *lockstep*)
 
 ## 4. Detection and alerts (firmware)
 
-- Flat nodes detect leaks with flow only: continuous night flow and abnormal consumption (the pressure rule was removed; see `../leak_detection/README.md` section 6).
+- Flat nodes detect leaks with flow only: continuous night flow and abnormal consumption (the pressure rule was removed; see `../tinyml/leakage/README.md` section 6).
 - The tank node detects abnormal supply and water-quality events.
 - The gateway runs a mass balance (supply flow against the sum of flat flows) to spot pipe leaks [Ali et al. [6], for comparing the tank supply against the flats to find pipe leaks].
 - **Alerts re-arm.** Once a problem has been quiet for 10 minutes (`ALERT_CLEAR_S`), the alert can fire again if the problem comes back.
@@ -153,7 +153,7 @@ Self-checks: `python3 live/radio.py` and `python3 webots/run_offline.py`.
 - **Hearing assumption.** The radio model assumes every node can hear every other node (one building). Hidden nodes are not checked.
 - **Uplink channels.** Only one uplink channel is used, although IN865 offers 3.
 - **Frequency band in ns-3.** ns-3 uses the EU868 frequency, because the module has no Indian band. The physics is the same.
-- **Packet format.** Packets are signed binary (`firmware/packet.py`), about a third of the JSON size. Keys are made from the node name for the simulation; real nodes need a key file on the SD card.
+- **Packet format.** Packets are signed binary (`hal/packet.py`), about a third of the JSON size. Keys are made from the node name for the simulation; real nodes need a key file on the SD card.
 - **Leak modelling.** Leaks use internal WNTR settings (tested with wntr 1.5.0).
 - **Gateway repeat check.** The gateway cannot yet tell "the same leak flickering" from "a new leak". It only marks repeats.
 - **Retry storm.** During a 3.5-hour radio cut, nodes made about 13,000 re-send attempts.
@@ -168,6 +168,6 @@ Self-checks: `python3 live/radio.py` and `python3 webots/run_offline.py`.
 5. **Hidden nodes.** Use ns-3 node-to-node links to check whether nodes can hear each other.
 6. **Retry storm.** Back off re-sends during long radio cuts to save energy.
 7. **New or ongoing leak.** Decide on the laptop whether a repeat alert is a new problem or the same one.
-8. **TinyML model.** Done: the tank node runs the 8-bit model (`../tinyml/README.md`).
+8. **TinyML model.** Done: the tank node runs the 8-bit model (`../tinyml/quality/README.md`).
 9. **Monitoring dashboard.** Build a Grafana dashboard for the real output.
 10. **Pass marks.** Agree final pass marks as a team.

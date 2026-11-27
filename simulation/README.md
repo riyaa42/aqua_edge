@@ -1,6 +1,6 @@
 # Aqua Edge: Simulation and Network Design
 
-Everything used to test the system before the hardware exists: the building B water network, the live simulation, the LoRa radio model and ns-3, and the Webots 3D test bench. The node and gateway code they run lives in `../firmware/`.
+Everything used to test the system before the hardware exists: the building B water network, the live simulation, the LoRa radio model and ns-3, and the Webots 3D test bench. The node and gateway code they run lives in `../edge/`, `../gateway/`, `../hal/` and `../tinyml/`.
 
 Full write-up of mechanisms, results and next steps: [`LIVE_SIMULATION.md`](LIVE_SIMULATION.md).
 
@@ -17,7 +17,7 @@ Uses [uv](https://docs.astral.sh/uv/) (configured at the repository root). From 
 
 ```
 sh live/run_local.sh --scenario live/scenarios/standard.jsonl     # no Docker: one process per node, 48 h in ~1 min
-sh live/run_local.sh --scenario live/scenarios/flow_leaks.jsonl   # three flow leaks (see ../leak_detection/)
+sh live/run_local.sh --scenario live/scenarios/flow_leaks.jsonl   # three flow leaks (see ../tinyml/leakage/)
 docker compose -f live/compose.yaml up                            # one container per node; panel at localhost:8501
 uv run streamlit run live/control_panel.py                        # control panel for the no-Docker run
 python3 live/check_comms.py                                       # PASS/FAIL report for the last run
@@ -34,4 +34,4 @@ All of them plus both live scenarios in one go: `sh check_all.sh` (about 4 minut
 
 ## NS-3 Scope Note (`ns3/aqua_lora.cc`)
 
-`simulation/ns3/aqua_lora.cc` is a **custom LoRa PHY replay** over India's 3 IN865 channels (`865.0625, 865.4025, 865.985 MHz`), **not** a complete LoRaWAN Class A/B/C MAC simulation (`EndDeviceLorawanMac::Send` and `gwPhy->SetReceiveOkCallback` are bypassed). This matches the project's firmware architecture, which uses plain LoRa with custom TDMA summary slots, listen-before-talk (CAD) for alerts, and signed binary packets (`firmware/packet.py`) rather than LoRaWAN join/ADR.
+`simulation/ns3/aqua_lora.cc` is a **custom LoRa PHY replay** over India's 3 IN865 channels (`865.0625, 865.4025, 865.985 MHz`), **not** a complete LoRaWAN Class A/B/C MAC simulation (`EndDeviceLorawanMac::Send` and `gwPhy->SetReceiveOkCallback` are bypassed). This matches the project's firmware architecture, which uses plain LoRa with custom TDMA summary slots, listen-before-talk (CAD) for alerts, and signed binary packets (`hal/packet.py`) rather than LoRaWAN join/ADR.

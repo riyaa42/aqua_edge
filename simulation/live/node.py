@@ -3,7 +3,7 @@
     NODE_ID=B-203 python3 live/node.py
     NODE_ID=GATEWAY python3 live/node.py
 
-Runs the real firmware (IOT_2026/firmware) through NetHAL, a hardware layer that gets this node's
+Runs the real firmware (edge/, gateway/, hal/, tinyml/) through NetHAL, a hardware layer that gets this node's
 sensor readings and radio messages from the timekeeper, one minute at a time. Standard library only.
 """
 import json
@@ -15,11 +15,10 @@ import zlib
 from multiprocessing.connection import Client
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-for _sub in ("edge_node", "communication"):
-    sys.path.insert(0, os.path.join(HERE, "..", "..", "firmware", _sub))
-from aqua_edge import FlatNode, TankNode  # noqa: E402
-from gateway import Gateway, Topology  # noqa: E402
-from packet import peek, sim_key  # noqa: E402
+sys.path.insert(0, os.path.join(HERE, "..", ".."))
+from edge.aqua_edge import FlatNode, TankNode  # noqa: E402
+from gateway.core import Gateway, Topology  # noqa: E402
+from hal.packet import peek, sim_key  # noqa: E402
 
 RUN = os.environ.get("AQUA_RUN", os.path.join(HERE, "run"))
 ADDRESS = (os.environ.get("AQUA_TIMEKEEPER", "localhost"), 6000)

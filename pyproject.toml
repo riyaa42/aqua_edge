@@ -9,9 +9,43 @@ dependencies = [
     "numpy>=2.0",
     "pandas>=2.0",
     "scikit-learn>=1.9.1",
+    "six>=1.17",          # wntr imports it without declaring it
     "streamlit>=1.66.1",
     "wntr>=1.5",
 ]
 
+[project.scripts]
+test-all = "tasks:test_all"
+test-hal = "tasks:test_hal"
+test-edge = "tasks:test_edge"
+test-gateway = "tasks:test_gateway"
+test-quality = "tasks:test_quality"
+test-consumption = "tasks:test_consumption"
+test-leakage = "tasks:test_leakage"
+test-runtime = "tasks:test_runtime"
+test-parity = "tasks:test_parity"
+edge-based-node = "tasks:edge_based_node"
+edge-based-gateway = "tasks:edge_based_gateway"
+cloud-based-node = "tasks:cloud_based_node"
+cloud-based-gateway = "tasks:cloud_based_gateway"
+pi-node = "tasks:pi_node"
+exp-compare-leaks = "tasks:exp_compare_leaks"
+exp-validate-campaign = "tasks:exp_validate_campaign"
+exp-validate-swifeed = "tasks:exp_validate_swifeed"
+exp-validate-cache-county = "tasks:exp_validate_cache_county"
+exp-consumption-building-b = "tasks:exp_consumption_building_b"
+exp-consumption-cache-county = "tasks:exp_consumption_cache_county"
+exp-static-anomaly = "tasks:exp_static_anomaly"
+exp-temporal-anomaly = "tasks:exp_temporal_anomaly"
+exp-train-quality = "tasks:exp_train_quality"
+
+[build-system]
+requires = ["uv_build>=0.13,<0.14"]
+build-backend = "uv_build"
+
 [tool.uv]
-package = false
+package = true
+
+[tool.uv.build-backend]
+module-root = ""
+module-name = ["tinyml", "gateway", "hal", "edge", "bogo_data_streaming", "tests", "tasks"]

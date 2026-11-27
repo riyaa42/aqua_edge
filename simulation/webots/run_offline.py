@@ -14,14 +14,12 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path[:0] = [
     HERE,
-    os.path.join(HERE, "..", "..", "firmware", "edge_node"),
-    os.path.join(HERE, "..", "..", "firmware", "gateway"),
-    os.path.join(HERE, "..", "..", "firmware", "communication"),
+    os.path.join(HERE, "..", ".."),
 ]
-from aqua_edge import FlatNode, TankNode, DAY  # noqa: E402
-from gateway import Gateway, Topology  # noqa: E402
+from edge.aqua_edge import FlatNode, TankNode, DAY  # noqa: E402
+from gateway.core import Gateway, Topology  # noqa: E402
 from simlink import SensorFeed, load_outages, link_up, STEP_S  # noqa: E402
-from packet import sim_key  # noqa: E402
+from hal.packet import sim_key  # noqa: E402
 
 GATEWAY = "GATEWAY"
 

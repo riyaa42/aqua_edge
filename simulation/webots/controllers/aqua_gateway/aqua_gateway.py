@@ -9,17 +9,15 @@ import sys
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path[:0] = [
     ROOT,
-    os.path.join(ROOT, "..", "..", "firmware", "edge_node"),
-    os.path.join(ROOT, "..", "..", "firmware", "gateway"),
-    os.path.join(ROOT, "..", "..", "firmware", "communication"),
+    os.path.join(ROOT, "..", ".."),
 ]
 
 from controller import Supervisor  # noqa: E402
-from gateway import Gateway, Topology  # noqa: E402
+from gateway.core import Gateway, Topology  # noqa: E402
 from simlink import STEP_S  # noqa: E402
 from webots_hal import WebotsHAL, TIME_STEP_MS, RUN_DIR  # noqa: E402
 from run_offline import score, write_csv, hhmm  # noqa: E402
-from aqua_edge import DAY, HOUR  # noqa: E402
+from edge.aqua_edge import DAY, HOUR  # noqa: E402
 
 # Screenshots for slides: set AQUA_SNAPSHOTS=1 (needs rendering on). Leak during the outage, then the burst.
 SNAPSHOTS = {DAY + 3 * HOUR: "leak_during_outage", DAY + 18.5 * HOUR: "pipe_burst"} if os.environ.get("AQUA_SNAPSHOTS") else {}

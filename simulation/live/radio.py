@@ -15,8 +15,8 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 LINK_TABLE = os.path.join(HERE, "..", "ns3", "link_table.csv")
 GATEWAY = "GATEWAY"
-sys.path.insert(0, os.path.join(HERE, "..", "..", "firmware", "communication"))
-from packet import NAMES, pack, peek, sim_key  # noqa: E402
+sys.path.insert(0, os.path.join(HERE, "..", ".."))
+from hal.packet import NAMES, pack, peek, sim_key  # noqa: E402
 
 BW_HZ, CODING_RATE, PREAMBLE = 125_000, 1, 8   # LoRa defaults: 125 kHz, 4/5, 8 symbols
 DEFAULT_SF, DEFAULT_PDR = 7, 1.0               # used until ns-3 gives real numbers
@@ -75,7 +75,7 @@ class Radio:
             sf = self.link(src)["sf"] if src != GATEWAY else None
             free_at = t
             for offset, msg, cad in sorted(((*s, False)[:3] for s in sends), key=lambda s: s[0]):
-                h = peek(msg)                                   # packets are signed binary (firmware/packet.py)
+                h = peek(msg)                                   # packets are signed binary (hal/packet.py)
                 nbytes = len(msg)
                 dsts = [h["n"]] if src == GATEWAY and h["k"] == "ACK" else \
                     [n for n in outs if n != GATEWAY] if src == GATEWAY else [GATEWAY]

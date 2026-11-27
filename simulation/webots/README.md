@@ -1,6 +1,6 @@
 # Aqua Edge in Webots: firmware test bench
 
-EPANET (through WNTR) simulates the water. Webots runs the **real node firmware** on 20 flat nodes, 1 tank node and 1 gateway in a 3D model of building B. The firmware never talks to Webots directly, only to a small hardware layer, so the same `../../firmware/` files are meant to run on the real hardware (Raspberry Pi 4 nodes; gateway on a laptop with an ESP32 radio bridge).
+EPANET (through WNTR) simulates the water. Webots runs the **real node firmware** on 20 flat nodes, 1 tank node and 1 gateway in a 3D model of building B. The firmware never talks to Webots directly, only to a small hardware layer, so the same `../../edge/`, `../../gateway/`, `../../hal/` and `../../tinyml/` files are meant to run on the real hardware (Raspberry Pi 4 nodes; gateway on a laptop with an ESP32 radio bridge).
 
 **Status: parked.** The main test is now the live simulation (`../live/`, see `../LIVE_SIMULATION.md`), which has realistic LoRa timing and lets events be added while it runs. Webots may be kept as a 3D demo. `run_offline.py` here is still used as a fast firmware test.
 
@@ -9,8 +9,8 @@ EPANET (through WNTR) simulates the water. Webots runs the **real node firmware*
 | File | Job |
 |---|---|
 | `make_scenario.py` | Simulates building B for 48 h in EPANET and writes what every sensor would read (`data/sensors.csv`), the planted events (`data/events.csv`) and network outages (`data/outages.csv`) |
-| `../../firmware/aqua_edge.py` | **Node firmware**: detection rules, store-and-forward queue |
-| `../../firmware/gateway.py` | **Gateway firmware**: acknowledgements, supply-event rule, mass balance |
+| `../../edge/aqua_edge.py` | **Node firmware**: detection rules, store-and-forward queue |
+| `../../gateway/core.py` | **Gateway firmware**: acknowledgements, supply-event rule, mass balance |
 | `simlink.py` | Serves sensor readings and outage times to a simulated node |
 | `run_offline.py` | Runs all firmware without Webots in about 20 seconds and scores it (every SD save waits until the data is really on disk, as on the real node). Use it after every firmware change |
 | `webots_hal.py` | Hardware layer for Webots (radio = Emitter/Receiver, light = LED, SD card = file) |
@@ -35,7 +35,7 @@ The first firmware version closed a flat's valve whenever its pressure dropped a
 1. A flat closed its valve on a pressure drop only if its own flow was also abnormally high (a real leak raises flow; a supply drop does not).
 2. The tank node reports an abnormally low tank, which tells the gateway directly that it is a supply problem.
 
-Valves were later removed from the project altogether (the response is now buzzer, LED and alert only). The pressure rule was also **removed completely**: a flow vs pressure comparison showed pressure blames the wrong flat and misses small leaks, while flow caught every leak (see `../../leak_detection/README.md`). Flat nodes now use flow only, and the supply event comes from the tank alone (change 2 above).
+Valves were later removed from the project altogether (the response is now buzzer, LED and alert only). The pressure rule was also **removed completely**: a flow vs pressure comparison showed pressure blames the wrong flat and misses small leaks, while flow caught every leak (see `../../tinyml/leakage/README.md`). Flat nodes now use flow only, and the supply event comes from the tank alone (change 2 above).
 
 ## Run it
 
@@ -54,4 +54,4 @@ After changing the scenario: `uv run python make_scenario.py` (uses the root `uv
 ## Limits
 - Webots radio is range based; it does not model LoRa airtime, spreading factors or collisions (the live simulation and ns-3 do that, see `../live/` and `../ns3/`).
 - Water quality readings are made up, with events planted on purpose; EPANET cannot model pH or TDS.
-- The quality check is the 8-bit model (`../../tinyml/README.md`); turbidity is in NTU.
+- The quality check is the 8-bit model (`../../tinyml/quality/README.md`); turbidity is in NTU.

@@ -5,7 +5,7 @@ Emitter/Receiver pair, the status light is a Webots LED, and the SD card is a fi
 """
 import glob
 import os
-from packet import sim_key
+from hal.packet import sim_key
 from simlink import SensorFeed, load_outages, link_up
 
 TIME_STEP_MS = 128            # Webots time per firmware step; one step = one minute of water time
@@ -41,7 +41,7 @@ class WebotsHAL:
 
     def send(self, msg, at_s=None, cad=False):      # timing ignored: Webots radio has no airtime
         if self.link_ok():
-            self.emitter.send(msg)                  # signed binary packet (firmware/packet.py)
+            self.emitter.send(msg)                  # signed binary packet (hal/packet.py)
 
     def receive(self):
         msgs = []
