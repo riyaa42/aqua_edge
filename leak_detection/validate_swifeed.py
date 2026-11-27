@@ -20,7 +20,12 @@ from wntr.network.controls import Control, ControlAction
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
-sys.path[:0] = [os.path.join(ROOT, "firmware"), os.path.join(ROOT, "simulation", "scripts")]
+sys.path[:0] = [
+    os.path.join(ROOT, "firmware", "edge_node"),
+    os.path.join(ROOT, "firmware", "gateway"),
+    os.path.join(ROOT, "firmware", "communication"),
+    os.path.join(ROOT, "simulation", "scripts"),
+]
 
 from aqua_edge import FlatNode, TankNode, DAY, HOUR  # noqa: E402
 from gateway import Gateway  # noqa: E402

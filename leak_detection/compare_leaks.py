@@ -25,7 +25,12 @@ import sys
 from multiprocessing import Pool
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path[:0] = [os.path.join(HERE, "..", "simulation", "live"), os.path.join(HERE, "..", "firmware")]
+sys.path[:0] = [
+    os.path.join(HERE, "..", "simulation", "live"),
+    os.path.join(HERE, "..", "firmware", "edge_node"),
+    os.path.join(HERE, "..", "firmware", "gateway"),
+    os.path.join(HERE, "..", "firmware", "communication"),
+]
 from water import Water, LEAK_SIZES_LPS  # noqa: E402
 from aqua_edge import FlatNode, TankNode, DAY  # noqa: E402
 from gateway import Gateway  # noqa: E402

@@ -15,7 +15,8 @@ import zlib
 from multiprocessing.connection import Client
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(HERE, "..", "..", "firmware"))   # IOT_2026/firmware: the real node code
+for _sub in ("edge_node", "communication"):
+    sys.path.insert(0, os.path.join(HERE, "..", "..", "firmware", _sub))
 from aqua_edge import FlatNode, TankNode  # noqa: E402
 from gateway import Gateway  # noqa: E402
 from packet import peek, sim_key  # noqa: E402

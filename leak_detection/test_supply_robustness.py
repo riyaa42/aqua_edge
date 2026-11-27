@@ -16,7 +16,11 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
-sys.path[:0] = [os.path.join(ROOT, "firmware")]
+sys.path[:0] = [
+    os.path.join(ROOT, "firmware", "edge_node"),
+    os.path.join(ROOT, "firmware", "gateway"),
+    os.path.join(ROOT, "firmware", "communication"),
+]
 
 from aqua_edge import TankNode, FlatNode, DAY  # noqa: E402
 from gateway import Gateway  # noqa: E402

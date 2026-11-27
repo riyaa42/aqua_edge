@@ -22,9 +22,12 @@ import numpy as np
 import wntr
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.path.dirname(HERE)
+FIRMWARE_DIR = os.path.dirname(HERE)
+ROOT = os.path.dirname(FIRMWARE_DIR)
 sys.path[:0] = [
-    HERE,
+    os.path.join(FIRMWARE_DIR, "edge_node"),
+    os.path.join(FIRMWARE_DIR, "gateway"),
+    os.path.join(FIRMWARE_DIR, "communication"),
     os.path.join(ROOT, "leak_detection"),
     os.path.join(ROOT, "simulation", "webots"),
     os.path.join(ROOT, "simulation", "scripts"),
@@ -207,12 +210,13 @@ def measure_resources(stream, td_sample):
 
     # Flash / storage footprint
     artifacts = [
-        "firmware/aqua_edge.py",
-        "firmware/gateway.py",
-        "firmware/packet.py",
-        "firmware/quality_model.py",
-        "firmware/quality_model.json",
-        "firmware/temporal_model.json",
+        "firmware/edge_node/aqua_edge.py",
+        "firmware/gateway/gateway.py",
+        "firmware/gateway/gateway_analytics.py",
+        "firmware/communication/packet.py",
+        "firmware/edge_node/quality_model.py",
+        "firmware/edge_node/quality_model.json",
+        "firmware/edge_node/temporal_model.json",
         "abnormal_consumption/detectors.py",
     ]
     artifact_bytes = {p: os.path.getsize(os.path.join(ROOT, p)) for p in artifacts}
@@ -253,7 +257,7 @@ def main():
     print("Combined 3-pipeline replay PASS; alerts:", sorted(alerts))
     metrics = measure_resources(stream, td)
     print(json.dumps(metrics, indent=2))
-    out_path = os.path.join(HERE, "unified_runtime_metrics.json")
+    out_path = os.path.join(FIRMWARE_DIR, "unified_runtime_metrics.json")
     with open(out_path, "w") as f:
         json.dump(metrics, f, indent=2)
     print("UNIFIED EDGE RUNTIME TESTS PASSED")

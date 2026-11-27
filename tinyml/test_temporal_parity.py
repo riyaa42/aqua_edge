@@ -6,7 +6,7 @@ import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
-sys.path.insert(0, os.path.join(ROOT, "firmware"))
+sys.path[:0] = [os.path.join(ROOT, "firmware", "edge_node"), os.path.join(ROOT, "firmware", "communication")]
 
 import exp2_temporal_anomaly as E2
 from quality_model import TemporalModel, QualityMonitor

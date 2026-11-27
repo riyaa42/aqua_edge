@@ -37,9 +37,12 @@ import os
 import random
 import sys
 
-_AC_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "abnormal_consumption")
-if _AC_DIR not in sys.path:
-    sys.path.append(_AC_DIR)
+_EDGE_DIR = os.path.dirname(os.path.abspath(__file__))
+_FW_DIR = os.path.dirname(_EDGE_DIR)
+_ROOT_DIR = os.path.dirname(_FW_DIR)
+for _d in (_EDGE_DIR, os.path.join(_FW_DIR, "communication"), os.path.join(_ROOT_DIR, "abnormal_consumption")):
+    if _d not in sys.path:
+        sys.path.append(_d)
 
 from detectors import StatisticalZeroFlowDetector
 from packet import pack, unpack, violation_mask

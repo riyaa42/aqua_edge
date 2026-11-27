@@ -28,8 +28,16 @@ How the leak checks fit together: leak_detection/README.md.
 """
 import json
 import os
+import sys
+
+_GW_DIR = os.path.dirname(os.path.abspath(__file__))
+_FW_DIR = os.path.dirname(_GW_DIR)
+for _d in (_GW_DIR, os.path.join(_FW_DIR, "edge_node"), os.path.join(_FW_DIR, "communication")):
+    if _d not in sys.path:
+        sys.path.append(_d)
 
 from aqua_edge import SUMMARY_S, iso_utc, save_atomic
+from gateway_analytics import GatewayAnalytics
 from packet import pack, unpack
 
 SUPPLY_WINDOW_S = 900          # a SUPPLY_LOW flag from the tank counts for this long
@@ -77,6 +85,7 @@ class Gateway:
         self.last_seen = None       # node -> time last heard (set on the first step)
         self.silent = {}            # node -> time last heard before it went silent
         self.skewed = set()
+        self.analytics = GatewayAnalytics(self.flats, self.tank)
 
     def _is_seen_and_record(self, node, seq):
         """Return True if seq was already seen; otherwise record it (advancing contiguous floor)."""
@@ -119,6 +128,7 @@ class Gateway:
                 # Persist seen state BEFORE sending ACK so a node never deletes unpersisted data
                 self._save_seen()
                 self.log.append({**m, "rx": now, "rx_utc": round(utc_s), "rx_iso": iso_utc(utc_s)})
+                self.analytics.on_packet(now, m)
                 self.check_clock(now, m)
                 if m["k"] == "ALERT" and not m["a"].endswith("_CLEARED"):
                     self.check_repeat(m)
@@ -151,7 +161,13 @@ class Gateway:
         self.mass_balance(now)
 
     def decide(self, now, kind, **info):
-        self.events.append({"t": now, "event": kind, **info})
+        ev = {"t": now, "event": kind, **info}
+        self.events.append(ev)
+        self.analytics.on_event(now, ev)
+
+    def snapshot(self, now=None):
+        """Return a JSON-serializable operational snapshot for the dashboard."""
+        return self.analytics.snapshot(self, now=now)
 
     def check_repeat(self, m):
         """Nodes re-send an alert each time a problem comes back; decide if this one is new."""
@@ -278,6 +294,7 @@ class Gateway:
             if supply < MIN_SUPPLY_L:
                 continue
             err = 100 * (supply - sum(got[n] for n in self.flats)) / supply
+            self.analytics.last_balance_pct = round(err, 2)
             leaking = err > MASS_BALANCE_PCT
             if not leaking and not self.pipe_alerted and i in self.p_sums:
                 for f, p_v in self.p_sums[i].items():
@@ -295,6 +312,7 @@ class Gateway:
                             localization_confidence=conf, floor_drops=drops)
             elif self.balance_ok >= MASS_BALANCE_INTERVALS:
                 self.pipe_alerted = False                   # re-arm: a later leak alerts again
+                self.analytics.clear_pipe_leak(t_resolved=now)
 
 
 if __name__ == "__main__":

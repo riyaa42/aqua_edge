@@ -7,7 +7,12 @@ import os
 import sys
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-sys.path[:0] = [ROOT, os.path.join(ROOT, "..", "..", "firmware")]
+sys.path[:0] = [
+    ROOT,
+    os.path.join(ROOT, "..", "..", "firmware", "edge_node"),
+    os.path.join(ROOT, "..", "..", "firmware", "gateway"),
+    os.path.join(ROOT, "..", "..", "firmware", "communication"),
+]
 
 from controller import Supervisor  # noqa: E402
 from gateway import Gateway  # noqa: E402

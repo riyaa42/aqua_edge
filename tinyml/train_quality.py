@@ -29,13 +29,13 @@ import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
-sys.path.insert(0, os.path.join(ROOT, "firmware"))
+sys.path.insert(0, os.path.join(ROOT, "firmware", "edge_node"))
 from quality_model import QualityModel, QualityMonitor  # noqa: E402
 
 CLASSES = ["NORMAL", "RUNOFF", "CHEMICAL"]
 PH_LO, PH_HI, TDS_MAX, TURB_MAX = 6.5, 8.5, 500.0, 5.0  # IS 10500:2012
 COND_TO_TDS = 0.65
-MODEL_PATH = os.path.join(ROOT, "firmware", "quality_model.json")
+MODEL_PATH = os.path.join(ROOT, "firmware", "edge_node", "quality_model.json")
 rng = np.random.default_rng(7)
 
 

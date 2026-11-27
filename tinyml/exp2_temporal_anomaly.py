@@ -24,7 +24,7 @@ from sklearn.metrics import roc_auc_score
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
-TEMPORAL_MODEL_PATH = os.path.join(ROOT, "firmware", "temporal_model.json")
+TEMPORAL_MODEL_PATH = os.path.join(ROOT, "firmware", "edge_node", "temporal_model.json")
 COND_TO_TDS = 0.65
 rng = np.random.default_rng(42)
 

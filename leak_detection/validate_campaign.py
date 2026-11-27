@@ -28,7 +28,9 @@ from wntr.network.controls import Rule, Control, AndCondition, SimTimeCondition,
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path[:0] = [
-    os.path.join(ROOT, "firmware"),
+    os.path.join(ROOT, "firmware", "edge_node"),
+    os.path.join(ROOT, "firmware", "gateway"),
+    os.path.join(ROOT, "firmware", "communication"),
     os.path.join(ROOT, "simulation", "live"),
     os.path.join(ROOT, "simulation", "webots"),
     os.path.join(ROOT, "simulation", "scripts"),

@@ -15,7 +15,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 LINK_TABLE = os.path.join(HERE, "..", "ns3", "link_table.csv")
 GATEWAY = "GATEWAY"
-sys.path.insert(0, os.path.join(HERE, "..", "..", "firmware"))
+sys.path.insert(0, os.path.join(HERE, "..", "..", "firmware", "communication"))
 from packet import NAMES, pack, peek, sim_key  # noqa: E402
 
 BW_HZ, CODING_RATE, PREAMBLE = 125_000, 1, 8   # LoRa defaults: 125 kHz, 4/5, 8 symbols

@@ -27,7 +27,7 @@ from sklearn.metrics import roc_auc_score
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
-sys.path.insert(0, os.path.join(ROOT, "firmware"))
+sys.path.insert(0, os.path.join(ROOT, "firmware", "edge_node"))
 from quality_model import check_standards  # noqa: E402
 
 COND_TO_TDS = 0.65
