@@ -463,16 +463,21 @@ def test_state_versioning_and_commands_disabled():
     td = tempfile.mkdtemp(prefix="gw_ver_")
     hal = TestHAL(os.path.join(td, "seen.json"))
     hal.storage_path = os.path.join(td, "gw.jsonl")
-    gw = Gateway(hal, FLATS, TANK)
+    gw = Gateway(hal, FLATS, TANK, enable_commands=False)
     gw.decide(1000, "PIPE_LEAK", suspected_floor="3", error_pct=20.0)
     gw.decide(1010, "SUPPLY_EVENT", inflow_lps=0.0)
-    # Default Gateway (enable_commands=False) does not queue CMD packets in outbox
+    # Switched off, nothing is queued for the nodes
     assert gw.outbox == {}
     gw.save_state()
     with open(gw.state_path) as f:
         saved = json.load(f)
     assert saved["version"] == 1
     assert "analytics" in saved
+
+    # By default the affected nodes are told: the tank and the flats on the suspected floor
+    on = Gateway(TestHAL(os.path.join(td, "on_seen.json")), FLATS, TANK)
+    on.decide(1000, "PIPE_LEAK", suspected_floor="3", suspected_range=["3"], localization_confidence="high")
+    assert sorted(c["n"] for c in on.outbox.values()) == sorted([TANK] + [f for f in FLATS if f.startswith("B-3")])
 
     # Older unversioned state file lacking analytics / BY_BLOCK still loads cleanly
     legacy_path = os.path.join(td, "legacy.jsonl")

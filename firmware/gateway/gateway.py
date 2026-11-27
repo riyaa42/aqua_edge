@@ -46,6 +46,7 @@ Same hardware layer as the nodes (hal.now / send / receive). Jobs:
        a flat's pressure alert during a pipe leak -> that flat (PIPE_LEAK_CAUSE: its own leak
                                    alert may not be its own leak)
      One that ended before it could be delivered still goes, marked "over".
+     On by default; enable_commands=False keeps these results on the gateway only.
 What the checks need is saved to one state file before any ACK is sent, so a restart keeps the
 open problems and pipe check, and does not reopen the door to replays. Not saved: the in-memory
 message log and event list. The gateway clock must carry on across a restart.
@@ -86,7 +87,7 @@ BY_BLOCK = ("sums", "p_sums", "p_mean_sums", "verdicts")     # {block number: va
 
 
 class Gateway:
-    def __init__(self, hal, flat_ids, tank_id, enable_commands=False):
+    def __init__(self, hal, flat_ids, tank_id, enable_commands=True):
         self.hal, self.flats, self.tank = hal, set(flat_ids), tank_id
         self.enable_commands = enable_commands
         self.seen_floor = {}        # node -> highest contiguous seq received (1..floor)
@@ -622,7 +623,7 @@ if __name__ == "__main__":
         block(gw, i, v)
     assert events(gw) == ["PIPE_LEAK", "PIPE_LEAK"], events(gw)
     # A flat pressure alert is labelled only during a pipe leak and only if stamped after it began
-    gw4 = Gateway(FakeHAL(), [F1, F2], T, enable_commands=True)
+    gw4 = Gateway(FakeHAL(), [F1, F2], T)
 
     def label(t, alert="LEAK_PRESSURE_DROP"):
         gw4.hal.seq += 1
@@ -656,7 +657,7 @@ if __name__ == "__main__":
         gw.hal.box = [pack(m, sim_key(m["n"])) for m in packets]
         gw.step()
 
-    gw5 = Gateway(FakeHAL(), [F1, F2], T, enable_commands=True)
+    gw5 = Gateway(FakeHAL(), [F1, F2], T)
     gw5.step()
     assert unpack(gw5.hal.sent[0], sim_key) == {"k": "BEACON", "n": "GATEWAY", "s": 0, "gt": 0}, "beacon at startup"
     for i, v in enumerate([ok, leak, leak]):
@@ -675,7 +676,7 @@ if __name__ == "__main__":
     assert {(n, a, o) for n, a, o, _ in commands(gw5, seen)} == {(n, "PIPE_LEAK_CLEARED", 0) for n in (F1, F2, T)}
 
     # Floor known: only the tank and those floors
-    gw6 = Gateway(FakeHAL(), ["B-401", "B-301", "B-101"], T, enable_commands=True)
+    gw6 = Gateway(FakeHAL(), ["B-401", "B-301", "B-101"], T)
     gw6.decide(0, "PIPE_LEAK", suspected_floor="3", suspected_range=["3"], localization_confidence="high")
     assert sorted(c["n"] for c in gw6.outbox.values()) == ["B-301", T]
 
@@ -684,7 +685,7 @@ if __name__ == "__main__":
     hal7 = FakeHAL()
     hal7.storage_path = os.path.join(tempfile.mkdtemp(), "GW7.jsonl")
     hal7.t = 1000
-    gw7 = Gateway(hal7, [F1], T, enable_commands=True)
+    gw7 = Gateway(hal7, [F1], T)
     deliver(gw7, {"k": "FLAG", "n": T, "s": 1, "t": 1000, "f": "SUPPLY_LOW", "level": 0.4, "inflow": 0.0})
     assert [(c["n"], c["a"], c["over"]) for c in gw7.outbox.values()] == [(T, "SUPPLY_EVENT", 0)]
     hal7.t = 1060
@@ -694,7 +695,7 @@ if __name__ == "__main__":
     waiting = sorted((c["a"], c["over"]) for c in gw7.outbox.values())
     assert waiting == [("LEAK_TANK_DRAIN", 1), ("SUPPLY_CLEARED", 0), ("SUPPLY_EVENT", 1)], waiting
     hal7.sent.clear()
-    gw7 = Gateway(hal7, [F1], T, enable_commands=True)
+    gw7 = Gateway(hal7, [F1], T)
     gw7.step()
     assert len(commands(gw7)) == 3 and unpack(hal7.sent[-1], sim_key)["k"] == "BEACON"
 

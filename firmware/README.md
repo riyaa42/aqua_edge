@@ -1,6 +1,6 @@
 # Aqua Edge: Firmware
 
-The real code for the nodes and the gateway. It only uses the Python standard library, and it never talks to hardware directly: it calls a small hardware layer (`hal`) for sensors, radio, clock, SD card and buzzer/LED. There are no valves yet: the response to a problem is the buzzer, the LED and an alert. The firmware calls an optional `hal.buzzer` and has a hook for valve control (`hal.on_gateway_alert`) that closes nothing; no hardware layer drives a real buzzer yet. The simulation (`../simulation/`) plugs in a simulated hardware layer; the real hardware will get its own: one for the Raspberry Pi 3B nodes (USB powered), and one on the gateway laptop that exchanges packets over USB serial with an ESP8266, the interface to the gateway's LoRa module.
+The real code for the nodes and the gateway. It only uses the Python standard library, and it never talks to hardware directly: it calls a small hardware layer (`hal`) for sensors, radio, clock, SD card and buzzer/LED. There are no valves yet: the response to a problem is the buzzer, the LED and an alert. A node sounds `hal.buzzer` for its own alerts and for gateway alerts that concern it. There is a hook for valve control (`hal.on_gateway_alert`) that closes nothing. The simulation (`../simulation/`) plugs in a simulated hardware layer; real hardware has its own: `communication/hal/pi_hal.py` for the Raspberry Pi 3B nodes (USB powered; SX1278 and buzzer drivers, not verified on hardware in these tests). The laptop gateway's layer, which exchanges packets over USB serial with an ESP8266 (the interface to its LoRa module), and the ESP8266 sketch are not in the repository yet, so **no gateway message reaches a real node yet**.
 
 | File | Runs on | What it does |
 |---|---|---|
@@ -41,9 +41,9 @@ These cover delivery after a decision. Detection windows (for example 3 h of con
 - **1 physical node** (`Raspberry Pi 3B` + `SX1278 433 MHz` + `RTC` + `microSD` + `buzzer`) streams one node's dataset/WNTR rows and transmits signed `packet.py` frames over LoRa to the **SX1278 → ESP8266 → USB serial** laptop gateway.
 - **20 virtual nodes** run in **Docker containers** using the same `EdgeRuntime` and `packet.py` framing, feeding into the same `Gateway` instance so physical and virtual nodes are indistinguishable to `Gateway` and `GatewayAnalytics` (and from there to the dashboard).
 
-## Gateway alerts sent to nodes (opt-in)
+## Gateway alerts sent to nodes
 
-Nodes act by themselves on local anomalies (triggering their own buzzer/LED immediately without LoRa or Internet) and buffer messages for the gateway. Gateway cross-node conclusions (`PIPE_LEAK`, `SUPPLY_EVENT`, `LEAK_TANK_DRAIN`) go to the dashboard via `Gateway.snapshot()`; `CMD` dispatch back to nodes is disabled by default (`enable_commands=False`) and can be enabled if needed.
+Nodes act by themselves on local anomalies (triggering their own buzzer/LED immediately without LoRa or Internet) and buffer messages for the gateway. What needs several nodes' data, the gateway also sends back to the affected nodes, as a signed command (`CMD`) repeated until the node confirms it (`GOT`) and kept across gateway restarts. The same results stay available to the dashboard through `Gateway.snapshot()`. Sending is on by default; `Gateway(..., enable_commands=False)` keeps results on the gateway only.
 
 | Gateway result | Sent to |
 |---|---|

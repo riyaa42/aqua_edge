@@ -87,7 +87,7 @@ Most leak decisions are made **on the node itself**, not on the gateway. This is
 | Tank outflow check | Tank node | Needs only the tank's own meter |
 | Building check (water in = water out) | Gateway | Needs numbers from every node at once, and only the gateway receives them all |
 
-If the radio or the gateway goes down, flats still catch their own leaks and still turn their light red (a buzzer is planned but **not yet implemented**). Only the building check pauses, and it catches up when the stored summaries arrive.
+If the radio or the gateway goes down, flats still catch their own leaks turn their light red and sound their buzzer. Only the gateway's work pauses, such as the building check; it catches up when the stored summaries arrive, and then sends the affected nodes any alerts it finds.
 
 ---
 
@@ -219,7 +219,7 @@ This follows common practice for LoRa networks: track when each device was last 
 
 ## 7. How an alarm reaches the gateway
 
-1. **The node decides.** A check trips, and in the same step the node turns its light red and calls the buzzer (no hardware layer drives a real buzzer yet). No gateway is needed for this.
+1. **The node decides.** A check trips, and in the same step the node turns its light red and sounds the buzzer (driven on the Pi by `pi_hal.py`; not verified on hardware in these tests). No gateway is needed for this.
 2. **It saves the alarm to the SD card first,** so nothing is lost if the power or radio fails.
 3. **It sends the alarm straight away.** Alarms skip the queue. They listen first to check the radio channel is free (listen before talk), then send.
 4. **The gateway replies "got it"** (an ACK). The reply also carries the gateway's time for setting node clocks. The firmware does not set any clock itself; only the live simulation's hardware layer uses it.

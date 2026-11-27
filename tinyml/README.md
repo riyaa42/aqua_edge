@@ -236,7 +236,7 @@ JalRakshak's water-quality monitoring separates responsibilities across three of
 2. **Module 2: Temporal TinyML Autoencoder (`TemporalModel`, [firmware/temporal_model.json](../firmware/temporal_model.json))** - Primary ML anomaly detector. Runs on unsmoothed readings with causal EWMA features (15-minute and 12-hour at one reading per minute), suppresses alerts during startup warm-up (`< 15` samples, much shorter than the 12-hour EWMA window), skips readings with any missing/`NaN` value (including temperature), and after a timestamp gap (`> 1800 s`) discards both EWMAs and its confirmation counts and warms up again as at startup, emitting `QUALITY_TEMPORAL_ANOMALY` / `QUALITY_TEMPORAL_CLEARED` separately in [firmware/packet.py](../firmware/packet.py).
 3. **Module 3: Three-Class Classifier (`QualityModel`, [firmware/quality_model.json](../firmware/quality_model.json))** - Secondary contamination-pattern attribution (`NORMAL`, `RUNOFF`, `CHEMICAL`) after 3-sample moving-average smoothing and 3-reading confirmation. It is skipped when temperature is missing.
 
-Their outputs stay separate, interpretable signals (`QUALITY_LIMIT_VIOLATION`, `QUALITY_RUNOFF`, `QUALITY_CHEMICAL`, and `QUALITY_TEMPORAL_ANOMALY`) for the node's alert LED and signed binary LoRa transmission, without treating ML predictions as confirmed root causes. One reading that is both over a limit and classified as contamination raises both alerts. `QUALITY_CLEARED` is sent once no limit or classifier alert remains active. The runtime also calls an optional `hal.buzzer` on a new alert, but no hardware adapter drives a real buzzer yet.
+Their outputs stay separate, interpretable signals (`QUALITY_LIMIT_VIOLATION`, `QUALITY_RUNOFF`, `QUALITY_CHEMICAL`, and `QUALITY_TEMPORAL_ANOMALY`) for the node's alert LED and signed binary LoRa transmission, without treating ML predictions as confirmed root causes. One reading that is both over a limit and classified as contamination raises both alerts. `QUALITY_CLEARED` is sent once no limit or classifier alert remains active. The runtime also calls `hal.buzzer` on a new alert; `firmware/communication/hal/pi_hal.py` drives it on the Pi (not verified on hardware in these tests).
 
 ---
 
@@ -248,7 +248,7 @@ Their outputs stay separate, interpretable signals (`QUALITY_LIMIT_VIOLATION`, `
 - **Regulatory-standard differences:** GECCO 2019 demonstrates that a model trained on IS 10500 flags compliant water from utilities operating under higher pH limits (*TrinkwV*).
 - **Low event prevalence in GECCO:** With `0.44%` event prevalence, even `0.14%` FPR yields `0.23` false alerts/day (`P = 0.642`), and `4-7` of `28` events are still missed at high-precision thresholds.
 - **Temporal model scope:** Tested primarily on GECCO 2019; it is not yet proven to eliminate seasonal drift across all water utilities.
-- **No physical sensors or Pi 3B hardware benchmarks yet:** There is no physical sensor or Pi 3B hardware layer yet (`firmware/hal/` holds only a README); replays and timings (about `37 µs` per model call in pure Python) are from development machines.
+- **No physical sensors or Pi 3B hardware benchmarks yet:** There are no physical sensors; the Pi 3B hardware layer (`firmware/communication/hal/pi_hal.py`) replays recorded readings and has not been benchmarked on hardware; replays and timings (about `37 µs` per model call in pure Python) are from development machines.
 
 ---
 
@@ -261,14 +261,14 @@ Their outputs stay separate, interpretable signals (`QUALITY_LIMIT_VIOLATION`, `
 | Module 3: 3-Class Classifier (`QualityModel`) | [tinyml/train_quality.py](../tinyml/train_quality.py), [firmware/quality_model.json](../firmware/quality_model.json), [firmware/quality_model.py](../firmware/quality_model.py) | **Implemented & integrated** (frozen baseline) |
 | Experiment 1: Static Multivariate Benchmark | [tinyml/exp1_multivariate_anomaly.py](../tinyml/exp1_multivariate_anomaly.py), [tinyml/exp1_results.txt](../tinyml/exp1_results.txt) | **Archived benchmark** (not used in production) |
 | Unified multi-task node execution (`FlatNode` + `TankNode` merge) | [firmware/aqua_edge.py](../firmware/aqua_edge.py) | **Implemented in software** (`EdgeRuntime` `combined` mode, for resource validation). Deployment keeps them separate: `QualityMonitor` runs on `TankNode`, not on flat nodes |
-| Local buzzer output | `firmware/hal/` | **Pending** |
+| Local buzzer output | `firmware/communication/hal/pi_hal.py` | **Written**, not verified on hardware |
 | Raspberry Pi 3B RAM/CPU/latency hardware benchmark | `firmware/hal/` | **Pending** |
 
 ---
 
 ## 15. Future Work
 
-1. Write the Raspberry Pi 3B dataset-replay HAL, including the buzzer output.
+1. Verify the Raspberry Pi 3B dataset-replay HAL (`firmware/communication/hal/pi_hal.py`), including the buzzer output, on hardware.
 2. Benchmark full runtime RAM, flash, and per-minute CPU time on physical Raspberry Pi 3B hardware using that HAL.
 3. Validate `QualityModel` and `TemporalModel` against physically measured, NTU-calibrated contamination experiments if sensor calibration data becomes available.
 4. Evaluate `TemporalModel` on additional continuous drinking-water utility time series beyond GECCO 2019.
