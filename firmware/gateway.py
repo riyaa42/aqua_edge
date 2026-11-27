@@ -3,7 +3,10 @@ board bridges the radio to the laptop over USB serial.
 
 Same hardware layer as the nodes (hal.now / send / receive). Jobs:
   1. Acknowledge every node message (so nodes can delete it from their SD queue) and log it.
-     Every ACK carries the gateway time ("gt") so node clocks stay in step.
+     Every ACK carries the gateway time ("gt") so node clocks stay in step. The ACK goes out
+     inside the sender's own time slot, after its packets (borrowed from LoRaWAN Class A), so a
+     reply never lands in another node's slot: our gateway is one radio and cannot hear while
+     it sends. hal.slots = {node: (index, count)}, the same table the nodes got at installation.
   2. Building check, the mass balance (Ali et al. [6], supply vs branch flows): water leaving
      the tank minus water used by all flats, per 15-minute summary; above 10% for 2 blocks means
      a leak in the pipes between the tank and the flats (a leak inside a flat is after its
@@ -35,6 +38,8 @@ MASS_BALANCE_INTERVALS = 2     # blocks in a row above threshold before alerting
 MIN_SUPPLY_L = 5.0             # ignore near-empty blocks (division by tiny numbers)
 SILENT_S = 2700                # nothing heard from a node for 3 summary periods = silent
 CLOCK_AHEAD_S = 60             # message time this far ahead of the gateway clock = bad node clock
+ACK_AT_S = 1.5                 # seconds into the sender's slot: its own packets start at 0.2 s
+# ponytail: fits the 2.86 s slot at SF7/SF8; at SF9+ the slot fit check (HANDOVER step 8) must count ACKs
 SEEN_WINDOW = 1000             # counters this far below a node's newest are refused as too old
 # ponytail: 1000 is about 10 days of one node's messages; a longer outage loses its oldest backlog
 
@@ -72,7 +77,8 @@ class Gateway:
             if m["k"] not in ("ALERT", "FLAG", "SUM"):
                 continue
             ack = {"k": "ACK", "n": m["n"], "s": m["s"], "gt": now}       # gt: nodes sync their clock
-            self.hal.send(pack(ack, self.hal.key(m["n"])))
+            slot = (getattr(self.hal, "slots", None) or {}).get(m["n"])
+            self.hal.send(pack(ack, self.hal.key(m["n"])), at_s=slot and slot[0] * 60 / slot[1] + ACK_AT_S)
             self.last_seen[m["n"]] = now
             seen = self.seen.setdefault(m["n"], set())
             if m["s"] in seen or m["s"] <= max(seen, default=0) - SEEN_WINDOW:
@@ -166,7 +172,7 @@ if __name__ == "__main__":
         key = staticmethod(sim_key)
 
         def __init__(self):
-            self.t, self.box, self.seq, self.sent = 0, [], 0, []
+            self.t, self.box, self.seq, self.sent, self.at = 0, [], 0, [], []
 
         def now(self):
             return self.t
@@ -175,8 +181,9 @@ if __name__ == "__main__":
             msgs, self.box = self.box, []
             return msgs
 
-        def send(self, raw):
+        def send(self, raw, at_s=None):
             self.sent.append(raw)
+            self.at.append(at_s)
 
     def block(gw, i, vols):
         """Deliver one 15-minute block of summaries {node: litres}, then step the gateway 15 times."""
@@ -216,12 +223,14 @@ if __name__ == "__main__":
     # even after the gateway restarts; the ACK goes back signed with the node's key
     hal = FakeHAL()
     hal.storage_path = os.path.join(tempfile.mkdtemp(), "GATEWAY.jsonl")
+    hal.slots = {F1: (3, 20)}                                            # F1 owns seconds 9 to 12
     gw = Gateway(hal, [F1], T)
     real = pack({"k": "ALERT", "n": F1, "s": 1, "t": 0, "a": "LEAK_NIGHT_FLOW", "flow": 0.05}, sim_key(F1))
     hal.box = [pack({"k": "ALERT", "n": F1, "s": 2, "t": 0, "a": "LEAK_NIGHT_FLOW"}, b"attacker-guessed"), real]
     gw.step()
     assert len(gw.log) == 1 and sorted(events(gw)) == ["BAD_PACKET", "NEW_ALERT"], events(gw)
     assert unpack(hal.sent[0], sim_key) == {"k": "ACK", "n": F1, "s": 1, "gt": 0}
+    assert hal.at[0] == 3 * 60 / 20 + ACK_AT_S, "ACK must go out in the sender's own slot"
     gw = Gateway(hal, [F1], T)                                           # gateway restarts
     hal.box = [real]                                                     # someone replays the alert
     gw.step()

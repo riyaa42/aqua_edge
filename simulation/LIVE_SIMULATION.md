@@ -20,7 +20,7 @@ The earlier offline test fed every node a pre-made 48-hour file of sensor values
 | Timekeeper | `live/timekeeper.py` | The clock of the whole simulation: steps the water, applies commands, passes messages through the radio model |
 | Nodes and gateway | `live/node.py` | One process (or container) per node, running the real firmware |
 | Firmware | `../firmware/aqua_edge.py`, `gateway.py` | Detection rules, alerts, sending, re-sending, SD card storage, gateway analysis |
-| Radio model | `live/radio.py` | Decides which packets arrive: airtime, collisions, radio cuts, weak links |
+| Radio model | `live/radio.py` | Decides which packets arrive: airtime, collisions, a gateway that cannot hear while it sends, radio cuts, weak links |
 | Control panel | `live/control_panel.py` | Streamlit web page to trigger events and watch alerts |
 | Checker | `live/check_comms.py` | Scores a finished run with PASS/FAIL lines |
 | ns-3 | `ns3/aqua_lora.cc`, `ns3/run_ns3.sh` | Builds the link table for building B and replays live runs |
@@ -59,6 +59,7 @@ The timekeeper waits for every node before moving on (this is called *lockstep*)
 | **TDMA** (own time slot per node) | Summaries and flags: each node sends only in its own 2.86 s slot of every minute |
 | **Guard time** | 0.2 s at the start of each slot, in case a clock is slightly off |
 | **Time sync by piggybacking** | Every gateway ACK carries the gateway's time; nodes reset their clocks from it |
+| **Replies in the sender's slot** (from LoRaWAN Class A) | The gateway sends each ACK 1.5 s into the sender's own slot, after the sender's packets, so a reply never lands in another node's slot |
 | **CSMA/CA** (listen before talk, LoRa CAD) | Alerts: they go out straight away, after checking the channel is free |
 | **Random backoff** | A busy channel means waiting a random 0.1 to 1 s and listening again, up to 5 times |
 | **ARQ** (re-send if no ACK) | Any message not acknowledged within 2 minutes is sent again |
@@ -76,16 +77,18 @@ Real clocks run slightly fast or slow. The DS3231 clock is rated at ±2 ppm, whi
 
 ### Does a node's traffic fit its slot?
 
-At SF7, four back-to-back packets plus the guard time take about 0.8 s, well inside the 2.86 s slot. The worst minute in a real run used 0.91 s. Four packets still fit up to SF9. At SF10 and above they would spill into the next node's slot. Nothing in the firmware prevents that yet (see Next steps).
+At SF7, four back-to-back packets plus the guard time take about 0.8 s, well inside the 2.86 s slot. The worst minute in a real run used 0.91 s. The gateway's replies follow at 1.5 s and end by about 1.7 s at SF7. Packets and replies together fit up to SF8; four packets alone still fit up to SF9. At SF10 and above they would spill into the next node's slot. Nothing in the firmware prevents that yet (see Next steps).
 
 ## 6. Radio model and ns-3
 
 ### Python radio model (`live/radio.py`)
 
 - **Airtime** follows the Semtech LoRa formula (our signed binary packets are 14 to 34 bytes: 46 to 77 ms at SF7, 1.2 to 1.8 s at SF12; the old 75-byte JSON took 133 ms at SF7) [Semtech AN1200.13, for the time-on-air formula].
-- **Collision rule:** two uplinks that overlap in time on the same channel and spreading factor are both lost.
+- **One shared channel.** Our gateway is one SX1276 chip, like the nodes, so it listens on one channel and one spreading factor. Its replies use that same channel.
+- **Collision rule:** two packets that overlap in time at the same spreading factor are both lost. This covers uplinks at the gateway and replies at a node.
+- **Half-duplex rule:** a radio cannot hear while it is sending. An uplink that arrives while the gateway is sending a reply is lost (`half_duplex`), and so is a reply that arrives while its node is sending.
 - **Other results:** a packet sent during a radio cut is marked `radio_cut`. A packet can also be lost at random according to the link's delivery rate (`weak_link`).
-- **Listen before talk:** a CAD listen does not hear a packet that started less than 2 symbols earlier, so two alerts that start at almost the same instant still collide. That is realistic.
+- **Listen before talk:** a CAD listen hears node packets and gateway replies alike. It does not hear a packet that started less than 2 symbols earlier, so two alerts that start at almost the same instant still collide. That is realistic.
 - **Every attempt** is logged to `live/run/tx_log.csv`.
 
 ### ns-3 (`ns3/`)
@@ -93,7 +96,7 @@ At SF7, four back-to-back packets plus the guard time take about 0.8 s, well ins
 ns-3 runs inside Docker, using ns-3.48 with the LoRaWAN module v0.3.7. It does two jobs:
 
 1. **Link table.** It models building B (18 × 18 m, 5 floors, concrete walls, shadowing) with the gateway outside. For each node, it works out the spreading factor needed, the signal strength, and the share of 200 lone test packets that arrive. The result goes in `ns3/link_table.csv`, which the Python radio model reads.
-2. **Replay.** It re-sends every uplink of a live run at the same moment, with the same size and spreading factor. It then reports which packets ns-3 thinks arrive. `check_comms.py` compares this with the Python model, node by node.
+2. **Replay.** It re-sends every uplink and every gateway reply of a live run at the same moment, with the same size and spreading factor. It then reports which packets ns-3 thinks arrive. `check_comms.py` compares this with the Python model, node by node.
 
 This follows the idea of pairing a water simulator with ns-3 [Pagano et al. [5], for co-simulating a water network with ns-3].
 
@@ -110,13 +113,14 @@ The scenario contains:
 | Check | Result |
 |---|---|
 | Uplink attempts that got through while the radio was up | **100.0%** (pass mark 95%; was 89.3% before slots) |
-| Collisions | **2** out of about 4,000 (was 489 before slots; same with the shorter signed packets) |
+| Collisions | **0** out of about 4,000 (was 489 before slots) |
+| Lost because the gateway was sending (half-duplex) | **0** uplinks, **0** replies (31 uplinks and 26 replies lost when replies went out at a random second) |
 | Messages never delivered | **0** |
 | Usual delay with the radio up | 1 minute |
 | Stored alerts delivered after the radio cut | 4 minutes after the radio came back (pass mark 5) |
 | Events detected | **All 6** |
 | Alerts from nodes with no event | 0 |
-| Python radio vs ns-3 replay | **0.0 points** gap (pass mark 5) |
+| Python radio vs ns-3 replay | **0.0 points** gap (pass mark 5), with the gateway's replies on air in both |
 | Link quality (ns-3) | All nodes on SF7, 100% delivery, weakest node B-404 at -97 dBm (about 26 dB to spare) |
 | Docker run | Same PASS results as without Docker |
 
@@ -130,6 +134,7 @@ The scenario contains:
 | About 10% of packets collided | All summaries were sent at random in the same minute | Time slots for summaries, listen before talk for alerts |
 | 90 packets had no result in the ns-3 replay | A node started its next packet the very instant the last one ended | 10 ms turnaround gap between a node's own packets |
 | The replay sent 4 times too many packets | A hidden end-of-line character broke a check | Strip it when reading the log |
+| The radio model let the gateway hear while it sent, and kept its replies on a separate channel | Our gateway is one half-duplex SX1276; replies went out at a random second, sometimes in another node's slot | Modelled the real gateway (31 uplinks and 26 replies lost), then moved replies into the sender's own slot (0 lost) |
 | The ns-3 module would not build | A missing `#include` in the module's source | Added automatically in `ns3/Dockerfile` |
 
 ## 9. How to run
@@ -151,7 +156,7 @@ Self-checks: `python3 live/radio.py` and `python3 webots/run_offline.py`.
 
 - **What is real and what is imitated.** The timing decisions are in the real firmware: slots, listen before talk, ACK time, re-sending and SD storage. The actual CAD listening, the clock setting and the radio itself are only imitated by the simulator.
 - **Hearing assumption.** The radio model assumes every node can hear every other node (one building). Hidden nodes are not checked.
-- **Uplink channels.** Only one uplink channel is used, although IN865 offers 3.
+- **One channel.** Our gateway is a single SX1276, so everything uses one channel. Using IN865's other 2 channels would need a multi-channel gateway chip (SX1302).
 - **Frequency band in ns-3.** ns-3 uses the EU868 frequency, because the module has no Indian band. The physics is the same.
 - **Packet format.** Packets are signed binary (`firmware/packet.py`), about a third of the JSON size. Keys are made from the node name for the simulation; real nodes need a key file on the SD card.
 - **Leak modelling.** Leaks use internal WNTR settings (tested with wntr 1.5.0).

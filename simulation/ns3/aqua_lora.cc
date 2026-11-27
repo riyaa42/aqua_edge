@@ -4,8 +4,9 @@
 //       link table: spreading factor each node needs, signal strength, and how many of
 //       200 lone test packets reach the gateway (no other traffic, so no collisions)
 //   ./ns3 run "aqua_lora --positions=positions.csv --replay=tx_log.csv --out=replay_result.csv"
-//       replay: every uplink of a live run, sent at the same second with the same size and SF,
-//       so ns-3's own collision and capture rules can be compared with live/radio.py
+//       replay: every uplink and gateway ACK of a live run, sent at the same second with the same
+//       size and SF, so ns-3's own collision, capture and half-duplex rules (the gateway cannot
+//       receive while it sends) can be compared with live/radio.py; results are for uplinks
 //
 // Packets go straight to each node's radio (PHY), skipping the LoRaWAN MAC: the firmware
 // already chose the send times (time slots, listen-before-talk) and those are in tx_log.csv.
@@ -58,14 +59,14 @@ Mark(std::string result, Ptr<const Packet> p, uint32_t)
 }
 
 static void
-SendAt(Ptr<LoraPhy> phy, uint32_t bytes, uint8_t sf, uint64_t* id)
+SendAt(Ptr<LoraPhy> phy, uint32_t bytes, uint8_t sf, uint64_t* id, IQPolarity iq)
 {
     LoraTxParameters tx;
     tx.spreadingFactor = sf;
     tx.lowDataRateOptimize = sf >= 11;
     Ptr<Packet> p = Create<Packet>(bytes);
     *id = p->GetUid();
-    phy->Send(p, FREQ_HZ, IQPolarity::UP, tx, TX_DBM);
+    phy->Send(p, FREQ_HZ, iq, tx, TX_DBM);
 }
 
 int
@@ -146,6 +147,7 @@ main(int argc, char* argv[])
     gwPhy->TraceConnectWithoutContext("LostPacketBecauseInterference", MakeBoundCallback(&Mark, std::string("collision")));
     gwPhy->TraceConnectWithoutContext("LostPacketBecauseUnderSensitivity", MakeBoundCallback(&Mark, std::string("weak_link")));
     gwPhy->TraceConnectWithoutContext("LostPacketBecauseNoMoreReceivers", MakeBoundCallback(&Mark, std::string("collision")));
+    gwPhy->TraceConnectWithoutContext("NoReceptionBecauseTransmitting", MakeBoundCallback(&Mark, std::string("half_duplex")));
 
     std::map<std::string, uint32_t> index;
     std::vector<std::vector<uint64_t>> ids(names.size(), std::vector<uint64_t>(TEST_PACKETS));
@@ -167,26 +169,37 @@ main(int argc, char* argv[])
             for (int k = 0; k < TEST_PACKETS; k++)
             {
                 Simulator::Schedule(Seconds(5.0 * (i * TEST_PACKETS + k) + 1), &SendAt, edPhy(i), TEST_BYTES,
-                                    edSf(i), &ids[i][k]);
+                                    edSf(i), &ids[i][k], IQPolarity::UP);
             }
         }
     }
     else
     {
-        auto log = ReadCsv(replay); // t_s,src,dst,kind,seq,bytes,sf,ch,airtime_ms,backoffs,result
+        auto log = ReadCsv(replay); // t_s,src,dst,kind,seq,bytes,sf,airtime_ms,backoffs,result
+        std::vector<uint64_t> downIds;
+        downIds.reserve(log.size());
         for (auto& r : log)
         {
-            if (r[0] == "t_s" || r[2] != "GATEWAY" || r.back() == "radio_cut" || !index.count(r[1]))
+            if (r[0] == "t_s" || r.back() == "radio_cut")
             {
                 continue;
             }
-            rows.push_back(r);
+            if (r[1] == "GATEWAY") // the gateway's ACKs: on air, so the gateway is deaf meanwhile
+            {
+                downIds.push_back(0);
+                Simulator::Schedule(Seconds(std::stod(r[0])), &SendAt, gwPhy, std::stoul(r[5]),
+                                    uint8_t(std::stoi(r[6])), &downIds.back(), IQPolarity::DOWN);
+            }
+            else if (r[2] == "GATEWAY" && index.count(r[1]))
+            {
+                rows.push_back(r);
+            }
         }
         std::vector<uint64_t> order(rows.size());
         for (size_t k = 0; k < rows.size(); k++)
         {
             Simulator::Schedule(Seconds(std::stod(rows[k][0])), &SendAt, edPhy(index[rows[k][1]]),
-                                std::stoul(rows[k][5]), uint8_t(std::stoi(rows[k][6])), &order[k]);
+                                std::stoul(rows[k][5]), uint8_t(std::stoi(rows[k][6])), &order[k], IQPolarity::UP);
         }
         Simulator::Run();
         std::ofstream f(out);

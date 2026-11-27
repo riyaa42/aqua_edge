@@ -20,11 +20,10 @@ from packet import NAMES, pack, peek, sim_key  # noqa: E402
 
 BW_HZ, CODING_RATE, PREAMBLE = 125_000, 1, 8   # LoRa defaults: 125 kHz, 4/5, 8 symbols
 DEFAULT_SF, DEFAULT_PDR = 7, 1.0               # used until ns-3 gives real numbers
-UPLINK_CHANNELS = 1                            # worst case; IN865 has 3 default uplink channels
 CAD_TRIES, CAD_BACKOFF_S = 5, (0.1, 1.0)       # listen-before-talk: retries, random wait between them
 TURNAROUND_S = 0.01                            # a radio's gap between its own back-to-back packets
 CAD_SYMBOLS = 2                                # a CAD listen lasts ~2 symbols; packets newer than that go unheard
-LOG_FIELDS = ["t_s", "src", "dst", "kind", "seq", "bytes", "sf", "ch", "airtime_ms", "backoffs", "result"]
+LOG_FIELDS = ["t_s", "src", "dst", "kind", "seq", "bytes", "sf", "airtime_ms", "backoffs", "result"]
 
 
 def airtime_s(nbytes, sf, bw=BW_HZ):
@@ -64,50 +63,49 @@ class Radio:
     def transmit(self, t, outs):
         """outs: {sender: [(offset_s, msg[, cad]), ...]} sent during minute t. Returns {receiver: [msg]}
         for delivery at the next minute. Star network: nodes talk to the gateway only.
-        Timed packets (time slots) go first; cad=True packets listen before talking."""
+        Timed packets (time slots) go first; cad=True packets listen before talking.
+        Our gateway is one SX1276 like the nodes: one channel and one SF for everyone, uplinks and
+        downlinks on the same channel, and no radio can hear while it is sending (half-duplex)."""
         inbox, tx, cad_wait = {}, [], []
         for src, sends in outs.items():
-            sf = self.link(src)["sf"] if src != GATEWAY else None
             free_at = t
             for offset, msg, cad in sorted(((*s, False)[:3] for s in sends), key=lambda s: s[0]):
                 h = peek(msg)                                   # packets are signed binary (firmware/packet.py)
-                nbytes = len(msg)
                 dsts = [h["n"]] if src == GATEWAY and h["k"] == "ACK" else \
                     [n for n in outs if n != GATEWAY] if src == GATEWAY else [GATEWAY]
-                air = airtime_s(nbytes, sf or max(self.link(d)["sf"] for d in dsts))
-                x = {"src": src, "dsts": dsts, "msg": msg, "h": h, "bytes": nbytes, "air": air, "sf": sf, "backoffs": 0,
-                     "ch": self.rng.randrange(UPLINK_CHANNELS) if src != GATEWAY else "down"}
+                sf = self.link(src)["sf"] if src != GATEWAY else max(self.link(d)["sf"] for d in dsts)
+                x = {"src": src, "dsts": dsts, "msg": msg, "h": h, "bytes": len(msg), "air": airtime_s(len(msg), sf),
+                     "sf": sf, "backoffs": 0}
                 if cad and src != GATEWAY:
                     x["want"] = t + offset
                     cad_wait.append(x)
                     continue
                 x["start"] = max(t + offset, free_at)        # one radio cannot send two packets at once
-                x["end"] = x["start"] + air
+                x["end"] = x["start"] + x["air"]
                 free_at = x["end"] + TURNAROUND_S
                 tx.append(x)
-        ups = [x for x in tx if x["src"] != GATEWAY]
-        # Listen before talk (LoRa CAD): busy if another packet on our channel and SF is on air right
-        # now, or our own radio is sending then; back off and listen again, then send anyway.
+        overlap = lambda a, b: a["start"] < b["end"] and b["start"] < a["end"]
+        # Listen before talk (LoRa CAD): busy if any packet at our SF (a node's or the gateway's) is on
+        # air right now, or our own radio is sending then; back off and listen again, then send anyway.
         # ponytail: every node hears every other node (one building); hidden nodes need node-to-node links from ns-3
-        busy = lambda x, at: any((y["ch"] == x["ch"] and y["sf"] == x["sf"] and y["start"] + CAD_SYMBOLS * 2 ** x["sf"] / BW_HZ <= at < y["end"])
-                                 or (y["src"] == x["src"] and y["start"] < at + x["air"] and at < y["end"]) for y in ups)
+        busy = lambda x, at: any((y["sf"] == x["sf"] and y["start"] + CAD_SYMBOLS * 2 ** x["sf"] / BW_HZ <= at < y["end"])
+                                 or (y["src"] == x["src"] and y["start"] < at + x["air"] and at < y["end"]) for y in tx)
         for x in sorted(cad_wait, key=lambda x: x["want"]):
             at = x["want"]
             while x["backoffs"] < CAD_TRIES and busy(x, at):
                 x["backoffs"] += 1
                 at += self.rng.uniform(*CAD_BACKOFF_S)
             x["start"], x["end"] = at, at + x["air"]
-            ups.append(x)
             tx.append(x)
         for x in tx:
             for d in x["dsts"]:
                 node = d if x["src"] == GATEWAY else x["src"]
-                # ponytail: no capture effect (overlap = both lost), downlinks on their own channel and
-                # gateway half-duplex ignored, overlap across the minute boundary not checked
+                # ponytail: no capture effect (overlap = both lost), overlap across the minute boundary not checked
                 if self.is_cut(node, x["start"]):
                     result = "radio_cut"
-                elif x["src"] != GATEWAY and any(y is not x and y["ch"] == x["ch"] and y["sf"] == x["sf"]
-                                                 and y["start"] < x["end"] and x["start"] < y["end"] for y in ups):
+                elif any(y["src"] == d and overlap(x, y) for y in tx):
+                    result = "half_duplex"                      # the receiver was sending itself
+                elif any(y["src"] not in (x["src"], d) and y["sf"] == x["sf"] and overlap(x, y) for y in tx):
                     result = "collision"
                 elif self.rng.random() >= self.link(node)["pdr"]:
                     result = "weak_link"
@@ -117,7 +115,7 @@ class Radio:
                 if self.writer:
                     self.writer.writerow({"t_s": round(x["start"], 3), "src": x["src"], "dst": d, "kind": x["h"]["k"],
                                           "seq": x["h"]["s"], "bytes": x["bytes"], "sf": self.link(node)["sf"],
-                                          "ch": x["ch"], "airtime_ms": round(1000 * x["air"], 1),
+                                          "airtime_ms": round(1000 * x["air"], 1),
                                           "backoffs": x["backoffs"], "result": result})
         if self.log:
             self.log.flush()
@@ -158,4 +156,19 @@ if __name__ == "__main__":
     # two alerts starting at the very same instant both hear silence and collide: CAD cannot stop that
     got = r.transmit(360, {A: [(10, a, True)], B: [(10, pk({"n": B, "s": 9, "k": "ALERT", "a": "LEAK_NIGHT_FLOW"}), True)], GATEWAY: []})
     assert GATEWAY not in got
+    # Half-duplex gateway on the shared channel (results read back from the log)
+    import tempfile
+    log = os.path.join(tempfile.mkdtemp(), "tx.csv")
+    r = Radio(log)
+    results = lambda: [(row["src"], row["dst"], row["result"]) for row in csv.DictReader(open(log))]
+    # the gateway starts an ACK while A's packet is arriving: the gateway is deaf to A, and the ACK to
+    # B is drowned by A's packet at B
+    r.transmit(0, {A: [(10, m(A, 1))], GATEWAY: [(10.02, ack(B))], B: []})
+    assert results() == [(A, GATEWAY, "half_duplex"), (GATEWAY, B, "collision")], results()
+    # the ACK sent later in A's own slot, after A's packet: both arrive
+    got = r.transmit(60, {A: [(20.2, m(A, 2))], GATEWAY: [(21.5, ack(A))], B: []})
+    assert len(got[GATEWAY]) == 1 and len(got[A]) == 1, results()
+    # an alert listening before talk hears the gateway's ACK and waits
+    got = r.transmit(120, {GATEWAY: [(30, ack(B))], A: [(30.01, a, True)], B: []})
+    assert len(got[GATEWAY]) == 1 and len(got[B]) == 1, results()
     print("radio self-check passed")

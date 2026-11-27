@@ -56,7 +56,7 @@ Every node runs one step **once a minute**: read sensors, learn or check, queue 
 
 Hardware: LoRa module + ESP32 (radio bridge: passes packets between LoRa and USB serial) + laptop. `gateway.py` runs **on the laptop**; it needs a small laptop-side hardware layer that reads and writes packets over the USB serial link.
 
-1. **ACK** every message; the ACK carries the gateway time `gt`, and nodes reset their clocks from it. Duplicates are dropped; each logged message gets the receive time `rx`.
+1. **ACK** every message, 1.5 s into the sender's own time slot (`ACK_AT_S`), so a reply never lands in another node's slot; the ACK carries the gateway time `gt`, and nodes reset their clocks from it. Duplicates are dropped; each logged message gets the receive time `rx`.
 2. **Building check (mass balance)** [Ali et al. [6], for comparing tank supply with the flats' use to find pipe leaks]: per 15-minute block, (water out of tank - sum of all flats) / water out of tank. Above 10% for 2 blocks gives `PIPE_LEAK`. Blocks under 5 L are skipped. Re-arms after 2 normal blocks. Cannot see leaks inside a flat (those pass the flat's meter; the flat's own checks catch them).
 3. **Silent nodes:** nothing heard for 45 minutes gives `NODE_SILENT`; `BALANCE_PAUSED` names the silent nodes (the building check waits rather than guess); `NODE_BACK` when heard again, and the late blocks are then checked from the stored summaries.
 4. **Supply event:** the tank's `SUPPLY_LOW` flag gives `SUPPLY_EVENT` (our own rule, not from a paper).
@@ -69,6 +69,7 @@ Hardware: LoRa module + ESP32 (radio bridge: passes packets between LoRa and USB
 |---|---|
 | Own time slot per node (TDMA) | Summaries: node k sends at second k x 60/21 + 0.2 of the minute (2.86 s slots, 0.2 s guard) |
 | Listen before talk (LoRa CAD) + random backoff 0.1 to 1 s, up to 5 tries | Alerts: sent the same minute they fire |
+| Gateway replies inside the sender's slot (idea from LoRaWAN Class A) | Every ACK: the gateway is one radio and cannot hear while it sends, so its replies stay out of other nodes' slots |
 | Re-send if no ACK within 2 minutes | Everything |
 | Signed binary packets (`firmware/packet.py`) | Every packet, ACKs included: about a third of the JSON size, 4-byte signature (HMAC-SHA256) with a key shared by that node and the gateway. Forged or changed packets are dropped (`BAD_PACKET`); a repeated counter is a duplicate or replay and is not used again, even after a gateway restart. Signed, not encrypted. |
 | Store-and-forward to SD card | Messages wait during radio cuts [Mariadhason et al. [4], for timestamped store-and-forward to SD card] |
@@ -102,7 +103,7 @@ From `sh simulation/check_all.sh` on 11 November 2026: **all checks pass.**
 
 | Scenario | Result |
 |---|---|
-| Standard (48 h): 3.5 h radio cut, small flat leak, runoff, downtake burst, chemical | All events caught; stored alarms delivered 4 min after the radio returned; 100% of attempts through while radio up; 0 lost; 0 false alarms; radio model vs ns-3 gap 0.0 points |
+| Standard (48 h): 3.5 h radio cut, small flat leak, runoff, downtake burst, chemical | All events caught; stored alarms delivered 4 min after the radio returned; 100% of attempts through while radio up; 0 lost; 0 false alarms; radio model vs ns-3 gap 0.0 points. Gateway modelled as one half-duplex radio on the shared channel (2026-11-27): 0 uplinks or replies lost with replies in the sender's slot (31 and 26 lost with replies at a random second) |
 | Flow leaks: small leak in B-203 at 02:00, medium leak in B-402 at 10:00, large burst on downtake B-D1 at 18:00 | Night check 30 min (continuous-flow check also fires at 8 h); too-much check 60 min; tank outflow 15 min and building check 31 min (67% of water missing); 0 false alarms |
 | Flow vs pressure comparison (35 runs, firmware of commit 4f7867a) | Flow: 30/30 leaks caught, 0 false alarms. Pressure: 748 false alarms (mostly the wrong flat), small leaks missed, faster only on medium/large flat leaks (10 min) |
 | Laptop measurement of one flat node | About 0.2 ms of work per simulated minute, about 13 MB for the whole Python process. To be confirmed on a real Pi Zero 2 W |
@@ -155,7 +156,7 @@ Settled on 11 November 2026: nodes on mains power, gateway = LoRa + ESP32 + lapt
 | An alert can collide with the first slot at quarter-hour boundaries | Seen once (B-203 at 02:30:00.2 vs B-401's summary); recovered by the 2-minute re-send. |
 | Retry storm during long radio cuts | About 13,000 re-send attempts in 3.5 h; add backoff. |
 | No location for downtake leaks | Building check says "pipe leak", not which floor. |
-| Simulation-only parts | CAD, radio and clock setting are imitated; ns-3 uses EU868 (no Indian band in the module); one uplink channel modelled (IN865 has 3); keys are made from the node name (`sim_key`); real keys come from a key file on the SD card (`load_keys` in `firmware/packet.py`), used by `firmware/pi_hal.py`. |
+| Simulation-only parts | CAD, radio and clock setting are imitated; ns-3 uses EU868 (no Indian band in the module); one channel (our gateway is one SX1276; IN865's other 2 channels would need a multi-channel gateway chip); keys are made from the node name (`sim_key`); real keys come from a key file on the SD card (`load_keys` in `firmware/packet.py`), used by `firmware/pi_hal.py`. |
 | `matplotlib` is in `simulation/pyproject.toml` but nothing imports it directly | Can probably be removed. |
 
 ---
@@ -168,7 +169,7 @@ Settled on 11 November 2026: nodes on mains power, gateway = LoRa + ESP32 + lapt
 2. **Real Pi Zero 2 W test:** run one node's firmware with simulated readings; measure memory (`/usr/bin/time -v`), processor (`htop`), temperature (`vcgencmd measure_temp`).
 3. **Hardware layers** (same interface as `NetHAL` in `simulation/live/node.py`):
    - `firmware/pi_hal.py` for the nodes: **done (2026-11-27)**, untested on hardware so far. Reads recorded sensor readings row by row from a file (the sensors are simulated), plus the real SX1276 / RFM95 LoRa module with CAD, DS3231 clock, SD card, buzzer and LEDs. Setup and wiring: `firmware/README.md`. Testing on a Raspberry Pi 4 (the Zero 2 W is broken).
-   - A laptop hardware layer for the gateway that exchanges packets with the ESP32 over USB serial, plus a small ESP32 program that bridges LoRa and serial (and sends the ACKs the laptop asks for).
+   - A laptop hardware layer for the gateway that exchanges packets with the ESP32 over USB serial, plus a small ESP32 program that bridges LoRa and serial (and sends the ACKs the laptop asks for, at the second the laptop asks). The laptop layer must give the gateway `hal.slots` (every node's slot, from the installation file) so ACKs go in the sender's slot.
 4. **TinyML model:** done (2026-11-23). Next step there: lab tests with tap water spiked with known runoff or cleaner.
 5. Timestamps (UTC Unix seconds, ISO 8601 logs).
 6. One combined "all silent" alert; re-send backoff.

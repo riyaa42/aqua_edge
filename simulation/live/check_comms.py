@@ -61,9 +61,9 @@ def main():
     up = [r for r in tx if r["dst"] == GATEWAY]
     live = [r for r in up if r["result"] != "radio_cut"]
     ok = sum(r["result"] == "ok" for r in live)
-    by = lambda res: sum(r["result"] == res for r in up)
-    lines.append(f"Uplink attempts: {len(up)} (ok {by('ok')}, collision {by('collision')}, "
-                 f"weak link {by('weak_link')}, radio cut {by('radio_cut')})")
+    results = lambda rows: ", ".join(f"{k.replace('_', ' ')} {sum(r['result'] == k for r in rows)}"
+                                     for k in ("ok", "collision", "half_duplex", "weak_link", "radio_cut"))
+    lines.append(f"Uplink attempts: {len(up)} ({results(up)})")
     waited = [r for r in up if int(r.get("backoffs") or 0) > 0]
     lines.append(f"Listen-before-talk: {len(waited)} packets found the channel busy and waited "
                  f"({sum(int(r['backoffs']) for r in waited)} back-offs, {sum(r['kind'] == 'ALERT' for r in waited)} of them alerts)")
@@ -76,8 +76,8 @@ def main():
     mark(ok / max(len(live), 1) >= MIN_ATTEMPT_OK,
          f"attempts that got through while radio up: {100 * ok / max(len(live), 1):.1f}% "
          f"(worst node {worst_node} {100 * w_ok / w_n:.1f}%), pass mark {100 * MIN_ATTEMPT_OK:.0f}%")
-    down = [r for r in tx if r["src"] == GATEWAY and r["result"] != "radio_cut"]
-    lines.append(f"Downlinks (ACK, supply) while radio up: {sum(r['result'] == 'ok' for r in down)} of {len(down)} delivered")
+    down = [r for r in tx if r["src"] == GATEWAY]
+    lines.append(f"Downlinks (ACKs): {len(down)} ({results(down)})")
 
     # 2. Messages: created vs delivered (store-and-forward)
     sent = {(r["src"], int(r["seq"])) for r in up}

@@ -37,6 +37,8 @@ class NetHAL:
         self.rng = random.Random(zlib.crc32(name.encode()))
         self.slot = slot
         self.drift = self.rng.uniform(-CLOCK_PPM, CLOCK_PPM) * 1e-6     # this node's clock runs fast or slow
+        if name == "GATEWAY":
+            self.drift = 0.0                 # the gateway's clock is the one every node sets itself by
         self.synced_at = 0.0
         self.colour = "green"
 
@@ -79,6 +81,8 @@ def main(name):
     conn.send(name)
     setup = conn.recv()                      # {"flats": [...], "tank": "B-TANK"}
     hal = NetHAL(name, setup["slots"].get(name))
+    if name == "GATEWAY":
+        hal.slots = setup["slots"]           # the gateway answers each node inside that node's slot
     if name == "GATEWAY":
         fw = Gateway(hal, setup["flats"], setup["tank"])
     else:
