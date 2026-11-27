@@ -458,10 +458,10 @@ function buildFloors(nodes) {
     floors.appendChild(row);
   }
 }
-/* Building cutaway. Real layout: square building 24 m a side, 4 flats per floor (01 front left, then
+/* Building cutaway. Real layout: square building 18 m a side (same box as the ns-3 radio model, ns3/aqua_lora.cc), 4 flats per floor (01 front left, then
    round: 02, 03, 04), floors 3 m, each node 1 m above its floor (drawn on the floor), tank node on the roof tank, gateway
    outside (positions from ns3/positions.csv). Up is drawn 2.6 times taller so the floors don't overlap; the pipes run up a central shaft. */
-const W = 12, FL = {G: 0, 1: 1, 2: 2, 3: 3, 4: 4}, CORNER = [[-6, -6], [6, -6], [6, 6], [-6, 6]];
+const W = 9, FL = {G: 0, 1: 1, 2: 2, 3: 3, 4: 4}, CORNER = [[-6, -6], [6, -6], [6, 6], [-6, 6]];
 const DOWN = [-0.6, 0.6], RISE = [0.6, -0.6], TANK = {x: 0, y: 0, z: 16, h: 2, r: 1.5}, GW = [16, -14], PUMP = [-7, -15];
 // Seen from the front, turned a little to the right, so all four flats of a floor stay apart
 const P = (x, y, z) => [x * 0.95 - y * 0.35, -(x * 0.12 + y * 0.3) - z * 2.6];
@@ -500,7 +500,7 @@ function buildDiagram(flats) {
     g += box("dg-slab", -W, W, -W, W, z);
     flats.filter(n => FL[n[2]] === f).forEach(n => {
       const [cx, cy] = CORNER[+n.slice(-1) - 1];
-      g += box(`dg-room`, cx - 5.6, cx + 5.6, cy - 5.6, cy + 5.6, z + .02).replace("<polygon", `<polygon data-node="${n}"`);
+      g += box(`dg-room`, Math.min(0, cx * 1.5) + .15, Math.max(0, cx * 1.5) - .15, Math.min(0, cy * 1.5) + .15, Math.max(0, cy * 1.5) - .15, z + .02).replace("<polygon", `<polygon data-node="${n}"`);
       g += path("dg-pipe branch", [[...DOWN, zn], [cx, 0, zn], [cx, cy, zn]]);
     });
     g += wall("dg-wall inner", [0, -W], [0, W], z, z + 3) + wall("dg-wall inner", [-W, 0], [W, 0], z, z + 3);
