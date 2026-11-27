@@ -7,10 +7,11 @@ simulation. Standard library only.
 One SX1278 listens on one channel and one spreading factor at a time and cannot receive while
 it sends, so the whole building shares one channel.
 
-Power and transmit-time limits: from secondary summaries of India's 2022 licence exemption for
-433.05-434.79 MHz, NOT checked against the official gazette. TX_DBM is the module's output
-setting: radiated power (ERP) also depends on antenna gain and cable loss, and equipment
-approval may apply. Check all of this before transmitting.
+Power and transmit-time limits follow India's WPC G.S.R. 347(E) (May 9, 2022) licence
+exemption for 433.05-434.79 MHz: 10 mW ERP (10 dBm) max, 10% duty cycle, no 10 kHz
+bandwidth cap (125 kHz LoRa allowed), and integral/built-in antenna requirement. TX_DBM is
+the module's output setting: radiated power (ERP) also depends on antenna gain and cable
+loss, and WPC Equipment Type Approval (ETA) applies to commercial/imported hardware.
 """
 import math
 from collections import deque

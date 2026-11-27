@@ -459,6 +459,34 @@ def test_old_seen_file_is_still_read():
     assert gw._is_seen_and_record("B-401", 8) and not gw._is_seen_and_record("B-401", 6)
 
 
+def test_state_versioning_and_commands_disabled():
+    td = tempfile.mkdtemp(prefix="gw_ver_")
+    hal = TestHAL(os.path.join(td, "seen.json"))
+    hal.storage_path = os.path.join(td, "gw.jsonl")
+    gw = Gateway(hal, FLATS, TANK)
+    gw.decide(1000, "PIPE_LEAK", suspected_floor="3", error_pct=20.0)
+    gw.decide(1010, "SUPPLY_EVENT", inflow_lps=0.0)
+    # Default Gateway (enable_commands=False) does not queue CMD packets in outbox
+    assert gw.outbox == {}
+    gw.save_state()
+    with open(gw.state_path) as f:
+        saved = json.load(f)
+    assert saved["version"] == 1
+    assert "analytics" in saved
+
+    # Older unversioned state file lacking analytics / BY_BLOCK still loads cleanly
+    legacy_path = os.path.join(td, "legacy.jsonl")
+    legacy_state_path = os.path.join(td, "legacy_state.json")
+    with open(legacy_state_path, "w") as f:
+        json.dump({"seen_floor": {"B-401": 3}, "seen_above": {"B-401": [5]}}, f)
+    hal2 = TestHAL(os.path.join(td, "legacy_seen.json"))
+    hal2.storage_path = legacy_path
+    gw2 = Gateway(hal2, FLATS, TANK)
+    assert gw2.resumed is True
+    assert gw2.seen_floor["B-401"] == 3
+    assert gw2._is_seen_and_record("B-401", 5) is True
+
+
 def main():
     test_lifecycle_and_autoclear()
     test_mass_balance_rearm_and_pipe_correlation()
@@ -472,6 +500,7 @@ def main():
     test_possible_cause_follows_newest_alert()
     test_restart_restores_state()
     test_old_seen_file_is_still_read()
+    test_state_versioning_and_commands_disabled()
     print("GATEWAY ANALYTICS TESTS PASSED")
 
 

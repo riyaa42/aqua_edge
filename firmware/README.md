@@ -22,7 +22,7 @@ Water-quality model, data and test results: [`../tinyml/README.md`](../tinyml/RE
 
 ## Radio and instant delivery
 
-**One SX1278 per device.** It listens on one channel and one spreading factor at a time and cannot receive while sending, so the whole building shares 433.175 MHz, SF7, 125 kHz, CR 4/5, 8-symbol preamble (`lora433.py`). Power is set to 10 dBm, and each device limits itself to 10% of an hour on air (summaries pause at 8%). **These two limits come from secondary summaries of India's 2022 licence exemption for 433.05-434.79 MHz and are not checked against the official gazette.** A 10 dBm module setting is not automatically 10 mW radiated power (antenna gain and cable loss count), and equipment approval may apply.
+**One SX1278 per device.** It listens on one channel and one spreading factor at a time and cannot receive while sending, so the whole building shares 433.175 MHz, SF7, 125 kHz, CR 4/5, 8-symbol preamble (`lora433.py`). Power is set to 10 dBm, and each device limits itself to 10% of an hour on air (summaries pause at 8%), matching India's WPC **G.S.R. 347(E) (May 9, 2022)** licence exemption for 433.05–434.79 MHz (`10 mW ERP` max, `10%` duty cycle, no 10 kHz bandwidth cap, integral antenna). A 10 dBm module setting is not automatically 10 mW radiated power (antenna gain and cable loss count), and WPC Equipment Type Approval (ETA) applies to commercial/imported hardware.
 
 **Timing.** A node has two entry points: `step()` once a minute (sensors and checks) and `radio_poll()`, to be called when a packet arrives and at the time it returns. The gateway's `step()` works the same way.
 
@@ -36,9 +36,14 @@ Water-quality model, data and test results: [`../tinyml/README.md`](../tinyml/RE
 
 These cover delivery after a decision. Detection windows (for example 3 h of continuous flow, or two 15-minute blocks for a pipe leak) are unchanged, and repeated packet loss can still delay a message. **None of this timing has been measured on real radios or in a simulation with airtime and collisions:** the tests use a fake radio with no airtime, and the live simulation has not been updated for it.
 
-## Gateway alerts sent to nodes
+## Hybrid Physical Pi 3B + Dockerized Multi-Node Setup
 
-Nodes act by themselves on what they can detect. What needs several nodes' data, the gateway sends back as a signed command (`CMD`), repeated until the node confirms it (`GOT`) and kept across gateway restarts.
+- **1 physical node** (`Raspberry Pi 3B` + `SX1278 433 MHz` + `RTC` + `microSD` + `buzzer`) streams one node's dataset/WNTR rows and transmits signed `packet.py` frames over LoRa to the **SX1278 → ESP8266 → USB serial** laptop gateway.
+- **20 virtual nodes** run in **Docker containers** using the same `EdgeRuntime` and `packet.py` framing, feeding into the same `Gateway` instance so physical and virtual nodes are indistinguishable to `Gateway` and `GatewayAnalytics` (and from there to the dashboard).
+
+## Gateway alerts sent to nodes (opt-in)
+
+Nodes act by themselves on local anomalies (triggering their own buzzer/LED immediately without LoRa or Internet) and buffer messages for the gateway. Gateway cross-node conclusions (`PIPE_LEAK`, `SUPPLY_EVENT`, `LEAK_TANK_DRAIN`) go to the dashboard via `Gateway.snapshot()`; `CMD` dispatch back to nodes is disabled by default (`enable_commands=False`) and can be enabled if needed.
 
 | Gateway result | Sent to |
 |---|---|
