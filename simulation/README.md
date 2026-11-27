@@ -31,3 +31,7 @@ All of them plus both live scenarios in one go: `sh check_all.sh` (about 4 minut
 ## Results so far (standard scenario)
 
 100% of uplink attempts got through while the radio was up (2 collisions out of about 4,066), 0 messages lost, all 6 planted events detected, and ns-3 and the Python radio model agree on every node (gap 0.0 points). All nodes reach the gateway on SF7 with at least 26 dB to spare.
+
+## NS-3 Scope Note (`ns3/aqua_lora.cc`)
+
+`simulation/ns3/aqua_lora.cc` is a **custom LoRa PHY replay** over India's 3 IN865 channels (`865.0625, 865.4025, 865.985 MHz`), **not** a complete LoRaWAN Class A/B/C MAC simulation (`EndDeviceLorawanMac::Send` and `gwPhy->SetReceiveOkCallback` are bypassed). This matches the project's firmware architecture, which uses plain LoRa with custom TDMA summary slots, listen-before-talk (CAD) for alerts, and signed binary packets (`firmware/packet.py`) rather than LoRaWAN join/ADR.
