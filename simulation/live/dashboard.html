@@ -35,14 +35,14 @@ p { margin: 0; }
 button, select, input { font: inherit; color: inherit; }
 :focus-visible { outline: 3px solid var(--action); outline-offset: 3px; }
 
-.page { max-width: 1280px; margin: 0 auto; padding: 24px 24px 48px; }
+.page { max-width: 2400px; margin: 0 auto; padding: 14px 24px 48px; }
 .clay { background: var(--clay); border-radius: 32px; box-shadow: var(--clay-shadow); }
 
 /* Top bar */
-.top { display: flex; flex-wrap: wrap; align-items: center; gap: 16px 24px; margin-bottom: 20px; }
+.top { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; margin-bottom: 16px; }
 .brand { display: flex; align-items: center; gap: 14px; margin-right: auto; }
 .brand svg { width: 46px; height: 46px; filter: drop-shadow(5px 6px 8px rgba(var(--shade), .25)); }
-.brand h1 { font-size: 2rem; line-height: 1; }
+.brand h1 { font-size: 1.7rem; line-height: 1; }
 .brand p { color: var(--ink-soft); font-size: .95rem; }
 .clock { display: flex; align-items: center; gap: 12px; padding: 10px 12px 10px 22px; border-radius: 999px; }
 .clock #clock { font-family: var(--display); font-size: 1.4rem; font-weight: 500; font-variant-numeric: tabular-nums; }
@@ -62,17 +62,25 @@ button, select, input { font: inherit; color: inherit; }
 .btn.quiet { background: transparent; box-shadow: none; color: var(--ink-soft); text-decoration: underline; padding: 6px 4px; }
 select { border: 0; border-radius: 16px; padding: 10px 14px; background: var(--slab); box-shadow: var(--well-shadow); cursor: pointer; }
 
-.tabs { display: inline-flex; gap: 6px; padding: 6px; border-radius: 22px; background: var(--slab); box-shadow: var(--well-shadow); margin-bottom: 22px; }
-.tabs button { border: 0; background: transparent; padding: 9px 22px; border-radius: 16px; font-weight: 800; cursor: pointer; color: var(--ink-soft); }
-.tabs button[aria-selected="true"] { background: var(--clay); color: var(--ink); box-shadow: 4px 5px 10px rgba(var(--shade), .18), inset 3px 4px 8px rgba(255, 255, 255, .9); }
+/* Radio summary in the top bar: jumps to the details at the bottom */
+.radio-strip { display: flex; flex-wrap: wrap; max-width: 100%; gap: 6px; padding: 5px; border-radius: 20px; background: var(--slab); box-shadow: var(--well-shadow); color: inherit; text-decoration: none; }
+.radio-strip span { display: grid; padding: 3px 12px; border-radius: 15px; background: var(--clay); line-height: 1.2; }
+.radio-strip small { font-size: .72rem; font-weight: 800; color: var(--ink-soft); white-space: nowrap; }
+.radio-strip b { font-family: var(--display); font-weight: 600; font-variant-numeric: tabular-nums; }
 
-/* Building tab layout */
-.grid { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(340px, 1fr); gap: 28px; align-items: start; }
-.side { display: grid; gap: 28px; }
-.lower { display: grid; grid-template-columns: 1.4fr 1fr 1fr; gap: 28px; margin-top: 28px; }
-.card { padding: 26px 28px; }
-.card h2 { margin-bottom: 6px; }
-.hint { color: var(--ink-soft); font-size: .95rem; max-width: 60ch; }
+/* First screen: three columns that fill the window, long lists scroll inside their own card */
+.screen { height: calc(100vh - 14px); min-height: 640px; display: flex; flex-direction: column; }
+.cockpit { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(360px, .85fr) minmax(400px, 1fr); gap: 22px; padding-bottom: 14px; }
+.col { display: flex; flex-direction: column; gap: 22px; min-height: 0; min-width: 0; }
+.col > * { flex: none; }
+.col > .grow { flex: 1 1 0; min-height: 150px; display: flex; flex-direction: column; }
+.card { padding: 20px 22px; }
+.card h2 { margin-bottom: 6px; font-size: 1.2rem; }
+.card-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.hint { color: var(--ink-soft); font-size: .92rem; max-width: 62ch; }
+.below { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; margin-top: 28px; }
+.below .sensors { grid-column: 1 / -1; }
+.below h3 { font-size: 1.05rem; margin: 20px 0 4px; }
 
 /* The clay building: the one loud thing on the page */
 .building { padding: 22px 22px 26px; border-radius: 44px 44px 30px 30px; }
@@ -99,15 +107,19 @@ select { border: 0; border-radius: 16px; padding: 10px 14px; background: var(--s
 .drip { position: absolute; right: 8px; top: 7px; width: 14px; height: 19px; }
 .drip svg { width: 100%; height: 100%; display: block; animation: drip 1.6s ease-in infinite; }
 @keyframes drip { 0% { transform: translateY(-3px) scale(.75); opacity: .55; } 40% { opacity: 1; } 100% { transform: translateY(5px) scale(1); opacity: .55; } }
-.legend { list-style: none; padding: 0; margin: 18px 4px 0; display: flex; flex-wrap: wrap; gap: 8px 18px; font-size: .88rem; color: var(--ink-soft); }
+.legend { list-style: none; padding: 0; margin: 12px 0 0; display: grid; gap: 10px; font-size: .93rem; }
 .legend li { display: flex; align-items: center; gap: 8px; }
 .dot { width: 14px; height: 14px; border-radius: 50%; flex: none; background: var(--calm); box-shadow: inset -2px -3px 4px rgba(var(--shade), .2), inset 2px 2px 3px rgba(255, 255, 255, .6); }
 .dot.alert { background: var(--alert); } .dot.silent { background: var(--watch); } .dot.action { background: var(--action); }
 .legend svg { width: 12px; height: 16px; }
 
 /* Building cutaway: drawn from the real node positions (ns3/positions.csv), walls see-through */
-.diagram { padding: 14px 10px 6px; border-radius: 40px; }
-.diagram svg { width: 100%; height: auto; display: block; overflow: visible; }
+.diagram { flex: 1 1 0 !important; min-height: 0; display: flex; flex-direction: column; padding: 12px 12px 10px; border-radius: 36px; }
+.diagram svg { flex: 1; min-height: 0; width: 100%; height: 100%; display: block; overflow: visible; }
+.key { list-style: none; padding: 0; margin: 6px 6px 0; display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: .85rem; color: var(--ink-soft); font-weight: 700; }
+.key li { display: flex; align-items: center; gap: 6px; }
+.key svg { width: 11px; height: 15px; flex: none; }
+.key a { color: var(--action-deep); }
 .dg-ground { fill: #c9d8e2; fill-opacity: .55; stroke: rgba(33, 59, 79, .12); stroke-width: .1; }
 .dg-wall { fill: #fff; fill-opacity: .14; stroke: rgba(33, 59, 79, .3); stroke-width: .07; stroke-linejoin: round; pointer-events: none; }
 .dg-wall.back { fill-opacity: .38; }
@@ -156,49 +168,53 @@ select { border: 0; border-radius: 16px; padding: 10px 14px; background: var(--s
 .tank.alert { background: var(--alert); }
 
 /* What each node measures */
-.sensors { margin-top: 24px; padding: 22px 26px; }
-.sensors ul { list-style: none; padding: 0; margin: 12px 0 0; display: grid; gap: 12px; }
+.sensors ul { list-style: none; padding: 0; margin: 12px 0 0; display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
 .sensors li { display: grid; grid-template-columns: 112px 1fr; gap: 14px; padding: 12px 14px; border-radius: 20px; background: var(--slab); box-shadow: var(--well-shadow); }
 .sensors b { font-family: var(--display); font-weight: 600; }
 .sensors b small { display: block; font-family: var(--body); font-weight: 700; color: var(--ink-soft); font-size: .8rem; }
 .sensors p { font-size: .92rem; }
 .sensors p span { color: var(--ink-soft); }
-@media (max-width: 520px) { .sensors li { grid-template-columns: 1fr; gap: 4px; } }
+.sensors li { align-content: start; }
 
 /* Alarm: problems the gateway knows about, until they are fixed */
-.alarm { margin: 0 0 24px; padding: 20px 24px; border-radius: 30px; background: #fbe3e6;
+.alarm { flex: 0 1 auto !important; max-height: 40%; min-height: 0; display: flex; flex-direction: column; padding: 18px 22px; border-radius: 30px; background: #fbe3e6;
   box-shadow: 12px 14px 28px rgba(194, 68, 89, .22), inset -6px -8px 16px rgba(194, 68, 89, .14), inset 6px 8px 16px rgba(255, 255, 255, .8); }
 .alarm-head { display: flex; align-items: center; gap: 14px; }
-.alarm-head svg { width: 38px; height: 38px; flex: none; }
+.alarm-head svg { width: 34px; height: 34px; flex: none; fill: #e0475f; }
+.alarm-head h2 { font-size: 1.25rem; }
+.alarm.calm { background: var(--clay); box-shadow: var(--clay-shadow); }
+.alarm.calm .alarm-head svg { fill: var(--calm-deep); }
+.alarm.calm li { display: block; background: var(--slab); box-shadow: var(--well-shadow); color: var(--ink-soft); font-size: .92rem; }
 .alarm.fresh .alarm-head svg { animation: ring .5s ease-in-out 4; transform-origin: 50% 10%; }
 @keyframes ring { 25% { transform: rotate(14deg); } 75% { transform: rotate(-14deg); } }
-.alarm ul { list-style: none; padding: 0; margin: 12px 0 0; display: grid; gap: 10px; }
+.alarm ul { list-style: none; padding: 0 4px 2px 0; margin: 12px 0 0; display: grid; gap: 10px; overflow: auto; min-height: 0; }
 .alarm li { display: grid; grid-template-columns: 1fr auto; gap: 4px 16px; padding: 12px 16px; border-radius: 20px; background: rgba(255, 255, 255, .6); box-shadow: inset 3px 4px 8px rgba(194, 68, 89, .1); }
 .alarm li b { font-weight: 800; }
 .alarm li p { grid-column: 1; color: #6b3440; font-size: .93rem; }
 .alarm li time { grid-row: 1 / span 2; grid-column: 2; align-self: center; text-align: right; font-size: .85rem; font-weight: 700; color: #6b3440; }
-@media (max-width: 520px) { .alarm li { grid-template-columns: 1fr; } .alarm li time { grid-row: auto; grid-column: 1; text-align: left; } }
+@media (max-width: 1500px) { .alarm li { grid-template-columns: 1fr; } .alarm li time { grid-row: auto; grid-column: 1; text-align: left; } .alarm li time br { display: none; } }
 
 /* Leak test */
-.picked { display: flex; align-items: baseline; gap: 10px; margin: 18px 0 14px; }
-.picked strong { font-family: var(--display); font-size: 2.6rem; font-weight: 600; line-height: 1; }
+.picked { display: flex; align-items: baseline; gap: 10px; margin: 14px 0 4px; }
+.picked strong { font-family: var(--display); font-size: 2rem; font-weight: 600; line-height: 1.1; }
+#picked-info { margin-bottom: 12px; }
 .picked span { color: var(--ink-soft); font-weight: 700; }
-.sizes { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+.sizes { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
 .sizes button[aria-pressed="true"], .seg button[aria-pressed="true"] { background: var(--action); color: #fff;
   box-shadow: 5px 6px 12px rgba(74, 95, 196, .3), inset -3px -4px 8px rgba(30, 40, 110, .25), inset 3px 4px 8px rgba(255, 255, 255, .35); }
 input[type=range] { width: 100%; appearance: none; height: 16px; border-radius: 999px; background: var(--slab); box-shadow: var(--well-shadow); margin: 6px 0 8px; }
 input[type=range]::-webkit-slider-thumb { appearance: none; width: 30px; height: 30px; border-radius: 50%; background: var(--action); cursor: pointer;
   box-shadow: 4px 5px 10px rgba(74, 95, 196, .4), inset -3px -4px 6px rgba(30, 40, 110, .3), inset 3px 3px 6px rgba(255, 255, 255, .45); }
 input[type=range]::-moz-range-thumb { width: 30px; height: 30px; border: 0; border-radius: 50%; background: var(--action); cursor: pointer; }
-.lps { font-weight: 700; margin-bottom: 18px; }
+.lps { font-weight: 700; margin-bottom: 12px; }
 .lps b { font-family: var(--display); font-size: 1.25rem; font-weight: 600; }
-.seg { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 22px; }
+.seg { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 12px; }
 .learning { margin-top: 16px; }
 .bar { height: 16px; border-radius: 999px; background: var(--slab); box-shadow: var(--well-shadow); overflow: hidden; margin-top: 10px; }
 .bar i { display: block; height: 100%; border-radius: 999px; background: var(--calm); box-shadow: inset 0 4px 6px rgba(255, 255, 255, .5); transition: width .8s; }
 
 /* Leaks in this run. Each one's three moments are a real sequence, so they are numbered */
-.leaks { list-style: none; padding: 0; margin: 16px 0 0; display: grid; gap: 14px; max-height: 560px; overflow: auto; padding-right: 4px; }
+.leaks { list-style: none; padding: 0 4px 4px 0; margin: 12px 0 0; display: grid; align-content: start; gap: 14px; flex: 1; min-height: 0; overflow: auto; }
 .leak { padding: 14px 16px; border-radius: 24px; background: var(--slab); box-shadow: var(--well-shadow); }
 .leak-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 14px; }
 .leak-head .what { font-family: var(--display); font-weight: 600; font-size: 1.15rem; }
@@ -206,7 +222,9 @@ input[type=range]::-moz-range-thumb { width: 30px; height: 30px; border: 0; bord
 .leak-head .btn { padding: 8px 16px; border-radius: 16px; }
 .leak-status { display: flex; align-items: center; gap: 10px; }
 .chip.on { background: var(--alert); color: var(--ink); box-shadow: inset -2px -3px 6px rgba(var(--shade), .15), inset 2px 3px 6px rgba(255, 255, 255, .5); }
-.moments { list-style: none; padding: 0; margin: 12px 0 0; display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.leaks { container-type: inline-size; overflow-x: hidden; }
+.moments { list-style: none; padding: 0; margin: 12px 0 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+@container (max-width: 470px) { .moments { grid-template-columns: 1fr; } }
 .moments li { display: grid; grid-template-columns: 30px 1fr; gap: 10px; align-items: start; padding: 10px 12px; border-radius: 18px; background: var(--clay);
   box-shadow: 4px 5px 10px rgba(var(--shade), .12), inset 3px 4px 8px rgba(255, 255, 255, .9); font-size: .88rem; line-height: 1.35; }
 .moments .n { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; font-family: var(--display); font-weight: 600; background: var(--slab); box-shadow: var(--well-shadow); }
@@ -217,18 +235,22 @@ input[type=range]::-moz-range-thumb { width: 30px; height: 30px; border: 0; bord
 .moments span span { color: var(--ink-soft); font-weight: 700; }
 
 /* Feed, tank, other events */
-.feed { list-style: none; padding: 0; margin: 14px 0 0; display: grid; gap: 10px; max-height: 340px; overflow: auto; padding-right: 6px; }
-.feed li { display: grid; grid-template-columns: 14px 1fr auto; gap: 12px; align-items: center; padding: 10px 14px; border-radius: 18px; background: var(--slab); box-shadow: var(--well-shadow); }
+.feed { list-style: none; padding: 0 6px 4px 0; margin: 12px 0 0; display: grid; align-content: start; gap: 8px; flex: 1; min-height: 0; overflow: auto; }
+.feed li { display: grid; grid-template-columns: 14px 1fr auto; gap: 12px; align-items: center; padding: 8px 14px; font-size: .93rem; border-radius: 18px; background: var(--slab); box-shadow: var(--well-shadow); }
 .feed time { color: var(--ink-soft); font-size: .85rem; font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .empty { color: var(--ink-soft); padding: 14px 4px; }
-.big { font-family: var(--display); font-size: 2.4rem; font-weight: 600; line-height: 1.1; margin-top: 10px; }
+.big { font-family: var(--display); font-size: 2.1rem; font-weight: 600; line-height: 1.1; }
+.tank-row { display: grid; grid-template-columns: auto 1fr; gap: 18px; align-items: center; margin: 4px 0 6px; }
+.events { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
+.events .btn { padding: 9px 16px; border-radius: 16px; }
 .big small { font-size: 1rem; color: var(--ink-soft); }
-.spark { width: 100%; height: 70px; margin: 8px 0 10px; }
+.spark { width: 100%; height: 56px; }
 .stack { display: grid; gap: 12px; margin-top: 14px; justify-items: start; }
 
-/* Radio tab */
-.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 24px; }
-.tile { padding: 22px 24px; border-radius: 28px; }
+/* Radio details */
+.tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 14px; }
+.tile { padding: 12px 16px; border-radius: 20px; background: var(--slab); box-shadow: var(--well-shadow); }
+.tile .big { font-size: 1.7rem; }
 .tile p { color: var(--ink-soft); font-weight: 700; font-size: .92rem; }
 .tile .big { margin-top: 4px; }
 .nodes { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px 28px; margin-top: 16px; }
@@ -239,7 +261,20 @@ input[type=range]::-moz-range-thumb { width: 30px; height: 30px; border: 0; bord
 .toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); padding: 12px 22px; border-radius: 20px; font-weight: 800; background: var(--ink); color: #fff; opacity: 0; transition: opacity .3s; pointer-events: none; }
 .toast.show { opacity: 1; }
 
-@media (max-width: 1020px) { .grid, .lower { grid-template-columns: 1fr; } }
+/* Smaller or shorter screens: the page scrolls normally instead of fitting the window */
+@media (max-width: 1250px), (max-height: 820px) {
+  .screen { height: auto; min-height: 0; }
+  .cockpit { grid-template-columns: minmax(0, 1fr) minmax(340px, 1fr); }
+  .cockpit > .col:last-child { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr; align-items: start; }
+  .cockpit > .col:last-child > .alarm { grid-column: 1 / -1; max-height: none; }
+  .diagram svg { height: auto; flex: none; }
+  .leaks, .feed { max-height: 520px; }
+}
+@media (max-width: 760px) {
+  .radio-strip span { flex: 1; padding: 3px 8px; }
+  .cockpit, .cockpit > .col:last-child, .below, .sensors ul { grid-template-columns: 1fr; }
+  .tiles { grid-template-columns: 1fr 1fr; }
+}
 @media (max-width: 520px) {
   .page { padding: 16px 16px 40px; }
   .card { padding: 22px 20px; }
@@ -253,12 +288,18 @@ input[type=range]::-moz-range-thumb { width: 30px; height: 30px; border: 0; bord
 </head>
 <body>
 <div class="page">
+ <div class="screen">
   <header class="top">
     <div class="brand">
       <svg viewBox="0 0 48 48" aria-hidden="true"><path d="M24 4C24 4 9 21 9 30a15 15 0 0 0 30 0C39 21 24 4 24 4z" fill="#8ccbe8"/><ellipse cx="18" cy="29" rx="4" ry="6" fill="#fff" opacity=".55"/></svg>
       <div><h1>Building B</h1><p>Aqua Edge water monitor</p></div>
     </div>
     <div class="clock clay"><span id="clock">No simulation</span><span id="mode" class="chip">Stopped</span></div>
+    <a class="radio-strip" href="#radio" title="Radio details at the bottom of the page">
+      <span><small>Radio: through first time</small><b id="rs-ok">-</b></span>
+      <span><small>Lost to collisions</small><b id="rs-col">-</b></span>
+      <span><small>Usual delay</small><b id="rs-delay">-</b></span>
+    </a>
     <div class="controls">
       <select id="speed" aria-label="Simulation speed">
         <option value="0">As fast as possible</option>
@@ -273,138 +314,144 @@ input[type=range]::-moz-range-thumb { width: 30px; height: 30px; border: 0; bord
     </div>
   </header>
 
-  <section class="alarm" id="alarm" role="alert" hidden>
-    <div class="alarm-head">
-      <svg viewBox="0 0 40 40" aria-hidden="true"><path d="M20 4c-6 0-10 4.6-10 10.5V22l-3.5 5.5h27L30 22v-7.5C30 8.6 26 4 20 4z" fill="#e0475f"/><circle cx="20" cy="32.5" r="3.5" fill="#c24459"/><ellipse cx="15.5" cy="12" rx="2.2" ry="4" fill="#fff" opacity=".45"/></svg>
-      <h2 id="alarm-title">Needs attention</h2>
-    </div>
-    <ul id="alarm-list"></ul>
-  </section>
-
-  <nav class="tabs" role="tablist">
-    <button role="tab" aria-selected="true" data-tab="building">Building</button>
-    <button role="tab" aria-selected="false" data-tab="radio">Radio</button>
-  </nav>
-
-  <main id="tab-building">
-    <div class="grid">
-      <section>
-        <div class="diagram clay only-wide">
-          <svg id="dg" aria-label="Building B cut open: click a flat, or a white dot on the down pipe, to pick where a leak goes"></svg>
-        </div>
-        <div class="building clay only-narrow" id="building" aria-label="Building B, pick a flat">
-          <div class="roof">
-            <div class="tank" id="tank-tile" title="Water tank on the roof">
-              <div class="tank-window"><div class="tank-water" id="tank-water"></div></div>
-              <div class="tank-label" id="tank-label">Tank<small>no report yet</small></div>
-            </div>
-          </div>
-          <div id="floors"></div>
-        </div>
-        <ul class="legend">
+  <main class="cockpit">
+    <section class="col">
+      <div class="diagram clay only-wide">
+        <svg id="dg" aria-label="Building B cut open: click a node label, or a white dot on the down pipe, to pick where a leak goes"></svg>
+        <ul class="key">
           <li><span class="dot"></span>Normal</li>
-          <li><span class="dot alert"></span>Alert reached the gateway</li>
-          <li><span class="dot silent"></span>Not heard for 45 min</li>
-          <li><svg viewBox="0 0 12 16" aria-hidden="true"><path d="M6 1C6 1 1 7 1 10.5a5 5 0 0 0 10 0C11 7 6 1 6 1z" fill="#4a90c8"/></svg>Leak running (the system has to find it)</li>
-          <li class="only-wide"><span class="dot" style="background:#e0475f"></span>Red light on a node: its own alarm, buzzer beeping, works even with the radio down</li>
-          <li class="only-wide"><span class="dot" style="background:#fff;box-shadow:inset 0 0 0 2px #3a76a8"></span>Spot on the main down pipe where you can start a leak</li>
-          <li class="only-wide"><span class="dot" style="background:#3a76a8"></span>Rising pipe, pump to tank <span class="dot" style="background:#79b4d8;margin-left:8px"></span>Down pipe, tank to flats</li>
+          <li><span class="dot alert"></span>Alert at the gateway</li>
+          <li><span class="dot silent"></span>Not heard</li>
+          <li><svg viewBox="0 0 12 16" aria-hidden="true"><path d="M6 1C6 1 1 7 1 10.5a5 5 0 0 0 10 0C11 7 6 1 6 1z" fill="#4a90c8"/></svg>Leak running</li>
+          <li><a href="#key">Full key</a></li>
         </ul>
-        <article class="card clay sensors">
-          <h2>What each node measures</h2>
-          <ul>
-            <li><b>Flat node<small>20, one per flat</small></b><p>Water flow meter and pressure sensor. <span>Raises: water running at night, water never stopped for 8 hours, much more water than usual.</span></p></li>
-            <li><b>Tank node<small>1, on the roof tank</small></b><p>Inflow and outflow meters, water level, pH, TDS (dissolved salts), turbidity (cloudiness) and temperature. <span>Raises: water leaving the tank much faster than usual, runoff or chemical in the water (small model on the node), supply running low.</span></p></li>
-            <li><b>Gateway<small>1, outside</small></b><p>No sensors. <span>Receives every message, notices nodes that go quiet, and every night from 2 to 4 am compares the water that left the tank with what all the flats used: anything missing is leaking from the pipes.</span></p></li>
-          </ul>
-        </article>
-      </section>
-
-      <section class="side">
-        <article class="card clay" id="test-card">
-          <h2>Add a leak</h2>
-          <p class="hint">Pick a flat, or a white dot on the down pipe, and choose how bad the leak is. Add as many as you like, and run time with Pause, Play and the speed menu at the top. Or fast-forward: the simulation runs ahead until the flat's alert reaches the gateway, then pauses.</p>
-          <div id="start-box" hidden>
-            <p class="hint" style="margin-top:14px">No simulation is running. Starting one takes about a minute: every flat first spends a simulated day learning what normal water use looks like.</p>
-            <div class="stack"><button class="btn primary" id="start">Start simulation</button></div>
+      </div>
+      <div class="building clay only-narrow" id="building" aria-label="Building B, pick a flat">
+        <div class="roof">
+          <div class="tank" id="tank-tile" title="Water tank on the roof">
+            <div class="tank-window"><div class="tank-water" id="tank-water"></div></div>
+            <div class="tank-label" id="tank-label">Tank<small>no report yet</small></div>
           </div>
-          <div id="test-box">
-            <div class="picked"><strong id="picked">Pick a flat</strong><span id="picked-floor"></span></div>
-            <p class="hint" id="picked-info" style="margin:-6px 0 16px"></p>
-            <div class="sizes" role="group" aria-label="Leak size">
-              <button class="btn" data-size="small" data-lps="0.05" aria-pressed="true">Small</button>
-              <button class="btn" data-size="medium" data-lps="0.5" aria-pressed="false">Medium</button>
-              <button class="btn" data-size="large" data-lps="1.5" aria-pressed="false">Severe</button>
-            </div>
-            <label for="lps" class="hint">Or set any size</label>
-            <input type="range" id="lps" min="0.01" max="2" step="0.01" value="0.05">
-            <p class="lps" id="lps-text"></p>
-            <div class="seg" role="group" aria-label="When the leak starts">
-              <button class="btn" data-start="now" aria-pressed="true">Right now</button>
-              <button class="btn" data-start="hour" aria-pressed="false">At a set hour</button>
-              <select id="hour" aria-label="Hour the leak starts" hidden></select>
-            </div>
-            <div class="seg">
-              <button class="btn primary" id="go" disabled>Start leak</button>
-              <button class="btn" id="go-ff" disabled>Start and fast-forward until found</button>
-            </div>
-            <p class="hint" id="go-note" style="margin-top:-10px"></p>
-            <div class="learning" id="learning" hidden>
-              <p class="hint">The flats are learning what normal water use looks like (simulated day 1). Leaks can be added once they're done, so a leak isn't learned as normal.</p>
-              <div class="bar"><i id="learn-bar" style="width:0"></i></div>
-            </div>
+        </div>
+        <div id="floors"></div>
+      </div>
+    </section>
+
+    <section class="col">
+      <article class="card clay" id="test-card">
+        <h2>Add a leak</h2>
+        <p class="hint">Pick a node label or a white dot on the down pipe in the drawing. Add as many leaks as you like and run time from the top bar, or fast-forward until the leak is found.</p>
+        <div id="start-box" hidden>
+          <p class="hint" style="margin-top:14px">No simulation is running. Starting one takes about a minute: every flat first spends a simulated day learning what normal water use looks like.</p>
+          <div class="stack"><button class="btn primary" id="start">Start simulation</button></div>
+        </div>
+        <div id="test-box">
+          <div class="picked"><strong id="picked">Pick a flat</strong><span id="picked-floor"></span></div>
+          <p class="hint" id="picked-info"></p>
+          <div class="sizes" role="group" aria-label="Leak size">
+            <button class="btn" data-size="small" data-lps="0.05" aria-pressed="true">Small</button>
+            <button class="btn" data-size="medium" data-lps="0.5" aria-pressed="false">Medium</button>
+            <button class="btn" data-size="large" data-lps="1.5" aria-pressed="false">Severe</button>
           </div>
-        </article>
-
-        <article class="card clay" id="result-card">
-          <h2>Leaks in this run</h2>
-          <p class="hint" id="result-empty">No leaks yet. Pick a flat and press Start leak.</p>
-          <ol class="leaks" id="leaks" hidden></ol>
-        </article>
-      </section>
-    </div>
-
-    <div class="lower">
-      <article class="card clay">
-        <h2>What the gateway heard</h2>
-        <p class="hint">Newest first. Only what actually arrived by radio.</p>
-        <ol class="feed" id="feed"></ol>
+          <label for="lps" class="hint">Or set any size</label>
+          <input type="range" id="lps" min="0.01" max="2" step="0.01" value="0.05">
+          <p class="lps" id="lps-text"></p>
+          <div class="seg" role="group" aria-label="When the leak starts">
+            <button class="btn" data-start="now" aria-pressed="true">Right now</button>
+            <button class="btn" data-start="hour" aria-pressed="false">At a set hour</button>
+            <select id="hour" aria-label="Hour the leak starts" hidden></select>
+          </div>
+          <div class="seg">
+            <button class="btn primary" id="go" disabled>Start leak</button>
+            <button class="btn" id="go-ff" disabled>Start and fast-forward until found</button>
+          </div>
+          <p class="hint" id="go-note"></p>
+          <div class="learning" id="learning" hidden>
+            <p class="hint">The flats are learning what normal water use looks like (simulated day 1). Leaks can be added once they're done, so a leak isn't learned as normal.</p>
+            <div class="bar"><i id="learn-bar" style="width:0"></i></div>
+          </div>
+        </div>
       </article>
       <article class="card clay">
-        <h2>Tank</h2>
-        <p class="hint">From the tank's 15-minute reports.</p>
-        <p class="big" id="tank-level">No report<small></small></p>
-        <svg class="spark" id="spark" viewBox="0 0 300 70" preserveAspectRatio="none" aria-label="Tank level over the last day"></svg>
-        <span class="chip" id="tank-quality">Clean</span>
+        <div class="card-head"><h2>Tank</h2><span class="chip" id="tank-quality">Clean</span></div>
+        <div class="tank-row">
+          <p class="big" id="tank-level">No report<small></small></p>
+          <svg class="spark" id="spark" viewBox="0 0 300 70" preserveAspectRatio="none" aria-label="Tank level over the last day"></svg>
+        </div>
+        <p class="hint">Water level from the tank's 15-minute reports.</p>
       </article>
       <article class="card clay">
         <h2>Other events</h2>
-        <p class="hint">Problems the checks should also catch.</p>
-        <div class="stack">
-          <button class="btn" data-cmd='{"do":"quality","kind":"runoff","minutes":60}'>Send runoff into the tank for 1 hour</button>
-          <button class="btn" data-cmd='{"do":"quality","kind":"chemical","minutes":45}'>Send a chemical into the tank for 45 min</button>
-          <button class="btn" data-cmd='{"do":"radio_cut","who":"all","minutes":60}'>Cut every radio for 1 hour</button>
+        <div class="events">
+          <button class="btn" data-cmd='{"do":"quality","kind":"runoff","minutes":60}'>Runoff into the tank, 1 h</button>
+          <button class="btn" data-cmd='{"do":"quality","kind":"chemical","minutes":45}'>Chemical into the tank, 45 min</button>
+          <button class="btn" data-cmd='{"do":"radio_cut","who":"all","minutes":60}'>Cut every radio, 1 h</button>
           <button class="btn quiet" data-cmd='{"do":"stop"}'>Stop the simulation</button>
         </div>
       </article>
-    </div>
-  </main>
+    </section>
 
-  <main id="tab-radio" hidden>
-    <div class="tiles">
-      <div class="tile clay"><p>Messages that got through first time, while the radio was up</p><p class="big" id="r-ok">-</p></div>
-      <div class="tile clay"><p>Lost to two flats talking at once</p><p class="big" id="r-col">-</p></div>
-      <div class="tile clay"><p>Lost while the gateway was replying</p><p class="big" id="r-hd">-</p></div>
-      <div class="tile clay"><p>Alerts that waited for a free channel</p><p class="big" id="r-wait">-</p></div>
-      <div class="tile clay"><p>Usual delay, message to gateway</p><p class="big" id="r-delay">-</p></div>
-      <div class="tile clay"><p>Replies from the gateway delivered</p><p class="big" id="r-ack">-</p></div>
-    </div>
-    <article class="card clay" style="margin-top:28px">
-      <h2>Delivery per node</h2>
-      <p class="hint">Share of each node's radio attempts that reached the gateway, leaving out radio cuts. Every packet is encrypted (AES-128) and signed.</p>
+    <section class="col">
+      <section class="alarm calm" id="alarm" role="alert">
+        <div class="alarm-head">
+          <svg viewBox="0 0 40 40" aria-hidden="true"><path d="M20 4c-6 0-10 4.6-10 10.5V22l-3.5 5.5h27L30 22v-7.5C30 8.6 26 4 20 4z"/><circle cx="20" cy="32.5" r="3.5"/><ellipse cx="15.5" cy="12" rx="2.2" ry="4" fill="#fff" opacity=".45"/></svg>
+          <h2 id="alarm-title">Nothing needs attention</h2>
+        </div>
+        <ul id="alarm-list"></ul>
+      </section>
+      <article class="card clay grow" id="result-card">
+        <h2>Leaks in this run</h2>
+        <p class="hint" id="result-empty">No leaks yet. Pick a flat and press Start leak.</p>
+        <ol class="leaks" id="leaks" hidden></ol>
+      </article>
+      <article class="card clay grow" id="feed-card">
+        <div class="card-head"><h2>What the gateway heard</h2><span class="hint">Newest first</span></div>
+        <ol class="feed" id="feed"></ol>
+      </article>
+    </section>
+  </main>
+ </div>
+
+  <div class="below">
+    <article class="card clay sensors">
+      <h2>What each node measures</h2>
+      <ul>
+        <li><b>Flat node<small>20, one per flat</small></b><p>Water flow meter and pressure sensor. <span>Raises: water running at night, water never stopped for 8 hours, much more water than usual.</span></p></li>
+        <li><b>Tank node<small>1, on the roof tank</small></b><p>Inflow and outflow meters, water level, pH, TDS (dissolved salts), turbidity (cloudiness) and temperature. <span>Raises: water leaving the tank much faster than usual, runoff or chemical in the water (small model on the node), supply running low.</span></p></li>
+        <li><b>Gateway<small>1, outside</small></b><p>No sensors. <span>Receives every message, notices nodes that go quiet, and every night from 2 to 4 am compares the water that left the tank with what all the flats used: anything missing is leaking from the pipes.</span></p></li>
+      </ul>
+    </article>
+    <article class="card clay" id="key">
+      <h2>Reading the drawing</h2>
+      <ul class="legend">
+        <li><span class="dot"></span>Room colour: normal</li>
+        <li><span class="dot alert"></span>Room colour: an alert from this node reached the gateway</li>
+        <li><span class="dot silent"></span>Room colour: node not heard for 45 min</li>
+        <li><svg viewBox="0 0 12 16" aria-hidden="true"><path d="M6 1C6 1 1 7 1 10.5a5 5 0 0 0 10 0C11 7 6 1 6 1z" fill="#4a90c8"/></svg>Leak running (the system still has to find it)</li>
+        <li><span class="dot" style="background:#e0475f"></span>Red light on a node: its own alarm, buzzer beeping, works even with the radio down</li>
+        <li><span class="dot" style="background:#e8b84a"></span>Yellow light: the node's messages are waiting for the gateway's reply</li>
+        <li><span class="dot" style="background:#fff;box-shadow:inset 0 0 0 2px #3a76a8"></span>Spot on the down pipe where you can start a leak; red once the leak is found</li>
+        <li><span class="dot" style="background:#3a76a8"></span>Rising pipe, pump to tank</li>
+        <li><span class="dot" style="background:#79b4d8"></span>Down pipe, tank to flats</li>
+        <li>Heights are drawn 2.6 times taller than real so the floors don't hide each other</li>
+      </ul>
+    </article>
+    <article class="card clay radio" id="radio">
+      <h2>Radio</h2>
+      <p class="hint">Every packet is encrypted (AES-128) and signed.</p>
+      <div class="tiles">
+        <div class="tile"><p>Through first time, radio up</p><p class="big" id="r-ok">-</p></div>
+        <div class="tile"><p>Lost to two nodes talking at once</p><p class="big" id="r-col">-</p></div>
+        <div class="tile"><p>Lost while the gateway replied</p><p class="big" id="r-hd">-</p></div>
+        <div class="tile"><p>Alerts that waited for a free channel</p><p class="big" id="r-wait">-</p></div>
+        <div class="tile"><p>Usual delay to the gateway</p><p class="big" id="r-delay">-</p></div>
+        <div class="tile"><p>Gateway replies delivered</p><p class="big" id="r-ack">-</p></div>
+      </div>
+      <h3>Delivery per node</h3>
+      <p class="hint">Share of each node's attempts that reached the gateway, leaving out radio cuts.</p>
       <div class="nodes" id="nodes"></div>
     </article>
-  </main>
+  </div>
 </div>
 <div class="toast" id="toast" role="status"></div>
 
@@ -430,7 +477,7 @@ const ADVICE = {
   QUALITY_RUNOFF: "Tell residents not to drink or cook with tap water. Check the tank lid and overflow for rainwater getting in.",
   QUALITY_CHEMICAL: "Tell residents not to drink or cook with tap water until the tank node reports it clean. Find what got into the tank."};
 const LEARN_S = 86400;
-let S = null, picked = null, tab = "building", size = "small", lps = 0.05, startAt = "now", tiles = {}, dg = null;
+let S = null, R = null, polls = 0, picked = null, size = "small", lps = 0.05, startAt = "now", tiles = {}, dg = null;
 
 function describe(v) {
   const kind = v < 0.1 ? "about a running toilet" : v < 0.9 ? "a cracked pipe" : "a burst pipe";
@@ -604,11 +651,12 @@ function beep() {
 }
 function renderAlarm() {
   const list = S.running ? S.active || [] : [], box = $("#alarm");
-  box.hidden = !list.length;
-  $("#alarm-title").textContent = list.length === 1 ? "Needs attention" : `${list.length} problems need attention`;
+  box.classList.toggle("calm", !list.length);
+  $("#alarm-title").textContent = !list.length ? "Nothing needs attention" : list.length === 1 ? "Needs attention" : `${list.length} problems need attention`;
   $("#alarm-list").innerHTML = list.map(m => `<li><b>${flatName(m.n)}: ${ALERTS[m.a] || m.a}</b>` +
     `<p>${m.missing_l ? `${m.missing_l} litres did not reach any flat between 2 and 4 am. ` : ""}${ADVICE[m.a] || ""}${S.led[m.n] === "red" ? " The node's buzzer is beeping." : ""}</p>` +
-    `<time>Gateway heard it<br>${when(m.rx)}</time></li>`).join("");
+    `<time>Gateway heard it<br> ${when(m.rx)}</time></li>`).join("") ||
+    `<li>Problems the gateway knows about show up here, with what to do, until they are fixed.</li>`;
   const keys = list.map(m => m.n + m.a + m.rx), fresh = heard && keys.some(k => !heard.has(k));
   if (fresh) { beep(); box.classList.remove("fresh"); void box.offsetWidth; box.classList.add("fresh"); }
   heard = new Set(keys);
@@ -637,7 +685,7 @@ function render() {
   $("#tank-tile").classList.toggle("alert", !!live && S.status["B-TANK"] === "alert");
   renderDiagram(); renderAlarm();
   renderTank(); renderControls(); renderResult(); renderFeed();
-  if (tab === "radio" && S.radio) renderRadio();
+  if (R) renderRadio();
 }
 
 function renderTank() {
@@ -716,20 +764,21 @@ function renderFeed() {
 }
 
 function renderRadio() {
-  const r = S.radio, up = r.up, live = up.ok + up.collision + up.half_duplex + up.weak_link;
+  const r = R, up = r.up, live = up.ok + up.collision + up.half_duplex + up.weak_link;
   const down = r.down, dl = down.ok + down.collision + down.half_duplex + down.weak_link;
   $("#r-ok").textContent = live ? (100 * up.ok / live).toFixed(1) + "%" : "-";
   $("#r-col").textContent = up.collision; $("#r-hd").textContent = up.half_duplex; $("#r-wait").textContent = r.waits;
   $("#r-delay").textContent = r.median_delay_s == null ? "-" : mins(r.median_delay_s);
   $("#r-ack").textContent = dl ? (100 * down.ok / dl).toFixed(1) + "%" : "-";
+  $("#rs-ok").textContent = $("#r-ok").textContent; $("#rs-col").textContent = up.collision; $("#rs-delay").textContent = $("#r-delay").textContent;
   $("#nodes").innerHTML = Object.entries(r.per_node).map(([n, v]) =>
     `<div class="node-row"><span>${n.slice(2)}</span><span class="bar"><i style="width:${(v * 100).toFixed(1)}%;${v < .95 ? "background:var(--watch)" : ""}"></i></span><span>${(v * 100).toFixed(1)}%</span></div>`).join("");
 }
 
 async function poll() {
   try {
-    const r = await fetch("/api/state" + (tab === "radio" ? "?radio=1" : ""));
-    S = await r.json(); render();
+    const r = await fetch("/api/state" + (polls++ % 5 ? "" : "?radio=1"));   // radio numbers every 5 s: they read the whole radio log
+    S = await r.json(); if (S.radio) R = S.radio; render();
   } catch { $("#mode").textContent = "Dashboard offline"; }
   setTimeout(poll, 1000);
 }
@@ -774,11 +823,6 @@ $("#start").onclick = () => post("/api/start").then(ok => ok && toast("Starting 
 $("#playpause").onclick = () => send({do: S.clock.paused ? "resume" : "pause"});
 $("#speed").onchange = e => send({do: "speed", delay_s: +e.target.value});
 document.querySelectorAll("[data-cmd]").forEach(b => b.onclick = () => send(JSON.parse(b.dataset.cmd)).then(ok => ok && toast(b.textContent)));
-document.querySelectorAll("[data-tab]").forEach(b => b.onclick = () => {
-  tab = b.dataset.tab;
-  document.querySelectorAll("[data-tab]").forEach(x => x.setAttribute("aria-selected", x === b ? "true" : "false"));
-  $("#tab-building").hidden = tab !== "building"; $("#tab-radio").hidden = tab !== "radio";
-});
 poll();
 </script>
 </body>
