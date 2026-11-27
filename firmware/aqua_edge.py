@@ -32,9 +32,16 @@ alerts sent first (Mariadhason et al. [4], timestamped store-and-forward to SD c
 """
 from datetime import datetime, timezone
 import json
+import math
 import os
 import random
+import sys
 
+_AC_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "abnormal_consumption")
+if _AC_DIR not in sys.path:
+    sys.path.append(_AC_DIR)
+
+from detectors import StatisticalZeroFlowDetector
 from packet import pack, unpack
 from quality_model import QualityModel, QualityMonitor, TemporalModel
 
@@ -277,10 +284,13 @@ class FlatNode(Node):
     def __init__(self, node_id, hal):
         super().__init__(node_id, hal)
         self.night_run = self.high_run = self.cont_run = self.p_leak_run = 0
+        self.cmon = StatisticalZeroFlowDetector()
 
     def check(self, now, hour, r):
         """Leak & consumption checks. Runs once a minute."""
-        flow = r["flow_lps"]
+        flow = r.get("flow_lps")
+        if flow is None or math.isnan(flow):
+            return
         # Continuous night flow: nobody should be using water at 1-5 am
         at_night = NIGHT_START_H <= hour < NIGHT_END_H
         self.night_run = self.night_run + 1 if at_night and flow > NIGHT_FLOW_LPS else 0
@@ -307,8 +317,14 @@ class FlatNode(Node):
         self.p_leak_run = self.p_leak_run + 1 if (p_low and f_high) else 0
         if self.p_leak_run >= PRESSURE_LEAK_MIN:
             self.alert("LEAK_PRESSURE_DROP", flow=round(flow, 4), p_min=round(r["pressure_m"], 2))
+        # Separate abnormal-consumption checks (abnormal_consumption/detectors.py)
+        for ev_type, _ in self.cmon.step(now, flow):
+            if ev_type != "UNUSUAL_HIGH_CONSUMPTION":
+                self.alert(ev_type, flow=round(flow, 4))
 
     def accumulate(self, r):
+        if self.hal.now() < LEARN_S:
+            self.cmon.step(self.hal.now(), r.get("flow_lps"))
         self.acc["vol_l"] = self.acc.get("vol_l", 0.0) + r["flow_lps"] * 60
         self.acc["p_min"] = min(self.acc.get("p_min", 1e9), r["pressure_m"])
         self._p_sum = getattr(self, "_p_sum", 0.0) + r["pressure_m"]

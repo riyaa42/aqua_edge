@@ -22,6 +22,7 @@ temp.*
 simulation/live/run/
 simulation/ns3/replay_result.csv
 leak_detection/results/
+abnormal_consumption/results/
 
 # Downloaded datasets (large, and licensed separately: see tinyml/README.md)
 tinyml/data/
