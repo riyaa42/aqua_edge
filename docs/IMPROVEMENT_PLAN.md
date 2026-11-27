@@ -189,12 +189,12 @@ Sudden power loss is the classic cause of SD card damage on a Raspberry Pi. The 
 
 Set `RuntimeWatchdogSec=15` in systemd. If the node software freezes, the Pi reboots itself, and the saved queue and baseline (Phase 1) mean nothing is lost.
 
-### 5.4 Legal radio limits in India
+### 5.4 Legal radio limits in India (done)
 
-- India's band is **865 to 867 MHz**, under the 2021 licence exemption rules.
-- Sources disagree on the duty cycle (the share of time a device may transmit): some say none, some say 1%.
-- Read the official rules PDF and check our airtime against the limit using the radio log.
-- Use the standard IN865 channels: 865.0625, 865.4025 and 865.985 MHz.
+- Our LoRa chip is the **SX1278**, which only reaches 525 MHz, so the 865 to 867 MHz band is out. We use **433.05 to 434.79 MHz**, licence-free under the 2022 rules (G.S.R. 347(E)).
+- Limits there: **10 mW e.r.p.** (10 dBm into a simple antenna) and **at most 10% of the time on air**; bandwidth is not limited, so 125 kHz LoRa is allowed.
+- Settings: 433.175 MHz, 10 dBm (`firmware/pi_hal.py`, `simulation/ns3/aqua_lora.cc`).
+- Checked with the radio log: the busiest radio, the gateway, is on air 0.11% of its busiest hour; nodes under 0.02%.
 
 ## 6. Phase 5: at the end
 
@@ -224,7 +224,7 @@ Set `RuntimeWatchdogSec=15` in systemd. If the node software freezes, the Pi reb
 - [The Things Network: LoRaWAN security](https://www.thethingsnetwork.org/docs/lorawan/security/) (signature and counter ideas we borrow)
 - [Replay attacks and timestamps in LoRaWAN](https://arxiv.org/pdf/1905.01679) (why signatures alone don't stop every replay)
 - [YACTS payload encoding, MDPI Sensors 2023](https://mdpi.com/1424-8220/23/11/5124/html) (size savings of binary messages over JSON)
-- [India 865 to 867 MHz exemption rules, 2021](https://dotws.cdot.in/sites/default/files/The%20use%20of%20low%20power%20equipment%20in%20the%20frequency%20band%20865-867%20MHz%20for%20short%20range%20devices%20%28Exemption%20from%20License%29%20Rules%2C%202021.pdf) (legal radio limits)
+- [India 433.05 to 434.79 MHz exemption rules, 2022](https://eservices.dot.gov.in/sites/default/files/circular-notifications/the-use-of-low-power-radio-frequency-devices-in-the-frequency-band-433.05-to-434.79-mhz-exemption-from-license-rules-2022.pdf) (the power and time-on-air limits our SX1278 radios follow)
 - [Control charts for residential water use](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC10439885/) (evidence that EWMA catches apartment leaks sooner)
 - [Minimum Night Flow and legitimate night use](https://www.preprints.org/manuscript/202411.1010/v1) (why night use must be learned, not guessed)
 - [Riser submetering in a New York building](https://habitatmag.com/Publication-Content/Building-Operations/2015/2015-June/Early-Warning-System-Tracks-Down-Leaks) (best-value meter placement for finding leaks)

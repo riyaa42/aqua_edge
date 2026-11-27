@@ -64,7 +64,7 @@ class Radio:
         """outs: {sender: [(offset_s, msg[, cad]), ...]} sent during minute t. Returns {receiver: [msg]}
         for delivery at the next minute. Star network: nodes talk to the gateway only.
         Timed packets (time slots) go first; cad=True packets listen before talking.
-        Our gateway is one SX1276 like the nodes: one channel and one SF for everyone, uplinks and
+        Our gateway is one SX1278 like the nodes: one channel and one SF for everyone, uplinks and
         downlinks on the same channel, and no radio can hear while it is sending (half-duplex)."""
         inbox, tx, cad_wait = {}, [], []
         for src, sends in outs.items():

@@ -23,8 +23,8 @@
 using namespace ns3;
 using namespace lorawan;
 
-static const uint32_t FREQ_HZ = 868100000; // ponytail: EU868 channel; module has no IN865 plan, same physics
-static const double TX_DBM = 14;
+static const uint32_t FREQ_HZ = 868100000; // ponytail: only a channel label (the module has no 433 MHz plan); the 433 MHz physics is in the loss below
+static const double TX_DBM = 10;            // SX1278 at 433 MHz: India allows 10 mW e.r.p. in 433.05-434.79 MHz (G.S.R. 347(E), 2022)
 static const int TEST_PACKETS = 200, TEST_BYTES = 75;
 
 static std::map<uint64_t, std::string> g_result; // packet id -> ok / collision / weak_link
@@ -83,7 +83,9 @@ main(int argc, char* argv[])
     // Channel: distance loss + shadowing + walls/floors of the building (as complete-network-example)
     auto loss = CreateObject<LogDistancePropagationLossModel>();
     loss->SetPathLossExponent(3.76);
-    loss->SetReference(1, 7.7);
+    // Reference loss of the example (7.7 dB at 1 m, for 868 MHz) minus the 6.0 dB that 433 MHz loses less
+    // (free space: 20 log10(868 / 433)). Walls are kept at their 868 MHz loss, which is a little pessimistic.
+    loss->SetReference(1, 7.7 - 6.0);
     auto shadowing = CreateObject<CorrelatedShadowingPropagationLossModel>();
     loss->SetNext(shadowing);
     shadowing->SetNext(CreateObject<BuildingPenetrationLoss>());

@@ -7,7 +7,7 @@ The real code for the nodes and the gateway. It uses the Python standard library
 | `aqua_edge.py` | Every node (20 flats + tank), Raspberry Pi Zero 2 W | Learns normal on day 1 (saved to SD hourly, so a power cut keeps it), leak checks with flow only (flat: night, continuous flow, too much), water quality and tank outflow checks (tank), store-and-forward to SD card (saved safely, so a power cut never leaves half a file), sending in time slots, re-sending |
 | `quality_model.py` + `quality_model.json` | Tank node | Water-quality model: 8-bit neural network (308 bytes), pH + TDS + turbidity in, NORMAL / RUNOFF / CHEMICAL out; integer-only, plain Python. Trained by `../tinyml/train_quality.py` |
 | `packet.py` | Nodes and gateway | Radio packets: compact binary (about a third of the JSON size), body encrypted with AES-128 in counter mode (adds no bytes; header with type, node, counter and time stays readable, as in LoRaWAN), signed with a 4-byte tag (HMAC-SHA256) using a key shared between each node and the gateway; a message counter that never repeats |
-| `pi_hal.py` | Every real node (Raspberry Pi Zero 2 W; a Pi 4 for testing) | The real hardware layer: SX1276 / RFM95 LoRa radio over SPI (send, listen before talk, receive), clock (UTC from the DS3231, Indian hours), sensor readings fed row by row from a CSV (sensors are simulated), green/yellow/red LEDs and buzzer. Sets its clock only from signed ACKs |
+| `pi_hal.py` | Every real node (Raspberry Pi Zero 2 W; a Pi 4 for testing) | The real hardware layer: SX1278 LoRa radio (433 MHz, e.g. Ra-02 module) over SPI (send, listen before talk, receive), clock (UTC from the DS3231, Indian hours), sensor readings fed row by row from a CSV (sensors are simulated), green/yellow/red LEDs and buzzer. Sets its clock only from signed ACKs |
 | `gateway.py` | Gateway laptop (LoRa module on an ESP32 bridges the radio) | Replies to every message (with the time), building check (water in = water out), silent-node alerts, supply-event rule, new vs repeat alerts, clock check |
 
 Checks run once a minute; alarms are sent the moment they fire, summaries every 15 minutes in each node's time slot (details and timings: `../leak_detection/README.md` section 7b).
@@ -24,7 +24,7 @@ Raspberry Pi OS (Bookworm). The Pi 4 and the Pi Zero 2 W have the same pins, so 
 
 | Part | Pin on the part | Pi |
 |---|---|---|
-| RFM95 / SX1276 | 3.3V, GND | 3V3 (1), GND (6) |
+| SX1278 (Ra-02) | 3.3V, GND | 3V3 (1), GND (6) |
 | | MOSI, MISO, SCK | GPIO10 (19), GPIO9 (21), GPIO11 (23) |
 | | NSS | CE0, GPIO8 (24) |
 | | RESET | GPIO22 (15) |
@@ -33,7 +33,7 @@ Raspberry Pi OS (Bookworm). The Pi 4 and the Pi Zero 2 W have the same pins, so 
 | LEDs (each with a 330 ohm resistor to GND) | green, yellow, red | GPIO17 (11), GPIO27 (13), GPIO5 (29) |
 | Active buzzer | + | GPIO18 (12) |
 
-Pins and radio settings are knobs at the top of `pi_hal.py`. The gateway's ESP32 radio must use the same radio settings (865.0625 MHz, SF7, 125 kHz, 4/5, sync word 0x12).
+Pins and radio settings are knobs at the top of `pi_hal.py`. The gateway's ESP32 radio must use the same radio settings (433.175 MHz, SF7, 125 kHz, 4/5, sync word 0x12, 10 dBm: India allows 10 mW and 10% time on air in 433.05 to 434.79 MHz).
 
 **Setup, once per Pi**
 1. `sudo raspi-config` -> Interface Options -> turn on **SPI** and **I2C**.
@@ -46,7 +46,7 @@ Pins and radio settings are knobs at the top of `pi_hal.py`. The gateway's ESP32
 
 **Run**
 ```sh
-python3 firmware/pi_hal.py --radio-test        # expect: SX1276 found (version 0x12), channel free, sent
+python3 firmware/pi_hal.py --radio-test        # expect: SX1278 found (version 0x12), channel free, sent
 python3 firmware/pi_hal.py B-203 --keys ~/B-203_keys.json --sd ~/aqua --step-s 1     # fast demo
 python3 firmware/pi_hal.py B-203 --keys ~/B-203_keys.json --sd ~/aqua --slot 5 20    # real time
 ```

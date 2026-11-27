@@ -85,7 +85,7 @@ At SF7, four back-to-back packets plus the guard time take about 0.8 s, well ins
 ### Python radio model (`live/radio.py`)
 
 - **Airtime** follows the Semtech LoRa formula (our signed binary packets are 14 to 34 bytes: 46 to 77 ms at SF7, 1.2 to 1.8 s at SF12; the old 75-byte JSON took 133 ms at SF7) [Semtech AN1200.13, for the time-on-air formula].
-- **One shared channel.** Our gateway is one SX1276 chip, like the nodes, so it listens on one channel and one spreading factor. Its replies use that same channel.
+- **One shared channel.** Our gateway is one SX1278 chip, like the nodes, so it listens on one channel and one spreading factor. Its replies use that same channel.
 - **Collision rule:** two packets that overlap in time at the same spreading factor are both lost. This covers uplinks at the gateway and replies at a node.
 - **Half-duplex rule:** a radio cannot hear while it is sending. An uplink that arrives while the gateway is sending a reply is lost (`half_duplex`), and so is a reply that arrives while its node is sending.
 - **Other results:** a packet sent during a radio cut is marked `radio_cut`. A packet can also be lost at random according to the link's delivery rate (`weak_link`).
@@ -135,7 +135,7 @@ The scenario contains:
 | About 10% of packets collided | All summaries were sent at random in the same minute | Time slots for summaries, listen before talk for alerts |
 | 90 packets had no result in the ns-3 replay | A node started its next packet the very instant the last one ended | 10 ms turnaround gap between a node's own packets |
 | The replay sent 4 times too many packets | A hidden end-of-line character broke a check | Strip it when reading the log |
-| The radio model let the gateway hear while it sent, and kept its replies on a separate channel | Our gateway is one half-duplex SX1276; replies went out at a random second, sometimes in another node's slot | Modelled the real gateway (31 uplinks and 26 replies lost), then moved replies into the sender's own slot (0 lost) |
+| The radio model let the gateway hear while it sent, and kept its replies on a separate channel | Our gateway is one half-duplex SX1278; replies went out at a random second, sometimes in another node's slot | Modelled the real gateway (31 uplinks and 26 replies lost), then moved replies into the sender's own slot (0 lost) |
 | The ns-3 module would not build | A missing `#include` in the module's source | Added automatically in `ns3/Dockerfile` |
 
 ## 9. How to run
@@ -157,8 +157,8 @@ Self-checks: `python3 live/radio.py` and `python3 webots/run_offline.py`.
 
 - **What is real and what is imitated.** The timing decisions are in the real firmware: slots, listen before talk, ACK time, re-sending and SD storage. The actual CAD listening, the clock setting and the radio itself are only imitated by the simulator.
 - **Hearing assumption.** The radio model assumes every node can hear every other node (one building). Hidden nodes are not checked.
-- **One channel.** Our gateway is a single SX1276, so everything uses one channel. Using IN865's other 2 channels would need a multi-channel gateway chip (SX1302).
-- **Frequency band in ns-3.** ns-3 uses the EU868 frequency, because the module has no Indian band. The physics is the same.
+- **One channel.** Our gateway is a single SX1278, so everything uses one channel (433.175 MHz). More channels would need a multi-channel gateway chip.
+- **Frequency band in ns-3.** Our SX1278 radios use 433 MHz at 10 dBm (India's limit in 433.05 to 434.79 MHz). ns-3's LoRa module has no 433 MHz plan, so it keeps an 868 MHz channel name and models 433 MHz by lowering the distance loss by 6 dB (what free space loses less at 433 MHz); wall losses stay at their 868 MHz values, a little pessimistic. All links stay SF7 with every packet delivered; the busiest radio (the gateway) is on air 0.11% of its busiest hour, far under the 10% limit.
 - **Packet format.** Packets are encrypted, signed binary (`firmware/packet.py`), about a third of the JSON size. Only the body is encrypted: a listener can see that a node sent an alert, but not what it says. Keys are made from the node name for the simulation; real nodes need a key file on the SD card.
 - **Leak modelling.** Leaks use internal WNTR settings (tested with wntr 1.5.0).
 - **Gateway repeat check.** The gateway cannot yet tell "the same leak flickering" from "a new leak". It only marks repeats.

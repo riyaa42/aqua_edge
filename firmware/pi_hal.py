@@ -1,5 +1,5 @@
 """Hardware layer for a real Aqua Edge node: Raspberry Pi (Zero 2 W, or a Pi 4 for testing) with an
-SX1276 / RFM95 LoRa module on SPI. Same interface as the simulated layers (top of aqua_edge.py).
+SX1278 LoRa module (433 MHz, e.g. Ra-02) on SPI. Same interface as the simulated layers (top of aqua_edge.py).
 
 The sensors are simulated: readings come row by row from a CSV with one column per node and
 sensor ("B-203:flow_lps"), the format simulation/webots/make_scenario.py writes. Radio, clock,
@@ -25,11 +25,12 @@ DEFAULT_CSV = os.path.join(HERE, "..", "simulation", "webots", "data", "sensors.
 UTC_OFFSET_S = 19800                  # India: local time is UTC + 5 h 30 min
 
 # Radio settings. The gateway's ESP32 radio must use exactly the same ones.
-FREQ_HZ = 865_062_500                 # IN865 band, channel 1
+FREQ_HZ = 433_175_000                 # 433.05-434.79 MHz, licence-free in India (G.S.R. 347(E), 2022); the SX1278 only reaches 525 MHz
 SF, BW_BITS, CR_BITS = 7, 0x70, 0x02  # spreading factor 7, bandwidth 125 kHz, coding rate 4/5
 SYNC_WORD = 0x12                      # private LoRa network (LoRaWAN uses 0x34)
 PREAMBLE = 8                          # symbols
-TX_DBM = 14                           # transmit power on PA_BOOST (module allows 2 to 17)
+TX_DBM = 10                           # India limit in this band: 10 mW e.r.p. and at most 10% of the time on air.
+                                      # 10 dBm is right for a simple whip/dipole; lower it by the antenna gain above 2.15 dBi
 
 # Same listen-before-talk rule as the simulation (simulation/live/radio.py)
 CAD_TRIES, CAD_BACKOFF_S = 5, (0.1, 1.0)
@@ -40,16 +41,16 @@ RESET_PIN = 22
 LED_PINS = {"green": 17, "yellow": 27, "red": 5}
 BUZZER_PIN = 18
 
-# SX1276 registers and modes (datasheet section 6.4)
+# SX1278 registers and modes (SX1276/77/78/79 datasheet, section 6.4: same registers for the whole family)
 REG_FIFO, REG_OPMODE, REG_FRF, REG_PA, REG_LNA = 0x00, 0x01, 0x06, 0x09, 0x0C
 REG_FIFO_PTR, REG_TX_BASE, REG_RX_BASE, REG_RX_CURRENT = 0x0D, 0x0E, 0x0F, 0x10
 REG_IRQ, REG_RX_BYTES, REG_MODEM1, REG_MODEM2, REG_PREAMBLE = 0x12, 0x13, 0x1D, 0x1E, 0x20
 REG_PAYLOAD_LEN, REG_MODEM3, REG_SYNC, REG_VERSION = 0x22, 0x26, 0x39, 0x42
-SLEEP, STANDBY, TX, RX_CONTINUOUS, CAD = 0x80, 0x81, 0x83, 0x85, 0x87   # 0x80: LoRa mode bit
+SLEEP, STANDBY, TX, RX_CONTINUOUS, CAD = 0x88, 0x89, 0x8B, 0x8D, 0x8F   # 0x80: LoRa mode bit, 0x08: low-frequency band (SX1278, below 525 MHz)
 IRQ_RX_DONE, IRQ_CRC_ERROR, IRQ_TX_DONE, IRQ_CAD_DONE, IRQ_CAD_BUSY = 0x40, 0x20, 0x08, 0x04, 0x01
 
 
-class SX1276:
+class SX1278:
     """Minimal LoRa driver: send, listen-before-talk (CAD) and receive, over SPI.
     ponytail: polls the IRQ register over SPI instead of wiring DIO0 to an interrupt; wire DIO0
     and use gpiozero's when_activated if packets are ever missed."""
@@ -65,7 +66,7 @@ class SX1276:
         self.spi.max_speed_hz, self.spi.mode = 5_000_000, 0
         version = self.read(REG_VERSION)
         if version != 0x12:
-            raise RuntimeError(f"no SX1276 found (version register {version:#04x}, expected 0x12): "
+            raise RuntimeError(f"no SX1278 found (version register {version:#04x}, expected 0x12): "
                                "check the wiring and that SPI is enabled (raspi-config)")
         self.write(REG_OPMODE, 0x00)               # sleep in FSK mode: LoRa mode can only be set while asleep
         self.write(REG_OPMODE, SLEEP)
@@ -75,7 +76,7 @@ class SX1276:
         self.write(REG_TX_BASE, 0x00)
         self.write(REG_RX_BASE, 0x00)
         self.write(REG_LNA, self.read(REG_LNA) | 0x03)               # receiver boost
-        self.write(REG_PA, 0x80 | (TX_DBM - 2))                       # PA_BOOST pin, the one RFM95 boards use
+        self.write(REG_PA, 0x80 | (TX_DBM - 2))                       # PA_BOOST pin, the one SX1278 boards (e.g. Ra-02) use
         self.write(REG_MODEM1, BW_BITS | CR_BITS)                     # explicit header
         self.write(REG_MODEM2, SF << 4 | 0x04)                        # CRC on
         self.write(REG_MODEM3, 0x04 | (0x08 if SF >= 11 else 0))      # automatic gain; low data rate fix at SF11+
@@ -260,8 +261,8 @@ def make_node(name, hal):
 
 
 def radio_test():
-    r = SX1276()
-    print(f"SX1276 found (version {r.version:#04x}), {FREQ_HZ / 1e6:.4f} MHz, SF{SF}")
+    r = SX1278()
+    print(f"SX1278 found (version {r.version:#04x}), {FREQ_HZ / 1e6:.4f} MHz, SF{SF}")
     print("channel busy" if r.cad() else "channel free (CAD)")
     r.send(b"aqua-edge radio test")
     print("sent a test packet; listening 10 s for any packet...")
@@ -339,7 +340,7 @@ def check():
 
 
 if __name__ == "__main__":
-    ap = argparse.ArgumentParser(description="Run an Aqua Edge node on a Raspberry Pi with an SX1276 radio.")
+    ap = argparse.ArgumentParser(description="Run an Aqua Edge node on a Raspberry Pi with an SX1278 radio.")
     ap.add_argument("name", nargs="?", help="node name, e.g. B-203 or B-TANK")
     ap.add_argument("--csv", default=DEFAULT_CSV, help="sensor readings, one row per minute")
     ap.add_argument("--keys", help="key file (see load_keys in packet.py)")
@@ -360,6 +361,6 @@ if __name__ == "__main__":
         keys = load_keys(a.keys)
         if a.name not in keys:
             ap.error(f"{a.name} has no key in {a.keys}")
-        hal = PiHAL(a.name, SX1276(), a.csv, os.path.join(a.sd, f"{a.name}.jsonl"), keys,
+        hal = PiHAL(a.name, SX1278(), a.csv, os.path.join(a.sd, f"{a.name}.jsonl"), keys,
                     slot=tuple(a.slot) if a.slot else None, step_s=a.step_s)
         run(make_node(a.name, hal), hal, a.step_s)
