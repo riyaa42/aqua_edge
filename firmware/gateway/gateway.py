@@ -1,5 +1,7 @@
 """Aqua Edge gateway program (one per building). Runs on the laptop; an ESP8266 board on USB
-serial is only the interface to the LoRa module.
+serial is only the interface to the LoRa module (one SX1278, 433 MHz: lora433.py).
+
+Call step() whenever a packet arrives and at the time it returns (at least every 0.5 s).
 
 Nodes decide on their own what they can see. The gateway combines the data of many nodes, which
 some detections need (a pipe leak shows only when every flat's litres are set against the tank's).
@@ -35,6 +37,15 @@ Same hardware layer as the nodes (hal.now / send / receive). Jobs:
      (node, counter) pair already seen is a duplicate or a replay: acknowledged, not used again.
      ACKs are signed with the node's key, so a fake ACK cannot make a node delete its messages.
   9. Ranking of open problems for the dashboard: gateway_analytics.py.
+ 10. Beacon every 5 s (and at startup), so nodes know when to send what they stored.
+ 11. Dispatch: what only the gateway can know is sent back at once to the nodes concerned, as a
+     signed CMD, repeated every few seconds until the node confirms it (GOT):
+       pipe leak (and its end)  -> the tank and the flats on the suspected floors;
+                                   every node if the floor cannot be told
+       supply event / drain / uncertain (and recovery) -> the tank
+       a flat's pressure alert during a pipe leak -> that flat (PIPE_LEAK_CAUSE: its own leak
+                                   alert may not be its own leak)
+     One that ended before it could be delivered still goes, marked "over".
 What the checks need is saved to one state file before any ACK is sent, so a restart keeps the
 open problems and pipe check, and does not reopen the door to replays. Not saved: the in-memory
 message log and event list. The gateway clock must carry on across a restart.
@@ -42,6 +53,7 @@ How the leak checks fit together: leak_detection/README.md.
 """
 import json
 import os
+import random
 import sys
 
 _GW_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -52,6 +64,7 @@ for _d in (_GW_DIR, os.path.join(_FW_DIR, "edge_node"), os.path.join(_FW_DIR, "c
 
 from aqua_edge import SUMMARY_S, iso_utc, save_atomic
 from gateway_analytics import FLAT_LEAK_ALERTS, GatewayAnalytics, category_of
+from lora433 import BEACON_S, AirtimeBudget, airtime_s, retry_wait
 from packet import pack, unpack
 
 SUPPLY_WINDOW_S = 900          # a SUPPLY_LOW flag from the tank counts for this long
@@ -60,12 +73,14 @@ MASS_BALANCE_INTERVALS = 2     # blocks in a row above threshold before alerting
 MIN_SUPPLY_L = 5.0             # ignore near-empty blocks (division by tiny numbers)
 SILENT_S = 2700                # nothing heard from a node for 3 summary periods = silent
 CLOCK_AHEAD_S = 60             # message time this far ahead of the gateway clock = bad node clock
+SUPPLY_CODES = ("SUPPLY_EVENT", "LEAK_TANK_DRAIN", "SUPPLY_UNCERTAIN")
 KEEP_BLOCKS = 7 * 86400 // SUMMARY_S    # per-block data kept: 7 days, for late summaries
 # saved to disk as they are; the others need converting for JSON (save_state / load_state)
 SAVED = ("seen_floor", "alert_history_list", "tank_low_t", "tank_low_recv_t", "supply_active_until",
          "tank_drain_reported", "tank_abnormal_supply_recv_t", "flat_leak_recv_t", "tank_abnormal_supply_t",
          "flat_leak_t", "last_tank_inflow", "supply_cleared_t", "p_base", "p_mean_base", "last_pair",
-         "pipe_first", "pipe_alerted", "pipe_since", "balance_paused", "last_seen", "silent")
+         "pipe_first", "pipe_alerted", "pipe_since", "balance_paused", "last_seen", "silent",
+         "outbox", "command_number", "told", "told_pipe", "told_cause")
 BY_BLOCK = ("sums", "p_sums", "p_mean_sums", "verdicts")     # {block number: value}
 
 
@@ -99,6 +114,14 @@ class Gateway:
         self.silent = {}            # node -> time last heard before it went silent
         self.skewed = set()
         self.analytics = GatewayAnalytics(self.flats, self.tank)
+        self.outbox = {}            # command number (as text) -> command not yet confirmed by its node
+        self.command_number = 0     # never repeats: a node acts on each number once
+        self.told = {}              # node -> {alert code: its time}: sent as still going on
+        self.told_pipe, self.told_cause = [], []    # nodes told of the active pipe leak / possible cause
+        self.send_at, self.tries = {}, {}           # command number -> next time to send, sends so far
+        self.rng = random.Random(0)
+        self.airtime = AirtimeBudget()
+        self.boot, self.beacon_at, self.dirty = None, None, False
         # Everything above except log and events survives a restart. The state file replaces
         # the older _seen.json, which is still read if it is all there is.
         path = getattr(hal, "storage_path", None)
@@ -141,7 +164,8 @@ class Gateway:
 
     def load_state(self, state):
         for name in SAVED:
-            setattr(self, name, state[name])
+            if name in state:       # a state file from an older version may lack some
+                setattr(self, name, state[name])
         for name in BY_BLOCK:                       # JSON turned the block numbers into text
             setattr(self, name, {int(i): v for i, v in state[name].items()})
         self.seen_above = {n: set(v) for n, v in state["seen_above"].items()}
@@ -167,6 +191,8 @@ class Gateway:
         now = self.hal.now()
         utc_fn = getattr(self.hal, "utc_now", None)
         utc_s = utc_fn()[0] if utc_fn else now
+        if self.boot is None:
+            self.boot = int(utc_s)
         if self.last_seen is None:
             self.last_seen = {n: now for n in self.flats | {self.tank}}
         if self.resumed:            # the gateway was down, not the nodes: restart their silence timers
@@ -178,9 +204,13 @@ class Gateway:
             if m is None:
                 bad += 1                                    # wrong signature or broken packet
                 continue
+            if m["k"] == "GOT":
+                self.confirmed(now, m)
+                continue
             if m["k"] not in ("ALERT", "FLAG", "SUM"):
                 continue
             if not self._is_seen_and_record(m["n"], m["s"]):
+                self.hurry(now, m["n"])
                 self.last_seen[m["n"]] = now    # a repeated or replayed packet is no sign of life
                 self.log.append({**m, "rx": now, "rx_utc": round(utc_s), "rx_iso": iso_utc(utc_s)})
                 self.analytics.on_packet(now, m)
@@ -218,13 +248,122 @@ class Gateway:
         self.check_silence(now)
         self.supply_rule(now)
         self.mass_balance(now)
-        # Save first, then acknowledge: a node deletes a message once acknowledged, so its effect
-        # must already be on disk. (If the save fails, the node sends it again.)
-        if acks or len(self.events) > events_before:
+        # Save first, then transmit: a node deletes a message once acknowledged, so its effect
+        # (and any command it led to) must already be on disk. (If the save fails, it is resent.)
+        if acks or self.dirty or len(self.events) > events_before:
             self.save_state()
+            self.dirty = False
         for n, seq in acks:
             ack = {"k": "ACK", "n": n, "s": seq, "gt": now}     # gt: nodes sync their clock
-            self.hal.send(pack(ack, self.hal.key(n)))
+            self.transmit(now, pack(ack, self.hal.key(n)))
+        self.send_commands(now)
+        if self.beacon_at is None or now >= self.beacon_at or now < self.beacon_at - BEACON_S:
+            beacon = {"k": "BEACON", "n": "GATEWAY", "s": self.boot, "gt": now}
+            self.transmit(now, pack(beacon, self.hal.key("GATEWAY")))
+            self.beacon_at = now + BEACON_S
+        return min([self.beacon_at] + [self.send_at.get(num, now) for num in self.outbox])
+
+    # --- radio and dispatch ---
+    def transmit(self, now, raw):
+        if not self.airtime.take(now, airtime_s(len(raw)), True):
+            return False
+        self.hal.send(raw, cad=True)
+        return True
+
+    def send_commands(self, now):
+        """Unconfirmed commands that are due; ongoing problems go before ones already over."""
+        for num, c in sorted(self.outbox.items(), key=lambda kv: (kv[1]["over"], kv[1]["t"], int(kv[0]))):
+            if now < self.send_at.get(num, now):
+                continue
+            raw = pack({"k": "CMD", "n": c["n"], "s": int(num), "t": c["t"], "a": c["a"], "over": c["over"]},
+                       self.hal.key(c["n"]))
+            if self.transmit(now, raw):
+                tries = self.tries.get(num, 0)
+                self.send_at[num] = now + retry_wait(tries, True, c["n"] not in self.silent, self.rng)
+                self.tries[num] = tries + 1
+            else:
+                self.send_at[num] = now + 60
+
+    def hurry(self, now, node):
+        """A node just spoke, so it can hear: send what is waiting for it now."""
+        for num, c in self.outbox.items():
+            if c["n"] == node and self.tries.get(num):
+                self.send_at[num], self.tries[num] = now, 0
+
+    def confirmed(self, now, m):
+        num = str(m["s"])
+        if self.outbox.get(num, {}).get("n") != m["n"]:
+            return                  # not waiting for it (a repeat, or a replay): proves nothing
+        del self.outbox[num]
+        self.send_at.pop(num, None)
+        self.tries.pop(num, None)
+        self.dirty = True
+        self.hurry(now, m["n"])
+        self.last_seen[m["n"]] = now
+
+    def command(self, now, node, code, t, over=0):
+        self.command_number = max(self.command_number + 1, int(now))
+        self.outbox[str(self.command_number)] = {"n": node, "a": code, "t": t, "over": over}
+        self.dirty = True
+
+    def tell(self, now, node, code, t):
+        """Tell a node a problem is going on (once, until it ends)."""
+        active = self.told.setdefault(node, {})
+        if code in SUPPLY_CODES:
+            for other in SUPPLY_CODES:
+                if other != code and active.pop(other, None) is not None:
+                    self._mark_over(node, (other,), t)          # replaced by the newer state
+        if code not in active:
+            active[code] = t
+            self.command(now, node, code, t)
+
+    def _mark_over(self, node, codes, t_end):
+        """Commands not yet delivered whose problem has ended go out marked over."""
+        for num, c in list(self.outbox.items()):
+            if c["n"] == node and c["a"] in codes and not c["over"] and c["t"] <= t_end:
+                del self.outbox[num]
+                self.send_at.pop(num, None)
+                self.tries.pop(num, None)
+                self.command(now=self.hal.now(), node=node, code=c["a"], t=c["t"], over=1)
+
+    def tell_ended(self, now, node, clear_code, codes, t_end):
+        active = self.told.get(node, {})
+        ended = [code for code in codes if code in active and active[code] <= t_end]
+        if ended:
+            for code in ended:
+                del active[code]
+            self._mark_over(node, codes, t_end)
+            self.command(now, node, clear_code, t_end)
+
+    def pipe_leak_nodes(self, floor_range, confidence):
+        if confidence == "unlocalised" or not floor_range:
+            return sorted(self.flats | {self.tank})
+        return sorted({f for f in self.flats if self._floor_of(f) in floor_range} | {self.tank})
+
+    def dispatch(self, now, ev):
+        kind = ev["event"]
+        if kind == "PIPE_LEAK":
+            self.told_pipe = self.pipe_leak_nodes(ev.get("suspected_range"), ev.get("localization_confidence"))
+            for node in self.told_pipe:
+                self.tell(now, node, "PIPE_LEAK", self.pipe_since if self.pipe_since is not None else ev["t"])
+        elif kind == "PIPE_LEAK_PAST":                      # found only now, and already history
+            for node in self.pipe_leak_nodes(ev["suspected_range"], ev["localization_confidence"]):
+                self.command(now, node, "PIPE_LEAK", ev["began_t"], over=1)
+        elif kind in SUPPLY_CODES:
+            self.tell(now, self.tank, kind, ev.get("event_t", ev["t"]))
+        elif kind == "SUPPLY_RECOVERED":
+            self.tell_ended(now, self.tank, "SUPPLY_CLEARED", SUPPLY_CODES, ev["event_t"])
+        elif kind in ("NEW_ALERT", "REPEAT_ALERT") and ev.get("possible_cause") == "PIPE_LEAK":
+            self.tell(now, ev["node"], "PIPE_LEAK_CAUSE", ev["t"])
+            if ev["node"] not in self.told_cause:
+                self.told_cause.append(ev["node"])
+
+    def end_pipe_leak(self, now):
+        for node in self.told_pipe:
+            self.tell_ended(now, node, "PIPE_LEAK_CLEARED", ("PIPE_LEAK",), now)
+        for node in self.told_cause:
+            self.tell_ended(now, node, "PIPE_LEAK_CAUSE_CLEARED", ("PIPE_LEAK_CAUSE",), now)
+        self.told_pipe, self.told_cause = [], []
 
     def supply_recovered(self, now, m):
         if m["t"] < self.tank_low_t:
@@ -238,6 +377,7 @@ class Gateway:
         ev = {"t": now, "event": kind, **info}
         self.events.append(ev)
         self.analytics.on_event(now, ev)
+        self.dispatch(self.hal.now(), ev)
 
     def snapshot(self, now=None):
         """Return a JSON-serializable operational snapshot for the dashboard."""
@@ -251,7 +391,8 @@ class Gateway:
         # "possibly": a real flat leak during a pipe leak is labelled too. An alert that arrives
         # before PIPE_LEAK is decided is not labelled; the time test skips older stored alerts.
         extra = {}
-        if m["a"] == "LEAK_PRESSURE_DROP" and self.pipe_alerted and m["t"] >= self.pipe_since:
+        if m["a"] == "LEAK_PRESSURE_DROP" and self.pipe_alerted and m["t"] >= self.pipe_since \
+                and not self.analytics.is_stale(m["n"], "FLAT_LEAK", m["t"]):
             extra["possible_cause"] = "PIPE_LEAK"
         if prev:
             self.decide(m["t"], "REPEAT_ALERT", node=m["n"], alert=m["a"], count=prev[1] + 1,
@@ -402,6 +543,7 @@ class Gateway:
             if newest and self.pipe_alerted:
                 self.pipe_alerted = False                   # re-arm: a later leak alerts again
                 self.analytics.clear_pipe_leak(t_resolved=now)
+                self.end_pipe_leak(now)
             return
         pair, error_pct = {first, first + 1}, self.verdicts[first + 1][1]
         if newest and not self.pipe_alerted:
@@ -415,8 +557,9 @@ class Gateway:
                         localization_confidence=conf, floor_drops=drops)
             return
         if not newest and not pair & self.reported:         # an earlier leak, known only now
+            _, floor_range, conf = self._localize_floor(self._cross_floor_drops(first + 1))
             self.decide(now, "PIPE_LEAK_PAST", interval=first + 1, error_pct=error_pct,
-                        began_t=first * SUMMARY_S)
+                        began_t=first * SUMMARY_S, suspected_range=floor_range, localization_confidence=conf)
         self.reported |= pair
 
     def _forget_old_blocks(self):
@@ -448,7 +591,7 @@ if __name__ == "__main__":
             msgs, self.box = self.box, []
             return msgs
 
-        def send(self, raw):
+        def send(self, raw, cad=False):
             self.sent.append(raw)
 
     def block(gw, i, vols):
@@ -489,6 +632,65 @@ if __name__ == "__main__":
         block(gw4, i, v)
     assert label(gw4.hal.t) is None                           # pipe check re-armed
 
+    # Dispatch. Pipe leak with no pressure data: floor unknown, so every node; repeated until
+    # confirmed; ended by the balance check; a confirmation from the wrong node proves nothing
+    def commands(gw, since=0):
+        out = []
+        for raw in gw.hal.sent[since:]:
+            m = unpack(raw, sim_key)
+            if m["k"] == "CMD":
+                out.append((m["n"], m["a"], m["over"], m["s"]))
+        return out
+
+    def deliver(gw, *packets):
+        gw.hal.box = [pack(m, sim_key(m["n"])) for m in packets]
+        gw.step()
+
+    gw5 = Gateway(FakeHAL(), [F1, F2], T)
+    gw5.step()
+    assert unpack(gw5.hal.sent[0], sim_key) == {"k": "BEACON", "n": "GATEWAY", "s": 0, "gt": 0}, "beacon at startup"
+    for i, v in enumerate([ok, leak, leak]):
+        block(gw5, i, v)
+    first = {(n, a) for n, a, _, _ in commands(gw5)}
+    assert first == {(n, "PIPE_LEAK") for n in (F1, F2, T)}, first
+    mine = {n: num for n, _, _, num in commands(gw5)}
+    gw5.hal.t += 10
+    deliver(gw5, {"k": "GOT", "n": F2, "s": mine[F1], "t": gw5.hal.t})
+    assert len(gw5.outbox) == 3, "wrong node"
+    deliver(gw5, *({"k": "GOT", "n": n, "s": num, "t": gw5.hal.t} for n, num in mine.items()))
+    assert not gw5.outbox
+    seen = len(gw5.hal.sent)
+    for i in (3, 4):
+        block(gw5, i, ok)
+    assert {(n, a, o) for n, a, o, _ in commands(gw5, seen)} == {(n, "PIPE_LEAK_CLEARED", 0) for n in (F1, F2, T)}
+
+    # Floor known: only the tank and those floors
+    gw6 = Gateway(FakeHAL(), ["B-401", "B-301", "B-101"], T)
+    gw6.decide(0, "PIPE_LEAK", suspected_floor="3", suspected_range=["3"], localization_confidence="high")
+    assert sorted(c["n"] for c in gw6.outbox.values()) == ["B-301", T]
+
+    # Supply states go to the tank; one replaces another; over before delivery: sent as over.
+    # The gateway restarts with it undelivered, and still delivers
+    hal7 = FakeHAL()
+    hal7.storage_path = os.path.join(tempfile.mkdtemp(), "GW7.jsonl")
+    hal7.t = 1000
+    gw7 = Gateway(hal7, [F1], T)
+    deliver(gw7, {"k": "FLAG", "n": T, "s": 1, "t": 1000, "f": "SUPPLY_LOW", "level": 0.4, "inflow": 0.0})
+    assert [(c["n"], c["a"], c["over"]) for c in gw7.outbox.values()] == [(T, "SUPPLY_EVENT", 0)]
+    hal7.t = 1060
+    gw7.decide(1060, "LEAK_TANK_DRAIN", event_t=1030)
+    assert sorted((c["a"], c["over"]) for c in gw7.outbox.values()) == [("LEAK_TANK_DRAIN", 0), ("SUPPLY_EVENT", 1)]
+    deliver(gw7, {"k": "FLAG", "n": T, "s": 2, "t": 1050, "f": "SUPPLY_RECOVERED", "level": 1.5, "inflow": 0.3})
+    waiting = sorted((c["a"], c["over"]) for c in gw7.outbox.values())
+    assert waiting == [("LEAK_TANK_DRAIN", 1), ("SUPPLY_CLEARED", 0), ("SUPPLY_EVENT", 1)], waiting
+    hal7.sent.clear()
+    gw7 = Gateway(hal7, [F1], T)
+    gw7.step()
+    assert len(commands(gw7)) == 3 and unpack(hal7.sent[-1], sim_key)["k"] == "BEACON"
+
+    # A flat's pressure alert during a pipe leak: that flat is told the likely cause
+    assert any(c["n"] == F1 and c["a"] == "PIPE_LEAK_CAUSE" for c in gw4.outbox.values())
+
     # F2 goes silent for 4 blocks (60 min): alert and pause; it comes back with its stored
     # summaries and the late blocks are checked
     gw = Gateway(FakeHAL(), [F1, F2], T)
@@ -522,7 +724,8 @@ if __name__ == "__main__":
     hal.box = [pack({"k": "ALERT", "n": F1, "s": 2, "t": 0, "a": "LEAK_NIGHT_FLOW"}, b"attacker-guessed"), real]
     gw.step()
     assert len(gw.log) == 1 and sorted(events(gw)) == ["BAD_PACKET", "NEW_ALERT"], events(gw)
-    assert unpack(hal.sent[0], sim_key) == {"k": "ACK", "n": F1, "s": 1, "gt": 0}
+    acks = [m for m in (unpack(raw, sim_key) for raw in hal.sent) if m["k"] == "ACK"]
+    assert acks == [{"k": "ACK", "n": F1, "s": 1, "gt": 0}]
     gw = Gateway(hal, [F1], T)                                           # gateway restarts
     hal.box = [real]                                                     # someone replays the alert
     gw.step()

@@ -15,7 +15,7 @@ for _sub in ("edge_node", "gateway", "communication"):
 
 from aqua_edge import SUMMARY_S
 from gateway import Gateway, SILENT_S
-from packet import pack, sim_key
+from packet import pack, sim_key, unpack
 
 
 FLATS = ["B-401", "B-402", "B-301", "B-201", "B-101", "B-G01"]
@@ -42,7 +42,7 @@ class TestHAL:
         self.inbox.clear()
         return out
 
-    def send(self, pkt):
+    def send(self, pkt, cad=False):
         self.sent.append(pkt)
 
 
@@ -51,6 +51,10 @@ def _make_gw():
     hal = TestHAL(os.path.join(td, "seen.json"))
     gw = Gateway(hal, FLATS, TANK)
     return gw, hal, td
+
+
+def _acks(hal):
+    return sum(unpack(raw, sim_key)["k"] == "ACK" for raw in hal.sent)
 
 
 def _send(gw, hal, msg, rx=None):
@@ -340,12 +344,12 @@ def test_supply_recovery_and_clock_ok():
 def test_replay_is_no_sign_of_life():
     gw, hal, _ = _make_gw()
     old = pack(_Node(gw, hal)("B-401", 100, "SUM", i=0, vol_l=1.0), sim_key("B-401"))
-    sent = len(hal.sent)
+    sent = _acks(hal)
     for t in range(600, SILENT_S + 900, 600):
         hal.t, hal.inbox = t, [old]
         gw.step()
     assert "B-401" in gw.silent and len(gw.log) == 1
-    assert len(hal.sent) > sent, "a repeat is still acknowledged: it may be a real retry"
+    assert _acks(hal) > sent, "a repeat is still acknowledged: it may be a real retry"
 
 
 def _pipe_events(gw):
@@ -424,7 +428,10 @@ def test_restart_restores_state():
 
     # power cut during the save: no acknowledgement, so the node still has the message
     msg = {"k": "ALERT", "n": "B-301", "s": 900, "t": 20300, "a": "LEAK_NIGHT_FLOW"}
-    acked, real_replace = len(hal.sent), os.replace
+    def acks():
+        return _acks(hal)
+
+    acked, real_replace = acks(), os.replace
 
     def power_cut(*_):
         raise OSError("power cut")
@@ -437,10 +444,10 @@ def test_restart_restores_state():
         pass
     finally:
         os.replace = real_replace
-    assert len(hal.sent) == acked
+    assert acks() == acked
     gw = Gateway(hal, FLATS, TANK)
     _send(gw, hal, msg, rx=20400)                           # the node sends it again
-    assert ("B-301", "FLAT_LEAK") in _open(gw) and len(hal.sent) == acked + 1
+    assert ("B-301", "FLAT_LEAK") in _open(gw) and acks() == acked + 1
 
 
 def test_old_seen_file_is_still_read():
