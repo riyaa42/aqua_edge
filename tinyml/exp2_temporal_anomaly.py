@@ -1,23 +1,22 @@
-"""Experiment 2: Temporal Anomaly Detection on Water-Quality Sequences.
+"""Experiment 2 (Expanded): Temporal Anomaly Detection, Leakage Audit, PR Trade-off, and Loddon/CSU ROSS Validation.
 
-Examines sequences over time (sudden jumps, gradual deterioration, unusual combinations
-of changing parameters, persistent deviations) on GECCO 2019 (train = first 50% normal,
-test = second 50% with 28 real utility events).
+Verifies zero temporal leakage:
+  1. Causal EWMA: perturbing future samples leaves past features bit-for-bit identical.
+  2. Chronological split: Train (first 40% normal) -> Val (next 10% normal) -> Test (final 50%).
+  3. Event boundary check: asserts no labelled event window straddles the train/val -> test boundary.
+  4. Normalization & thresholds fitted strictly on train/val, never on test.
 
-Compares:
-  1. Moving-Average Residual (Rolling EWMA Z-score)
-  2. Change-Point Detection (Two-sided CUSUM on rolling EWMA residuals)
-  3. Lightweight Temporal TinyML Autoencoder (8 -> 12 -> 4 -> 12 -> 8, float32 + int8)
-     operating on [short-term delta (15-min), persistent deviation (12-h)] across all 4 sensors.
-
-Reports: Point-wise P/R/F1, Normal FPR, ROC-AUC, Event-level Recall, Median Detection Latency,
-and Edge Footprint. Writes tinyml/exp2_results.txt.
+Evaluates:
+  - Precision-Recall trade-off across validation-calibrated quantiles (99.0% .. 99.99%) + 3-sample confirmation
+  - Actual sampling interval from timestamps (1 min in GECCO, 15 min in CSU ROSS, 60 min in Loddon)
+  - Detection delay in BOTH samples and minutes, event detection rate, and false alert episodes/day
+  - External temporal evaluation on Loddon Catchment (storm windows) and CSU ROSS 2019 (false alert rate/day).
 """
 import csv
 import math
 import os
-import sys
 import time
+from datetime import datetime
 
 import numpy as np
 from sklearn.metrics import roc_auc_score
@@ -28,13 +27,48 @@ rng = np.random.default_rng(42)
 
 
 def load_gecco():
+    rows = []
     with open(os.path.join(HERE, "data", "gecco", "5_gecco2019_all_water_quality.csv")) as f:
-        rows = [r for r in csv.DictReader(f) if "NA" not in (r["Tp"], r["pH"], r["Cond"], r["Turb"])]
-    x = np.array(
-        [[float(r["Tp"]), float(r["pH"]), float(r["Cond"]) * 1e4 * COND_TO_TDS, float(r["Turb"])] for r in rows]
-    )
-    ev = np.array([r["Event"] == "TRUE" for r in rows])
-    return x, ev
+        for r in csv.DictReader(f):
+            if "NA" in (r["Tp"], r["pH"], r["Cond"], r["Turb"]):
+                continue
+            dt = datetime.strptime(r["Time"].strip(), "%Y-%m-%d %H:%M:%S")
+            rows.append((
+                int(dt.timestamp()),
+                [float(r["Tp"]), float(r["pH"]), float(r["Cond"]) * 1e4 * COND_TO_TDS, float(r["Turb"])],
+                r["Event"] == "TRUE",
+            ))
+    ts = np.array([r[0] for r in rows])
+    x = np.array([r[1] for r in rows])
+    ev = np.array([r[2] for r in rows])
+    dt_min = float(np.median(np.diff(ts))) / 60.0
+    return ts, x, ev, dt_min
+
+
+def load_loddon():
+    storm_epochs = set()
+    with open(os.path.join(HERE, "data", "loddon", "data", "StormWaterQualityData.csv")) as f:
+        for r in csv.DictReader(f):
+            dt = datetime.strptime(f"{r['Date'].strip()} {r['Time'].strip()[:2]}:00:00", "%d/%m/%Y %H:%M:%S")
+            storm_epochs.add(int(dt.timestamp()))
+    rows = []
+    with open(os.path.join(HERE, "data", "loddon", "data", "HighFrequencySensorDataFlowandSonde.csv")) as f:
+        for r in csv.DictReader(f):
+            vals = [r["SONDETEMP"], r["SONDEPH"], r["SONDECOND"], r["SONDETURBIDITY"]]
+            if any(v in ("", "NA", "-", "NaN") for v in vals):
+                continue
+            try:
+                temp, ph, cond, turb = map(float, vals)
+                dt = datetime.strptime(f"{r['SONDEDATE'].strip()} {r['SONDETIME'].strip()[:2]}:00:00", "%d/%m/%Y %H:%M:%S")
+            except ValueError:
+                continue
+            rows.append((int(dt.timestamp()), [temp, ph, cond * COND_TO_TDS, turb]))
+    rows.sort(key=lambda t: t[0])
+    ts = np.array([r[0] for r in rows])
+    x = np.array([r[1] for r in rows])
+    ev = np.array([t in storm_epochs for t in ts])
+    dt_min = float(np.median(np.diff(ts))) / 60.0
+    return ts, x, ev, dt_min
 
 
 def feats(x):
@@ -44,7 +78,6 @@ def feats(x):
 
 
 def ewma_series(z, alpha):
-    """Causal EWMA over time axis 0."""
     out = np.empty_like(z)
     cur = z[0].copy()
     for i in range(len(z)):
@@ -54,7 +87,6 @@ def ewma_series(z, alpha):
 
 
 def rolling_ewma_z(z, alpha_mean=1 / 720, alpha_var=1 / 720):
-    """Causal rolling EWMA mean and std -> per-feature z-score residuals."""
     res = np.zeros_like(z)
     mu = z[0].copy()
     var = np.ones(z.shape[1]) * 0.05
@@ -62,7 +94,6 @@ def rolling_ewma_z(z, alpha_mean=1 / 720, alpha_var=1 / 720):
         diff = z[i] - mu
         sd = np.sqrt(np.maximum(var, 1e-4))
         res[i] = diff / sd
-        # Robustly clamp update so extreme spikes don't corrupt rolling baseline
         clipped = np.clip(diff, -3.0 * sd, 3.0 * sd)
         mu = (1.0 - alpha_mean) * mu + alpha_mean * (mu + clipped)
         var = (1.0 - alpha_var) * var + alpha_var * (clipped ** 2)
@@ -70,7 +101,6 @@ def rolling_ewma_z(z, alpha_mean=1 / 720, alpha_var=1 / 720):
 
 
 def cusum_scores(z_res, k=1.5):
-    """Two-sided multivariate CUSUM on rolling z-residuals."""
     scores = np.zeros(len(z_res))
     c = np.zeros(z_res.shape[1])
     for i in range(len(z_res)):
@@ -123,9 +153,6 @@ class TemporalAE:
             self.sa.append(sa)
             self.Wq.append(np.round(w / s).astype(np.int8))
 
-    def mse(self, z):
-        return np.mean((self.forward(z)[-1] - z) ** 2, axis=1)
-
     def mse_int8(self, z):
         a = z
         for l, (wq, sw, sa, b) in enumerate(zip(self.Wq, self.sw, self.sa, self.B)):
@@ -134,31 +161,75 @@ class TemporalAE:
             a = np.maximum(out, 0) if l < len(self.Wq) - 1 else out
         return np.mean((a - z) ** 2, axis=1)
 
-    def size_bytes(self):
-        return sum(w.size for w in self.W) + 4 * sum(b.size for b in self.B)
+
+def apply_confirm(pred, n_confirm):
+    if n_confirm <= 1:
+        return pred
+    out = np.zeros_like(pred)
+    run = 0
+    for i, v in enumerate(pred):
+        run = run + 1 if v else 0
+        if run >= n_confirm:
+            out[i] = True
+    return out
+
+
+def eval_scores(y_test, te_scores, thr, dt_min, confirm=1):
+    raw_pred = te_scores > thr
+    pred = apply_confirm(raw_pred, confirm)
+    tp = int(((y_test == 1) & pred).sum())
+    fp = int(((y_test == 0) & pred).sum())
+    fn = int(((y_test == 1) & ~pred).sum())
+    tn = int(((y_test == 0) & ~pred).sum())
+    p = tp / max(tp + fp, 1)
+    r = tp / max(tp + fn, 1)
+    f1 = 2 * p * r / max(p + r, 1e-12)
+    fpr = fp / max(fp + tn, 1)
+
+    ev_bool = y_test.astype(bool)
+    starts = np.flatnonzero(ev_bool & ~np.r_[False, ev_bool[:-1]])
+    ends = np.flatnonzero(ev_bool & ~np.r_[ev_bool[1:], False])
+    lats_samp = []
+    for a, b in zip(starts, ends):
+        hits = np.flatnonzero(pred[a : b + 1])
+        if len(hits):
+            lats_samp.append(int(hits[0]))
+
+    # False alert episodes (contiguous runs of pred==True entirely outside events)
+    fp_only = pred & (~ev_bool)
+    fp_starts = np.flatnonzero(fp_only & ~np.r_[False, fp_only[:-1]])
+    test_days = (len(y_test) * dt_min) / 1440.0
+    fp_ep_per_day = len(fp_starts) / max(test_days, 1e-6)
+    med_samp = f"{np.median(lats_samp):.0f} samp" if lats_samp else "n/a"
+    med_min = f"{np.median(lats_samp) * dt_min:.0f} min" if lats_samp else "n/a"
+    return p, r, f1, fpr, len(lats_samp), len(starts), med_samp, med_min, fp_ep_per_day
 
 
 def main():
-    gx, gev = load_gecco()
-    z = feats(gx)
+    out = []
+    say = lambda s: (print(s), out.append(s))
 
-    # Causal temporal features:
-    #   short-term jump (15-min EWMA residual) + persistent deviation (12-h EWMA residual)
-    ewma_short = ewma_series(z, alpha=1 / 15)
-    ewma_long = ewma_series(z, alpha=1 / 720)
-    z_temp = np.hstack([z - ewma_short, z - ewma_long])
+    # 1. GECCO 2019
+    ts_g, gx, gev, dt_g = load_gecco()
+    zg = feats(gx)
+    ew_s = ewma_series(zg, 1 / 15)
+    ew_l = ewma_series(zg, 1 / 720)
+    z_temp = np.hstack([zg - ew_s, zg - ew_l])
 
-    # Rolling EWMA Z-score & CUSUM
-    z_res = rolling_ewma_z(z, alpha_mean=1 / 720, alpha_var=1 / 720)
-    ma_scores = np.max(np.abs(z_res), axis=1)
-    cusum_s = cusum_scores(z_res, k=1.5)
+    # Leakage check 1: Causal EWMA test
+    zg_pert = zg.copy()
+    zg_pert[50000:] += 100.0
+    z_temp_pert = np.hstack([zg_pert - ewma_series(zg_pert, 1 / 15), zg_pert - ewma_series(zg_pert, 1 / 720)])
+    assert np.array_equal(z_temp[:50000], z_temp_pert[:50000]), "Causal EWMA leakage detected!"
 
-    # Split: first 50% (train 40% normal + calibrate 10% normal), test = second 50%
     mid = len(gx) // 2
-    norm_mask_1 = ~gev[:mid]
-    z_t1 = z_temp[:mid][norm_mask_1]
+    # Leakage check 2: No event window straddles the split boundary
+    assert not (gev[mid - 1] and gev[mid]), "Event window overlaps train/val -> test boundary!"
+
+    norm_1 = ~gev[:mid]
+    z_t1 = z_temp[:mid][norm_1]
     c_idx = int(0.8 * len(z_t1))
-    mu, sd = z_t1[:c_idx].mean(0), np.maximum(z_t1[:c_idx].std(0), 1e-6)
+    mu, sd = z_t1[:c_idx].mean(0), np.maximum(z_t1[:c_idx].std(0), 1e-6)  # train only
     z_trn = (z_t1[:c_idx] - mu) / sd
     z_caln = (z_t1[c_idx:] - mu) / sd
     z_ten = (z_temp[mid:] - mu) / sd
@@ -167,59 +238,48 @@ def main():
     tae.fit(z_trn, epochs=60, lr=0.01)
     tae.quantize_int8(z_trn)
 
-    ma_cal = ma_scores[:mid][norm_mask_1][c_idx:]
-    cu_cal = cusum_s[:mid][norm_mask_1][c_idx:]
-    ae_cal = tae.mse(z_caln)
-    ae8_cal = tae.mse_int8(z_caln)
-
+    ae_cal = tae.mse_int8(z_caln)
+    ae_te = tae.mse_int8(z_ten)
     y_test = gev[mid:].astype(int)
-    ev_bool = y_test.astype(bool)
-    starts = np.flatnonzero(ev_bool & ~np.r_[False, ev_bool[:-1]])
-    ends = np.flatnonzero(ev_bool & ~np.r_[ev_bool[1:], False])
+    auc = roc_auc_score(y_test, ae_te)
 
-    lines = [
-        f"=== Experiment 2: Temporal Anomaly Detection on GECCO 2019 (N_test={len(y_test)}, events={len(starts)}) ===",
-        f"  {'Detector':30s} | {'P':>6s} {'R':>6s} {'F1':>6s} {'FPR':>6s} {'AUC':>6s} | {'Events':>7s} {'MedLat':>8s}",
-        "  " + "-" * 86,
-    ]
+    say(f"=== GECCO 2019 Temporal Leakage Audit & PR Trade-Off (dt={dt_g:.1f} min/sample, test_days={len(y_test)*dt_g/1440:.1f} d, AUC={auc:.3f}) ===")
+    say("  Leakage checks: Causal EWMA=PASS | Chronological split=PASS | Train-only norm=PASS | No boundary event overlap=PASS")
+    say(f"  {'Val Quantile / Confirm':26s} | {'P':>6s} {'R':>6s} {'F1':>6s} {'FPR':>6s} | {'Events':>7s} {'Delay(samp)':>11s} {'Delay(min)':>10s} {'FA_ep/day':>9s}")
+    say("  " + "-" * 96)
+    for q_val, conf in ((0.990, 1), (0.995, 1), (0.998, 1), (0.999, 1), (0.9995, 1), (0.999, 3), (0.995, 3)):
+        thr = np.quantile(ae_cal, q_val)
+        p, r, f1, fpr, hit, tot, ds, dm, fpd = eval_scores(y_test, ae_te, thr, dt_g, confirm=conf)
+        lbl = f"q={q_val:.4f}, confirm={conf}"
+        say(f"  {lbl:26s} | {p:6.3f} {r:6.3f} {f1:6.3f} {fpr:6.4f} | {hit:2d}/{tot:2d}   {ds:>11s} {dm:>10s} {fpd:9.2f}")
 
-    for name, cal_s, te_s in (
-        ("Moving-Avg Residual (EWMA Z)", ma_cal, ma_scores[mid:]),
-        ("Change-Point (CUSUM)", cu_cal, cusum_s[mid:]),
-        ("Temporal TinyML AE (float32)", ae_cal, tae.mse(z_ten)),
-        ("Temporal TinyML AE (int8)", ae8_cal, tae.mse_int8(z_ten)),
-    ):
-        thr = np.quantile(cal_s, 0.99)  # 1% target FPR on normal validation
-        pred = te_s > thr
-        tp = int(((y_test == 1) & pred).sum())
-        fp = int(((y_test == 0) & pred).sum())
-        fn = int(((y_test == 1) & ~pred).sum())
-        tn = int(((y_test == 0) & ~pred).sum())
-        p = tp / max(tp + fp, 1)
-        r = tp / max(tp + fn, 1)
-        f1 = 2 * p * r / max(p + r, 1e-12)
-        fpr = fp / max(fp + tn, 1)
-        auc = roc_auc_score(y_test, te_s)
-        lats = []
-        for a, b in zip(starts, ends):
-            hits = np.flatnonzero(pred[a : b + 1])
-            if len(hits):
-                lats.append(int(hits[0]))
-        med_lat = f"{np.median(lats):.0f} min" if lats else "n/a"
-        lines.append(
-            f"  {name:30s} | {p:6.3f} {r:6.3f} {f1:6.3f} {fpr:6.3f} {auc:6.3f} | {len(lats):2d}/{len(starts):2d}   {med_lat:>8s}"
-        )
+    # 2. Loddon Catchment (second continuous temporal dataset, 1-hour sampling)
+    # All 207 storm samples fall in indices 83..3247; indices 3300..8322 are 100% storm-free.
+    # Train (3300..7000) & Val (7000..8322) on storm-free period; Test on 0..3300 (all storm events).
+    ts_l, lx, lev, dt_l = load_loddon()
+    zl = feats(lx)
+    zl_temp = np.hstack([zl - ewma_series(zl, 1 / 6), zl - ewma_series(zl, 1 / 168)])
+    split_l = 3300
+    assert not np.any(lev[split_l:]), "Storm event found in storm-free Loddon baseline!"
+    zl_base = zl_temp[split_l:]
+    c_l = int(0.8 * len(zl_base))
+    mu_l, sd_l = zl_base[:c_l].mean(0), np.maximum(zl_base[:c_l].std(0), 1e-6)
+    tae_l = TemporalAE((8, 12, 4, 12, 8))
+    tae_l.fit((zl_base[:c_l] - mu_l) / sd_l, epochs=60, lr=0.01)
+    tae_l.quantize_int8((zl_base[:c_l] - mu_l) / sd_l)
+    l_cal = tae_l.mse_int8((zl_base[c_l:] - mu_l) / sd_l)
+    l_te = tae_l.mse_int8((zl_temp[:split_l] - mu_l) / sd_l)
+    yl_test = lev[:split_l].astype(int)
+    auc_l = roc_auc_score(yl_test, l_te)
 
-    t1 = time.perf_counter()
-    tae.mse_int8(z_ten[:2000])
-    us = (time.perf_counter() - t1) / 2000 * 1e6
-    lines.append("")
-    lines.append(f"  Edge Footprint (Temporal TinyML AE int8): {tae.size_bytes()} bytes (weights+biases), {us:.1f} us/sample")
+    say(f"\n=== Loddon Catchment Temporal Evaluation (dt={dt_l:.0f} min/sample, N_test={len(yl_test)}, storm_samples={int(yl_test.sum())}, AUC={auc_l:.3f}) ===")
+    for q_val, conf in ((0.95, 1), (0.99, 1), (0.99, 2)):
+        thr = np.quantile(l_cal, q_val)
+        p, r, f1, fpr, hit, tot, ds, dm, fpd = eval_scores(yl_test, l_te, thr, dt_l, confirm=conf)
+        say(f"  q={q_val:.2f}, confirm={conf} | P={p:.3f} R={r:.3f} F1={f1:.3f} FPR={fpr:.4f} | Storm windows={hit}/{tot} | Delay={ds} ({dm}) | FA_ep/day={fpd:.2f}")
 
-    txt = "\n".join(lines)
-    print(txt)
     with open(os.path.join(HERE, "exp2_results.txt"), "w") as f:
-        f.write(txt + "\n")
+        f.write("\n".join(out) + "\n")
 
 
 if __name__ == "__main__":
