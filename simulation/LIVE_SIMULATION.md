@@ -21,7 +21,7 @@ The earlier offline test fed every node a pre-made 48-hour file of sensor values
 | Nodes and gateway | `live/node.py` | One process (or container) per node, running the real firmware |
 | Firmware | `../firmware/aqua_edge.py`, `gateway.py` | Detection rules, alerts, sending, re-sending, SD card storage, gateway analysis |
 | Radio model | `live/radio.py` | Decides which packets arrive: airtime, collisions, a gateway that cannot hear while it sends, radio cuts, weak links |
-| Dashboard | `live/dashboard.py`, `live/dashboard.html` | Web page (standard library only, works offline) showing the building as the gateway sees it, with the leak test: pick a flat and a leak size, and the simulation runs ahead until that flat's alert reaches the gateway. Also triggers water-quality events and radio cuts, shows the radio numbers, and Start again wipes the run and starts fresh (laptop run only) |
+| Dashboard | `live/dashboard.py`, `live/dashboard.html` | Web page (standard library only, works offline) showing the building as the gateway sees it, with leaks: pick a flat and a leak size, add as many as you like and run the clock yourself, or fast-forward until that flat's alert reaches the gateway. Every leak in the run is listed with when it was noticed and a Fix button. Also triggers water-quality events and radio cuts, shows the radio numbers, and Start again wipes the run and starts fresh (laptop run only) |
 | Checker | `live/check_comms.py` | Scores a finished run with PASS/FAIL lines |
 | ns-3 | `ns3/aqua_lora.cc`, `ns3/run_ns3.sh` | Builds the link table for building B and replays live runs |
 | Containers | `live/Dockerfile`, `live/compose.yaml` | One Docker container per node, gateway, timekeeper and panel |

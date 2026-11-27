@@ -26,7 +26,7 @@
   --body: "Nunito", ui-rounded, system-ui, sans-serif;
 }
 * { box-sizing: border-box; }
-[hidden] { display: none !important; }     /* .steps and .verdict set display, which would beat it */
+[hidden] { display: none !important; }     /* classes that set display would otherwise beat it */
 html { background: var(--bg); }
 body { margin: 0; color: var(--ink); font: 16px/1.5 var(--body); background: var(--bg); min-height: 100vh; }
 h1, h2, h3 { font-family: var(--display); font-weight: 600; margin: 0; letter-spacing: .005em; }
@@ -123,20 +123,24 @@ input[type=range]::-moz-range-thumb { width: 30px; height: 30px; border: 0; bord
 .bar { height: 16px; border-radius: 999px; background: var(--slab); box-shadow: var(--well-shadow); overflow: hidden; margin-top: 10px; }
 .bar i { display: block; height: 100%; border-radius: 999px; background: var(--calm); box-shadow: inset 0 4px 6px rgba(255, 255, 255, .5); transition: width .8s; }
 
-/* Result timeline: a real sequence, so the steps are numbered */
-.steps { list-style: none; padding: 0; margin: 18px 0 0; display: grid; gap: 14px; }
-.steps li { display: grid; grid-template-columns: 46px 1fr auto; gap: 14px; align-items: center; padding: 12px 16px 12px 12px; border-radius: 22px; background: var(--slab); box-shadow: var(--well-shadow); }
-.steps .n { width: 46px; height: 46px; border-radius: 50%; display: grid; place-items: center; font-family: var(--display); font-weight: 600; font-size: 1.2rem; background: var(--clay); box-shadow: 4px 5px 10px rgba(var(--shade), .18), inset 3px 4px 8px rgba(255, 255, 255, .9); }
-.steps li.done .n { background: var(--calm); }
-.steps li.hit .n { background: var(--alert); }
-.steps li.wait { opacity: .6; }
-.steps .what { font-weight: 800; }
-.steps .what small { display: block; font-weight: 600; color: var(--ink-soft); font-size: .9rem; }
-.steps .when { text-align: right; font-variant-numeric: tabular-nums; }
-.steps .when b { display: block; font-family: var(--display); font-weight: 600; font-size: 1.15rem; }
-.steps .when small { color: var(--ink-soft); font-weight: 700; }
-.verdict { margin-top: 18px; display: flex; flex-wrap: wrap; align-items: center; gap: 14px; justify-content: space-between; }
-.verdict p { font-weight: 700; }
+/* Leaks in this run. Each one's three moments are a real sequence, so they are numbered */
+.leaks { list-style: none; padding: 0; margin: 16px 0 0; display: grid; gap: 14px; max-height: 560px; overflow: auto; padding-right: 4px; }
+.leak { padding: 14px 16px; border-radius: 24px; background: var(--slab); box-shadow: var(--well-shadow); }
+.leak-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 14px; }
+.leak-head .what { font-family: var(--display); font-weight: 600; font-size: 1.15rem; }
+.leak-head .what small { font-family: var(--body); font-weight: 700; color: var(--ink-soft); font-size: .88rem; margin-left: 6px; }
+.leak-head .btn { padding: 8px 16px; border-radius: 16px; }
+.leak-status { display: flex; align-items: center; gap: 10px; }
+.chip.on { background: var(--alert); color: var(--ink); box-shadow: inset -2px -3px 6px rgba(var(--shade), .15), inset 2px 3px 6px rgba(255, 255, 255, .5); }
+.moments { list-style: none; padding: 0; margin: 12px 0 0; display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.moments li { display: grid; grid-template-columns: 30px 1fr; gap: 10px; align-items: start; padding: 10px 12px; border-radius: 18px; background: var(--clay);
+  box-shadow: 4px 5px 10px rgba(var(--shade), .12), inset 3px 4px 8px rgba(255, 255, 255, .9); font-size: .88rem; line-height: 1.35; }
+.moments .n { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; font-family: var(--display); font-weight: 600; background: var(--slab); box-shadow: var(--well-shadow); }
+.moments li.done .n { background: var(--calm); box-shadow: none; }
+.moments li.hit .n { background: var(--alert); box-shadow: none; }
+.moments li.wait { opacity: .6; }
+.moments b { display: block; font-family: var(--display); font-weight: 600; font-size: 1rem; font-variant-numeric: tabular-nums; }
+.moments span span { color: var(--ink-soft); font-weight: 700; }
 
 /* Feed, tank, other events */
 .feed { list-style: none; padding: 0; margin: 14px 0 0; display: grid; gap: 10px; max-height: 340px; overflow: auto; padding-right: 6px; }
@@ -168,7 +172,7 @@ input[type=range]::-moz-range-thumb { width: 30px; height: 30px; border: 0; bord
   .building { padding: 16px 12px 20px; }
   .floor { gap: 6px; padding: 8px; grid-template-columns: 20px repeat(4, 1fr); }
   .flat .num { font-size: 1.05rem; } .flat .word { display: none; }
-  .steps li { grid-template-columns: 40px 1fr; } .steps .when { grid-column: 2; text-align: left; }
+  .moments { grid-template-columns: 1fr; }
 }
 @media (prefers-reduced-motion: reduce) { .drip svg { animation: none; } * { transition: none !important; } }
 </style>
@@ -221,8 +225,8 @@ input[type=range]::-moz-range-thumb { width: 30px; height: 30px; border: 0; bord
 
       <section class="side">
         <article class="card clay" id="test-card">
-          <h2>Leak test</h2>
-          <p class="hint">Pick a flat on the building and choose how bad the leak is. The simulation then runs ahead until that flat's alert reaches the gateway, and stops there.</p>
+          <h2>Add a leak</h2>
+          <p class="hint">Pick a flat on the building and choose how bad the leak is. Add as many as you like, and run time with Pause, Play and the speed menu at the top. Or fast-forward: the simulation runs ahead until the flat's alert reaches the gateway, then pauses.</p>
           <div id="start-box" hidden>
             <p class="hint" style="margin-top:14px">No simulation is running. Starting one takes about a minute: every flat first spends a simulated day learning what normal water use looks like.</p>
             <div class="stack"><button class="btn primary" id="start">Start simulation</button></div>
@@ -242,20 +246,22 @@ input[type=range]::-moz-range-thumb { width: 30px; height: 30px; border: 0; bord
               <button class="btn" data-start="hour" aria-pressed="false">At a set hour</button>
               <select id="hour" aria-label="Hour the leak starts" hidden></select>
             </div>
-            <button class="btn primary" id="go" disabled>Start leak and fast-forward</button>
-            <p class="hint" id="go-note" style="margin-top:12px"></p>
+            <div class="seg">
+              <button class="btn primary" id="go" disabled>Start leak</button>
+              <button class="btn" id="go-ff" disabled>Start and fast-forward until found</button>
+            </div>
+            <p class="hint" id="go-note" style="margin-top:-10px"></p>
             <div class="learning" id="learning" hidden>
-              <p class="hint">The flats are learning what normal water use looks like (simulated day 1). The leak test opens when they're done.</p>
+              <p class="hint">The flats are learning what normal water use looks like (simulated day 1). Leaks can be added once they're done, so a leak isn't learned as normal.</p>
               <div class="bar"><i id="learn-bar" style="width:0"></i></div>
             </div>
           </div>
         </article>
 
         <article class="card clay" id="result-card">
-          <h2>Last leak test</h2>
-          <p class="hint" id="result-empty">Results appear here once a leak test has started.</p>
-          <ol class="steps" id="steps" hidden></ol>
-          <div class="verdict" id="verdict" hidden><p id="verdict-text"></p><button class="btn" id="fix">Fix the leak</button></div>
+          <h2>Leaks in this run</h2>
+          <p class="hint" id="result-empty">No leaks yet. Pick a flat and press Start leak.</p>
+          <ol class="leaks" id="leaks" hidden></ol>
         </article>
       </section>
     </div>
@@ -400,35 +406,37 @@ function renderControls() {
   if (learning) $("#learn-bar").style.width = (c.t / LEARN_S * 100).toFixed(1) + "%";
   $("#lps-text").innerHTML = describe(lps);
   $("#hour").hidden = startAt !== "hour";
-  $("#go").disabled = !S.running || learning || racing || !picked;
-  $("#go").textContent = racing ? "Fast-forwarding..." : "Start leak and fast-forward";
+  const open = c && picked && c.leaks && picked in c.leaks;
+  $("#go").disabled = !S.running || learning || !picked;
+  $("#go-ff").disabled = $("#go").disabled || racing;
+  $("#go").textContent = open ? "Change this leak's size" : "Start leak";
+  $("#go-ff").textContent = racing ? "Fast-forwarding..." : open ? "Change size and fast-forward" : "Start and fast-forward until found";
   $("#go-note").textContent = !picked ? "Pick a flat on the building first." : racing
-    ? `Running ahead until ${flatName(c.watching.node)}'s alert reaches the gateway.` : "";
+    ? `Running ahead until ${flatName(c.watching.node)}'s alert reaches the gateway.`
+    : open ? `${flatName(picked)} already leaks ${c.leaks[picked].toFixed(2)} L/s. A flat has one leak at a time, so this changes its size.` : "";
 }
 
 function renderResult() {
-  const t = S.test, c = S.clock, steps = $("#steps");
-  const waitingStart = c && c.watching && (!t || t.start < c.watching.from_s);
-  $("#result-empty").hidden = !!(t || waitingStart); steps.hidden = !(t || waitingStart); $("#verdict").hidden = true;
-  if (waitingStart) {
-    steps.innerHTML = `<li class="wait"><span class="n">1</span><span class="what">Leak starts in ${flatName(c.watching.node)}<small>Fast-forwarding to the start time</small></span><span class="when"><b>${when(c.watching.from_s).split(", ")[1]}</b><small>${when(c.watching.from_s).split(", ")[0]}</small></span></li>`;
-    return;
-  }
-  if (!t) return;
-  const v = typeof t.size === "number" ? t.size : SIZES[t.size], a = t.alert;
-  const row = (n, cls, what, sub, at, after) => `<li class="${cls}"><span class="n">${n}</span><span class="what">${what}<small>${sub}</small></span><span class="when"><b>${at == null ? "" : when(at).split(", ")[1]}</b><small>${after}</small></span></li>`;
-  steps.innerHTML =
-    row(1, "done", `Leak started in ${flatName(t.where)}`, `${v.toFixed(2)} L/s, ${Math.round(v * 3600).toLocaleString()} litres an hour`, t.start, when(t.start).split(", ")[0]) +
-    (a ? row(2, "hit", `${flatName(t.node)} noticed it`, ALERTS[a.a], a.t, `${mins(a.t - t.start)} after the leak`)
-       : row(2, "wait", `Waiting for ${flatName(t.node)} to notice`, c && c.watching ? "Running ahead" : "Not noticed yet", null, c ? `${mins(c.t - t.start)} so far` : "")) +
-    (a ? row(3, "done", "The gateway knew", "Alert arrived by radio", a.rx, `${mins(a.rx - a.t)} after that`)
-       : row(3, "wait", "The gateway knows", "Not yet", null, ""));
-  const gaveUp = !a && c && !c.watching && c.t - t.start >= LEARN_S;
-  $("#verdict").hidden = false;
-  $("#verdict-text").textContent = t.fixed != null ? `Fixed at ${when(t.fixed)}.`
-    : a ? `Found ${mins(a.rx - t.start)} after it started.` : gaveUp ? "No alert within 24 hours of the leak starting." : "Leak still running.";
-  $("#fix").hidden = t.fixed != null;
-  $("#fix").onclick = () => send({do: "fix", where: t.where}).then(ok => ok && toast(`Fixed the leak in ${flatName(t.where)}`));
+  const c = S.clock, box = $("#leaks"), list = S.leaks || [], later = S.later || [];
+  $("#result-empty").hidden = !!(list.length || later.length); box.hidden = !(list.length || later.length);
+  const lpsOf = x => typeof x === "number" ? x : SIZES[x];
+  const amount = v => `${v.toFixed(2)} L/s, ${Math.round(v * 3600).toLocaleString()} L an hour`;
+  const hm = t => when(t).split(", ")[1];
+  const moment = (n, cls, title, at, note) => `<li class="${cls}"><span class="n">${n}</span><span><b>${title}${at == null ? "" : " " + hm(at)}</b><span>${note}</span></span></li>`;
+  const waiting = later.map(x => `<li class="leak"><div class="leak-head"><span class="what">${flatName(x.where)}<small>${amount(lpsOf(x.size))}</small></span><span class="chip">Starts ${when(x.at_s)}</span></div></li>`);
+  const done = list.map(x => {
+    const a = x.alert, end = x.fixed ?? x.replaced, upTo = end ?? (c ? c.t : x.start);
+    const racing = c && c.watching && c.watching.node === x.node && !a && end == null;
+    const status = x.fixed != null ? `<span class="chip">Fixed ${when(x.fixed)}</span>` : x.replaced != null ? `<span class="chip">Size changed ${when(x.replaced)}</span>`
+      : `<span class="chip on">Leaking</span><button class="btn" data-fix="${x.where}">Fix</button>`;
+    const notYet = racing ? "Fast-forwarding" : end != null ? "Not noticed before it ended" : upTo - x.start >= LEARN_S ? "Not noticed in 24 hours" : `Not yet, ${mins(upTo - x.start)} so far`;
+    return `<li class="leak"><div class="leak-head"><span class="what">${flatName(x.where)}<small>${amount(lpsOf(x.size))}</small></span><span class="leak-status">${status}</span></div><ol class="moments">` +
+      moment(1, "done", "Started", x.start, when(x.start).split(", ")[0]) +
+      (a ? moment(2, "hit", "Noticed", a.t, `${ALERTS[a.a]}, ${mins(a.t - x.start)} after it started${x.node === x.where ? "" : " (seen by the tank)"}`) : moment(2, "wait", "Noticed", null, notYet)) +
+      (a ? moment(3, "done", "Gateway knew", a.rx, `${mins(a.rx - a.t)} after that`) : moment(3, "wait", "Gateway knew", null, "Not yet")) + "</ol></li>";
+  });
+  box.innerHTML = waiting.join("") + done.join("");
+  box.querySelectorAll("[data-fix]").forEach(b => b.onclick = () => send({do: "fix", where: b.dataset.fix}).then(ok => ok && toast(`Fixed the leak in ${flatName(b.dataset.fix)}`)));
 }
 
 function feedText(e) {
@@ -482,15 +490,17 @@ $("#lps").oninput = e => {
 document.querySelectorAll("[data-start]").forEach(b => b.onclick = () => {
   startAt = b.dataset.start; document.querySelectorAll("[data-start]").forEach(x => x.setAttribute("aria-pressed", x === b ? "true" : "false")); renderControls();
 });
-$("#go").onclick = async () => {
+async function startLeak(ff) {
   const t = S.clock.t;
   let at = t;
   if (startAt === "hour") { at = Math.floor(t / 86400) * 86400 + +$("#hour").value * 3600; if (at <= t) at += 86400; }
   const leak = {do: "leak", where: picked, size: size || lps};
   if (at > t) leak.at_s = at;
-  if (await send(leak) && await send({do: "until_alert", node: picked, from_s: at}))
-    toast(at > t ? `Leak in ${flatName(picked)} set for ${when(at)}` : `Leak started in ${flatName(picked)}`);
-};
+  if (!await send(leak) || (ff && !await send({do: "until_alert", node: picked, from_s: at}))) return;
+  toast(at > t ? `Leak in ${flatName(picked)} set for ${when(at)}` : `Leak started in ${flatName(picked)}`);
+}
+$("#go").onclick = () => startLeak(false);
+$("#go-ff").onclick = () => startLeak(true);
 $("#reset").onclick = async () => {
   if (!confirm("Start again from day 1? The current run and its results will be wiped.")) return;
   const b = $("#reset"); b.disabled = true; b.textContent = "Restarting...";

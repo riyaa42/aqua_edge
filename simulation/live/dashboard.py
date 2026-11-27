@@ -83,16 +83,22 @@ def state(run=RUN, radio=False):
         if m["rx"] > calm_since.get(m["n"], -1):
             status[m["n"]] = "alert"
 
-    # The latest leak test: when it started, which check caught it, when the gateway knew
-    test = None
-    leaks = [e for e in applied if e["do"] == "leak"]
-    if leaks:
-        e = leaks[-1]
+    # Every leak in this run, newest first: when it started, which check caught it, when the
+    # gateway knew. A leak ends when it is fixed or its flat gets a new leak size ("replaced").
+    leaks = []
+    for i, e in enumerate(applied):
+        if e["do"] != "leak":
+            continue
         node = node_of(e["where"])
-        hit = next((m for m in alerts if m["n"] == node and m["t"] >= e["t"]), None)
-        fix = next((f["t"] for f in applied if f["do"] == "fix" and f["where"] == e["where"] and f["t"] >= e["t"]), None)
-        test = {"where": e["where"], "node": node, "size": e["size"], "start": e["t"], "fixed": fix,
-                "alert": hit and {k: hit[k] for k in ("a", "t", "rx")}}
+        end = next((f for f in applied[i + 1:] if f["do"] in ("leak", "fix") and f["where"] == e["where"]), None)
+        until = end["t"] if end else float("inf")
+        hit = next((m for m in alerts if m["n"] == node and e["t"] <= m["t"] <= until), None)
+        leaks.append({"where": e["where"], "node": node, "size": e["size"], "start": e["t"],
+                      "fixed": end["t"] if end and end["do"] == "fix" else None,
+                      "replaced": end["t"] if end and end["do"] == "leak" else None,
+                      "alert": hit and {k: hit[k] for k in ("a", "t", "rx")}})
+    now = clock["t"] if clock else 0
+    later = [c for c in jsonl(run, "commands.jsonl") if c.get("do") == "leak" and c.get("at_s", 0) > now]
 
     tank = [m for m in log if m["n"] == "B-TANK"]
     levels = [[m["t"], m["level_m"]] for m in tank if m["k"] == "SUM" and "level_m" in m]
@@ -100,7 +106,7 @@ def state(run=RUN, radio=False):
     feed = [e for e in gw if e["event"] not in ("BALANCE_PAUSED",)][-40:][::-1]
 
     out = {"running": running, "clock": clock, "nodes": nodes, "sites": lines(run, "leak_sites.txt"),
-           "status": status, "test": test, "feed": feed, "levels": levels[-96:], "quality": quality,
+           "status": status, "leaks": leaks[::-1], "later": later, "feed": feed, "levels": levels[-96:], "quality": quality,
            "messages": len(log)}
     if radio:
         out["radio"] = radio_stats(run, log)
@@ -219,13 +225,21 @@ def check():
     w("gateway_events.jsonl", json.dumps({"t": 96000, "event": "NODE_SILENT", "node": "B-204", "last_heard_min": 45}) + "\n")
     s = state(run)
     assert s["running"] and s["status"] == {"B-203": "alert", "B-204": "silent", "B-TANK": "ok"}, s["status"]
-    assert s["test"]["alert"] == {"a": "LEAK_NIGHT_FLOW", "t": 95400, "rx": 95460}, s["test"]
+    assert s["leaks"][0]["alert"] == {"a": "LEAK_NIGHT_FLOW", "t": 95400, "rx": 95460}, s["leaks"]
     assert s["levels"] == [[93600, 1.42]] and s["quality"] == "QUALITY_CLEARED"
     # Fixing the leak turns the flat calm again and closes the test
     with open(os.path.join(run, "events_applied.jsonl"), "a") as f:
         f.write(json.dumps({"t": 97000, "do": "fix", "where": "B-203"}) + "\n")
     s = state(run)
-    assert s["status"]["B-203"] == "ok" and s["test"]["fixed"] == 97000
+    assert s["status"]["B-203"] == "ok" and s["leaks"][0]["fixed"] == 97000
+    # A second leak elsewhere, one scheduled for later, and a new size for an open leak
+    with open(os.path.join(run, "events_applied.jsonl"), "a") as f:
+        f.write(json.dumps({"t": 97100, "do": "leak", "where": "B-204", "size": "small"}) + "\n")
+        f.write(json.dumps({"t": 97150, "do": "leak", "where": "B-204", "size": 0.8}) + "\n")
+    w("commands.jsonl", json.dumps({"do": "leak", "where": "B-203", "size": 0.3, "at_s": 99000}) + "\n")
+    s = state(run)
+    assert [(x["where"], x["size"], x["replaced"]) for x in s["leaks"]] == [("B-204", 0.8, None), ("B-204", "small", 97150), ("B-203", 0.05, None)], s["leaks"]
+    assert s["leaks"][2]["alert"]["a"] == "LEAK_NIGHT_FLOW" and [c["at_s"] for c in s["later"]] == [99000]
     # Only sensible commands get through
     sites, nodes = s["sites"], s["nodes"]
     good = [{"do": "leak", "where": "B-203", "size": 0.3, "at_s": 100000}, {"do": "leak", "where": "B-D1", "size": "large"},
