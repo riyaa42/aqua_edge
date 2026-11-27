@@ -1,8 +1,9 @@
 """Phase 5A & 6: Building B Bursty-Demand Evaluation of 4 Abnormal-Consumption Detectors.
 
 Uses build_society.py independent bursty demand patterns:
-  - Validation seeds: 101, 202 (used only to verify threshold sanity)
-  - Held-out test seeds: 303, 404, 505 across 3 flats (B-401, B-203, B-G01) = 9 flat-series per scenario
+  - Test seeds: 303, 404, 505 across 3 flats (B-401, B-203, B-G01) = 9 flat-series per scenario
+  - False positives are counted on the normal runs and before each injection; alerts after an
+    injection window are not scored
 
 Evaluates all 5 anomaly categories + normal operation across all 4 approaches,
 plus per-step CPU latency and RAM footprint.

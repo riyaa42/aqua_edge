@@ -42,7 +42,7 @@ if _AC_DIR not in sys.path:
     sys.path.append(_AC_DIR)
 
 from detectors import StatisticalZeroFlowDetector
-from packet import pack, unpack
+from packet import pack, unpack, violation_mask
 from quality_model import QualityModel, QualityMonitor, TemporalModel
 
 DAY, HOUR = 86400, 3600
@@ -315,7 +315,7 @@ class EdgeRuntime(Node):
                 QUALITY_MODEL, temporal_model=TEMPORAL_MODEL, window=3, confirm_n=QUALITY_MIN, clear_n=QUALITY_CLEAR_MIN
             )
             self.supply_run = self.low_run = self.ok_run = 0
-            self.bad_class, self.low_flagged = None, False
+            self.low_flagged = False
             self.min_level = None
             self._day1_levels = []
             self.prev_level = None
@@ -362,19 +362,24 @@ class EdgeRuntime(Node):
         """Tank-side water quality & outflow/level checks. Skips missing/NaN streams safely."""
         ph, tds, turb = r.get("ph"), r.get("tds_ppm"), r.get("turbidity_ntu")
         if _finite(ph) and _finite(tds) and _finite(turb):
-            temp_c = r.get("temp_c", 25.0)
-            if not _finite(temp_c):
-                temp_c = 25.0
-            _, _, _, q_ev, t_ev = self.qmon.update(temp_c, ph, tds, turb, ts_s=now)
-            if q_ev:
-                kind, cls_name, avg, _ = q_ev
+            temp_c = r.get("temp_c")          # missing: only the standards check runs
+            _, _, _, limit_ev, class_ev, t_ev = self.qmon.update(temp_c, ph, tds, turb, ts_s=now)
+            cleared = False
+            for ev in (limit_ev, class_ev):   # limit violation first: it is the authoritative one
+                if not ev:
+                    continue
+                kind, name, avg, violations = ev
                 if kind == "ALERT":
-                    self.bad_class = cls_name
-                    self.alert(f"QUALITY_{cls_name}", ph=round(avg[1], 2), tds=round(avg[2]))
-                elif kind == "CLEARED" and self.bad_class:
-                    self.alerts.pop(f"QUALITY_{self.bad_class}", None)
-                    self.bad_class = None
-                    self.emit("ALERT", a="QUALITY_CLEARED")
+                    extra = {}
+                    if name == "LIMIT_VIOLATION":
+                        extra = {"turb": round(avg[3], 2), "viol": violation_mask(violations)}
+                    self.alert(f"QUALITY_{name}", ph=round(avg[1], 2), tds=round(avg[2]), **extra)
+                else:
+                    self.alerts.pop(f"QUALITY_{name}", None)
+                    cleared = True
+            # one QUALITY_CLEARED, only when neither a limit nor a class alert is still active
+            if cleared and not self.qmon.limit_active and self.qmon.active_class is None:
+                self.emit("ALERT", a="QUALITY_CLEARED")
             if t_ev:
                 t_kind, t_score, _ = t_ev
                 if t_kind == "TEMPORAL_ALERT":

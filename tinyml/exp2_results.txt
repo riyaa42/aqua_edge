@@ -9,6 +9,9 @@
   q=0.9995, confirm=1        |  0.540  0.613  0.574 0.0023 | 19/28        0 samp      0 min      1.86
   q=0.9990, confirm=3        |  0.642  0.569  0.604 0.0014 | 21/28        2 samp      2 min      0.23
   q=0.9950, confirm=3        |  0.486  0.653  0.557 0.0031 | 24/28        2 samp      2 min      0.57
+  Baselines (q=0.99, confirm=1):
+  Moving-Avg Residual (EWMA Z) | P=0.099 R=0.074 F1=0.084 FPR=0.0030 AUC=0.889 | Events=9/28 | Delay=0 samp (0 min) | FA_ep/day=0.48
+  Change-Point (CUSUM)         | P=0.000 R=0.000 F1=0.000 FPR=0.0120 AUC=0.731 | Events=0/28 | Delay=n/a (n/a) | FA_ep/day=0.03
 
 === Loddon Catchment Temporal Evaluation (dt=60 min/sample, N_test=3300, storm_samples=207, AUC=0.747) ===
   q=0.95, confirm=1 | P=0.256 R=0.256 F1=0.256 FPR=0.0498 | Storm windows=9/24 | Delay=0 samp (0 min) | FA_ep/day=0.35

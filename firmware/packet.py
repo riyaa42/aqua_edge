@@ -29,12 +29,18 @@ ALERTS = ["LEAK_NIGHT_FLOW", "LEAK_CONTINUOUS_FLOW", "LEAK_PRESSURE_DROP", "ABNO
           "QUALITY_TEMPORAL_ANOMALY", "QUALITY_TEMPORAL_CLEARED",
           "UNUSUAL_NIGHT_CONSUMPTION", "PROLONGED_ZERO_FLOW", "SUDDEN_CONSUMPTION_CHANGE"]
 FLAGS = ["SUPPLY_LOW"]
+VIOLATIONS = ["pH", "TDS", "TURBIDITY"]     # "viol" is a bit mask of broken limits
 # field name -> how its value is packed; its number on air is its position here; "B" = index into ALERTS/FLAGS
 FIELDS = {"a": "B", "f": "B", "i": ">I", "vol_l": ">f", "p_min": ">f", "in_l": ">f", "level_m": ">f",
-          "flow": ">f", "ph": ">f", "tds": ">f", "level": ">f", "inflow": ">f", "score": ">f", "p_mean": ">f"}
+          "flow": ">f", "ph": ">f", "tds": ">f", "level": ">f", "inflow": ">f", "score": ">f", "p_mean": ">f",
+          "turb": ">f", "viol": ">B"}      # append only: a field's position is its number on air
 FIELD_NAMES = list(FIELDS)
 CODES = {"a": ALERTS, "f": FLAGS}
 HEADER_KEYS = {"k", "n", "s", "t", "gt"}
+
+
+def violation_mask(violations):
+    return sum(1 << VIOLATIONS.index(v) for v in violations)
 
 
 def sim_key(name):
@@ -94,6 +100,8 @@ if __name__ == "__main__":
             {"n": "B-203", "s": 8, "t": 93660, "k": "ALERT", "a": "LEAK_NIGHT_FLOW", "flow": 0.0512},
             {"n": "B-TANK", "s": 3, "t": 60, "k": "ALERT", "a": "QUALITY_CHEMICAL", "ph": 9.12, "tds": 700},
             {"n": "B-TANK", "s": 4, "t": 120, "k": "ALERT", "a": "QUALITY_CLEARED"},
+            {"n": "B-TANK", "s": 9, "t": 130, "k": "ALERT", "a": "QUALITY_LIMIT_VIOLATION", "ph": 7.1, "tds": 300,
+             "turb": 12.5, "viol": violation_mask(["TURBIDITY"])},
             {"n": "B-TANK", "s": 5, "t": 180, "k": "FLAG", "f": "SUPPLY_LOW", "level": 0.312, "inflow": 0.0},
             {"n": "B-TANK", "s": 6, "t": 240, "k": "SUM", "i": 5, "vol_l": 300.5, "in_l": 0.0, "level_m": 1.4991},
             {"k": "ACK", "n": "B-203", "s": 8, "gt": 93720}]

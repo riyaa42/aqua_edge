@@ -9,7 +9,9 @@ Unlike leakage (`../leak_detection/`) and abnormal water consumption (`../abnorm
 2. **Module 2 (`TemporalModel`):** An 8-bit (`int8`) Temporal Autoencoder (`432 bytes` of weights and biases) that tracks short-term and persistent changes over time to catch unusual water behaviour that fixed limits miss.
 3. **Module 3 (`QualityModel`):** A 4-feature `int8` classifier (`324 bytes` of weights and biases) that provides secondary contamination-pattern labels (`NORMAL`, `RUNOFF`, or `CHEMICAL`).
 
-All three modules run locally in pure Python (standard library only, no cloud or TensorFlow Lite dependency) on the Raspberry Pi 4 edge node.
+If temperature is missing or `NaN`, only Module 1 runs: no stand-in temperature is fed to either model. If pH, TDS or turbidity is missing, none of the three runs.
+
+All three modules run locally in pure Python (standard library only, no cloud or TensorFlow Lite dependency). The target is a Raspberry Pi 4 edge node; so far they have only run on development machines.
 
 ---
 
@@ -28,7 +30,7 @@ Because these three questions are different, a single model should not be asked 
 
 ## 3. System Architecture
 
-The water-quality subsystem runs on the monitoring node inside [firmware/quality_model.py](../firmware/quality_model.py) and [firmware/aqua_edge.py](../firmware/aqua_edge.py) (`TankNode.check`), and encodes its alerts in [firmware/packet.py](../firmware/packet.py).
+The water-quality subsystem runs on the monitoring node inside [firmware/quality_model.py](../firmware/quality_model.py) and [firmware/aqua_edge.py](../firmware/aqua_edge.py) (`EdgeRuntime._check_tank`, used by `TankNode` and `combined` mode), and encodes its alerts in [firmware/packet.py](../firmware/packet.py).
 
 ```mermaid
 flowchart TD
@@ -39,19 +41,21 @@ flowchart TD
     M2["Module 2: TemporalModel (int8 AE)<br/>Causal 15-min & 12-h EWMA residuals"]
     M3["Module 3: QualityModel (int8 MLP)<br/>NORMAL / RUNOFF / CHEMICAL"]
 
-    C1["3-Reading Confirmation<br/>(Module 1 + Module 3)"]
+    C1["3-Reading Confirmation<br/>(Module 1, its own track)"]
+    C3["3-Reading Confirmation<br/>(Module 3, its own track)"]
     C2["Warm-up / Gap Guard + 3-Reading Confirmation<br/>(Module 2)"]
 
-    OUT["Separate Binary LoRa Alerts & Local Buzzer<br/>QUALITY_LIMIT_VIOLATION | QUALITY_RUNOFF | QUALITY_CHEMICAL<br/>QUALITY_TEMPORAL_ANOMALY"]
+    OUT["Separate Binary LoRa Alerts & Alert LED<br/>QUALITY_LIMIT_VIOLATION | QUALITY_RUNOFF | QUALITY_CHEMICAL<br/>QUALITY_TEMPORAL_ANOMALY"]
 
     S --> MA
     MA --> M1
     MA --> M3
     S --> M2
     M1 --> C1
-    M3 --> C1
+    M3 --> C3
     M2 --> C2
     C1 --> OUT
+    C3 --> OUT
     C2 --> OUT
 ```
 
@@ -65,7 +69,7 @@ Following Sharma et al. [1], the initial goal was a compact on-device neural net
 - **Input features and preprocessing:** `[Temperature_C, pH, log1p(TDS_ppm), log1p(Turbidity_NTU)]`. Log transforms (`log(1 + x)`) compress TDS and turbidity, which span more than three orders of magnitude. Each feature is standardized using the training mean and standard deviation.
 - **Note on earlier branch history:** An earlier version on `live-simulation` dropped temperature (using `3 -> 16 -> 8 -> 3`) because `Unsafe` river/lake rows in the Kenya dataset happened to be warmer (`~26 °C`) than `Safe` tap water (`~22 °C`), which caused the model to associate warmer water with contamination. We restored the 4-input shape from Paper [1] and fixed the shortcut by sampling temperature from an overlapping range across all three classes.
 - **Training and quantization:** Trained in NumPy with Adam (`50` epochs, learning rate `0.01`, batch size `128`) using Stratified 5-Fold Cross-Validation, then quantized post-training to `int8` weights (`-127..127`) and `int32` biases with calibrated activation scales (mirroring TensorFlow Lite Micro).
-- **Firmware inference and footprint:** `QualityModel` in [firmware/quality_model.py](../firmware/quality_model.py) runs integer-only matrix multiplications in pure Python (`216` `int8` weights + `27` `int32` biases = `324 bytes`; `1,435 bytes` in [firmware/quality_model.json](../firmware/quality_model.json)).
+- **Firmware inference and footprint:** `QualityModel` in [firmware/quality_model.py](../firmware/quality_model.py) runs integer-only matrix multiplications in pure Python (`216` `int8` weights + `27` `int32` biases = `324 bytes`; `1,450 bytes` in [firmware/quality_model.json](../firmware/quality_model.json)).
 - **Why synthetic mixtures were needed:** No public IoT water-quality dataset we found provides verified `RUNOFF` and `CHEMICAL` labels across all four sensor channels. Synthetic mixtures were built from real `Safe` tap-water readings mixed with simulated runoff or chemical solutions and labeled using IS 10500:2012 limits.
 - **Limitation of synthetic labels:** Because labels came from synthetic mixing ranges and IS 10500 cutoffs, the original model could achieve very high cross-validation accuracy by memorizing simple feature ranges rather than learning true physical contamination signatures.
 
@@ -78,7 +82,7 @@ All datasets are stored locally under `tinyml/data/` (excluded from Git via `.gi
 | Dataset | Source / Reference | Measured Parameters Used | Role in This Project | Key Limitation |
 |---|---|---|---|---|
 | **Kenya Water Sources** | Ooko et al. (2026), Mendeley `575ctg3nnr/2` | `Temperature_C`, `pH`, `TDS_ppm`, `Turbidity_NTU`, `Label` (`Safe`/`Unsafe`) | `Safe` rows used as base tap water for 5-fold CV and held-out FPR; `Unsafe` rows used for external TPR | `Safe`/`Unsafe` labels reflect water source type, not verified runoff vs. chemical causes |
-| **GECCO 2019** | Thüringer Fernwasserversorgung, Zenodo `4304080` | `Tp` (°C), `pH`, `Cond` (converted via `0.65 * 1e4`), `Turb` (NTU), `Event` | External German drinking-water utility time series (`215,690` normal + `3,190` event rows at 1-min intervals) | Normal German pH exceeds 8.5 in 81.1% of readings (compliant under German *TrinkwV*, outside IS 10500); low event prevalence (`0.44%` in test half) |
+| **GECCO 2019** | Thüringer Fernwasserversorgung, Zenodo `4304080` | `Tp` (°C), `pH`, `Cond` (converted via `0.65 * 1e4`), `Turb` (NTU), `Event` | External German drinking-water utility time series (`218,880` rows at 1-min intervals; after dropping rows with a missing input, `216,294` remain: `215,690` normal + `604` event, `476` of them in the second half) | Normal German pH exceeds 8.5 in 81.1% of readings (compliant under German *TrinkwV*, outside IS 10500); low event prevalence (`0.44%` in test half) |
 | **CSU ROSS 2019** | Poudre Water Quality Network, HydroShare `521e317e...` | `Temperature` (°C), `pH`, `Specific Conductivity` (via `0.65`), `Turbidity` (NTU) | External environmental river dataset (`44,133` aligned QA/QC rows, `-0.1` to `20.7 °C`) | Natural river water, not treated tap water; cannot serve as a drinking-water compliance ground truth |
 | **Loddon Catchment** | UKCEH / EIDC `10.5285/331659d7...` | `SONDETEMP`, `SONDEPH`, `SONDECOND`, `SONDETURBIDITY`, storm sample timestamps | External hourly river monitoring (`8,322` rows) + storm-sample windows (`207` matched hours) | Naturally turbid river water; storm-autosampler timestamps mark when samples were taken, not that baseline river hours are "safe" |
 | **Mendeley 2019 WSN** | Sithole et al. (2019), Mendeley `pbb76sbbrg/1` | `pH m`, `Cm (µS/cm)` (Tables 1-6 only), `LDR m (kΩ)` | Exploratory physical contamination diagnostic (`10` lab experiments, `N=26` each) | Missing temperature; turbidity is uncalibrated `LDR (kΩ)` instead of NTU; Tables 7-10 omit conductivity. Excluded from quantitative evaluation and training |
@@ -88,13 +92,13 @@ All datasets are stored locally under `tinyml/data/` (excluded from Git via `.gi
 - **GECCO 2019:** Evaluates both cross-utility normal-water false positives and real labelled utility anomalies (`Event == TRUE`). Under German *TrinkwV* (`pH 6.5-9.5`, `TDS <= 1625 ppm`), `215,688` of `215,690` normal readings are compliant, whereas `81.13%` have `pH > 8.5` (exceeding IS 10500). Flagging German-compliant alkaline water under an IS 10500 model reflects a standard difference, not model overfitting.
 - **CSU ROSS 2019:** Provides both `value_raw` and `value_final` (QA/QC-cleaned) measurements across wide seasonal temperatures (`-0.1` to `20.7 °C`), testing whether the classifier remains stable on IS-10500-compliant environmental rows.
 - **Loddon Catchment:** Hourly sonde measurements (`HighFrequencySensorDataFlowandSonde.csv`) were matched by date and hour to storm-event sampling timestamps (`StormWaterQualityData.csv`). Because River Loddon's median turbidity is `~10 NTU` even outside storms (only `3.8%` of all hours meet IS 10500 drinking-water limits), drinking-water thresholds cannot treat non-storm river hours as "normal" or storm hours as isolated "runoff events." Loddon is therefore documented as an incompatible external dataset for judging drinking-water storm-runoff performance, and the model was not tuned against it.
-- **Mendeley 2019 WSN:** Contains 10 physical lab experiments at room temperature (`pure tap water`, `soil`, `chlorine`, `salt`, `washing powder`, `vinegar`, and 4 multi-contaminant mixtures). Because `LDR (kΩ)` cannot be treated as NTU without a physical sensor calibration curve, conductivity-to-TDS conversion varies by ionic composition, temperature is missing, and Tables 7-10 lack conductivity, Mendeley 2019 was excluded from quantitative NTU-based accuracy reporting and was **never used in retraining**. In an exploratory check using an uncalibrated proxy, it still revealed two conceptual gaps in the original training data: cloudy `washing powder` and acidic `vinegar` were both misclassified as `RUNOFF`.
+- **Mendeley 2019 WSN:** Contains 10 physical lab experiments at room temperature (`pure tap water`, `soil`, `chlorine`, `salt`, `washing powder`, `vinegar`, and 4 multi-contaminant mixtures). Because `LDR (kΩ)` cannot be treated as NTU without a physical sensor calibration curve, conductivity-to-TDS conversion varies by ionic composition, temperature is missing, and Tables 7-10 lack conductivity, Mendeley 2019 was excluded from quantitative NTU-based accuracy reporting and was **never used in retraining**. In an exploratory check (no script for it is in the repository) using an uncalibrated proxy, it still revealed two conceptual gaps in the original training data: cloudy `washing powder` and acidic `vinegar` were both misclassified as `RUNOFF`.
 
 ---
 
 ## 6. Original Classifier Failure Analysis
 
-To test whether the original 3-class classifier learned multi-sensor contamination patterns or simple range shortcuts, we ran an overlap experiment using held-out Kenya source samples:
+To test whether the original 3-class classifier learned multi-sensor contamination patterns or simple range shortcuts, we ran an overlap experiment using held-out Kenya source samples. The script and original model for this experiment are not in the current `tinyml/` code, so the figures in this section are a historical record that cannot be regenerated from it:
 - In the original training mixtures, `RUNOFF` always had high turbidity (`10-300 NTU`), while `CHEMICAL` was always clear alkaline water (`0.2-3 NTU`, `pH 10.5-12.5`).
 - When tested on an overlapping region (`pH 6.2-8.7`, `TDS 80-600`, `Turbidity 6-60 NTU` for runoff vs. `pH 6.5-10.5`, `TDS 350-1500`, `Turbidity 0.5-12 NTU` for chemical), **`37.4%` (`1,092 / 2,920`) of chemical samples were misclassified as `RUNOFF`**.
 - Inside the strict overlap sub-box (`pH 6.5-8.7`, `TDS 350-600`, `Turbidity 6-12 NTU`), **`100%` (`182 / 182`) of chemical samples were misclassified as `RUNOFF`**.
@@ -105,12 +109,12 @@ To test whether the original 3-class classifier learned multi-sensor contaminati
 
 ## 7. Retraining Methodology
 
-To fix those shortcuts without touching any external evaluation dataset (`GECCO`, `CSU ROSS`, `Loddon`, or `Mendeley 2019`), `tinyml/train_quality.py` was updated as follows:
+To fix those shortcuts, `tinyml/train_quality.py` was updated as follows. No rows from `GECCO`, `CSU ROSS`, `Loddon`, or `Mendeley 2019` are used for training. The evaluation is not fully independent of GECCO, though: the `NORMAL` pH range was chosen with GECCO's water in mind (item 3), and the script ends by asserting `FPR <= 0.05` on GECCO's IS-compliant normal rows. Turbidity, pH and TDS ranges below for `RUNOFF` and `CHEMICAL` describe the contaminant before it is mixed into tap water. A mixture is labelled with its contaminant class only if it breaks an IS 10500 limit; otherwise it is labelled `NORMAL`. Classes are then balanced.
 1. **Expanded `RUNOFF` regime:** Varied concentrations from `2.5` to `300 NTU`, `pH 5.4-7.4`, and low-to-moderate TDS (`10-250 ppm` endmember).
 2. **Expanded `CHEMICAL` regimes:** Included **acidic** (`pH 2.0-5.0`), **neutral high-TDS** (`pH 6.5-8.5`), and **alkaline** (`pH 9.5-12.5`) chemicals across overlapping turbidity (`0.2-80 NTU`).
-3. **Expanded `NORMAL` municipal pH envelope:** Covered `pH 6.55-8.49` so legitimate alkaline municipal supplies (such as GECCO's IS-compliant `pH ~8.48` water) are represented.
+3. **Expanded `NORMAL` municipal pH envelope:** Covered `pH 6.55-8.49` so legitimate alkaline municipal supplies (such as GECCO's IS-compliant `pH ~8.48` water) are represented. The range applies before sensor noise (`sigma = 0.05`) is added.
 4. **Overlapping temperature (`4-35 °C`):** Sampled identically across all three classes.
-5. **Leakage-free Stratified 5-Fold CV:** Original Kenya `Safe` source rows are split into 5 folds *first*, and synthetic mixtures are generated independently inside each fold.
+5. **Leakage-free 5-fold CV:** Original Kenya `Safe` source rows are shuffled and split into 5 folds *first*; class-balanced synthetic mixtures are then generated independently inside each fold. The exported model is trained separately on the first `80%` of `Safe` rows (file order), with the last `20%` held out.
 
 ### Updated Classifier Results (`tinyml/results.txt`)
 - **Leakage-free 5-Fold CV (expanded mixtures):** `float32` accuracy `0.9848 +/- 0.0012`, `int8` accuracy `0.9839 +/- 0.0013`, `int8`/`float32` agreement `0.9956`, macro-F1 `0.9839` (`NORMAL` F1 `0.9930`, `RUNOFF` F1 `0.9804`, `CHEMICAL` F1 `0.9784`).
@@ -128,19 +132,19 @@ To fix those shortcuts without touching any external evaluation dataset (`GECCO`
 
 ## 8. Why Alternative ML Tasks Were Investigated
 
-We directly compared the binary (`NORMAL` vs. `UNSAFE`) predictions of our TinyML classifier against the exact IS 10500 `if/else` rules (`unsafe_is10500`) across all datasets:
+We directly compared the binary (`NORMAL` vs. `UNSAFE`) predictions of the committed TinyML classifier against the exact IS 10500 `if/else` rules (`unsafe_is10500`), on single unsmoothed readings. No script in `tinyml/` prints this table. The first four rows were computed with `unsafe_is10500` and the committed model (synthetic mixtures regenerated by the `train_quality.py` pipeline); the CSU ROSS row is derived from the rates in `tinyml/results.txt`.
 
 | Dataset | Samples (`N`) | Rule Unsafe Rate | TinyML Unsafe Rate | Binary Agreement |
 |---|---|---|---|---|
-| Synthetic Mixtures (held-out) | `8,499` | `66.67%` | `66.21%` | **`99.38%`** |
+| Synthetic Mixtures (held-out) | `7,680` | `66.67%` | `66.48%` | **`99.53%`** |
 | Kenya `Safe` (held-out) | `6,048` | `0.00%` | `0.00%` | **`100.00%`** |
-| Kenya `Unsafe` | `70,560` | `96.17%` | `94.59%` | **`97.90%`** |
-| GECCO 2019 (all) | `216,294` | `81.13%` | `45.73%` | **`64.60%`** |
-| CSU ROSS 2019 (final) | `44,133` | `62.72%` | `63.61%` | **`97.56%`** |
+| Kenya `Unsafe` | `70,560` | `96.17%` | `97.03%` | **`99.10%`** |
+| GECCO 2019 (all) | `216,294` | `81.13%` | `26.34%` | **`45.21%`** |
+| CSU ROSS 2019 (final) | `44,133` | `62.72%` | `62.02%` | **`97.67%`** |
 
-*(On GECCO 2019, all `76,573` disagreements occurred in the narrow `pH 8.50-8.54` band with low TDS and turbidity, where `int8` quantization softened the `8.50` boundary.)*
+*(On GECCO 2019, all `118,511` disagreements are rows that break the IS 10500 pH limit but that the classifier calls `NORMAL`. They lie just above the limit, at `pH 8.50003-8.58975`; `72,847` of them are at or below `8.54`. Module 1 applies the `8.5` limit exactly.)*
 
-**Key conclusion:** For binary safe/unsafe detection, the classifier was largely approximating the `if/else` threshold boundary. Therefore, TinyML could not be justified as a replacement for binary standards checking. This motivated three structured experiments to test where ML actually adds value:
+**Key conclusion:** For binary safe/unsafe detection, the classifier was largely approximating the `if/else` threshold boundary, and it does so poorly for readings just past a limit (GECCO row). Therefore, TinyML could not be justified as a replacement for binary standards checking. This motivated three structured experiments to test where ML actually adds value:
 - **Experiment 1:** Static multivariate anomaly detection (catching unusual parameter combinations inside legal limits).
 - **Experiment 2:** Temporal anomaly detection (catching sudden shifts and persistent deviations over time while adapting to slow seasonal drift).
 - **Experiment 3:** Re-evaluating the retrained 3-class classifier as a secondary attribution module.
@@ -149,42 +153,50 @@ We directly compared the binary (`NORMAL` vs. `UNSAFE`) predictions of our TinyM
 
 ## 9. Experiment 1: Static Multivariate Anomaly Detection
 
-Implemented in [tinyml/exp1_multivariate_anomaly.py](file:///c:/Users/riyaa/Documents/code/aqua_edge/tinyml/exp1_multivariate_anomaly.py) with results in [tinyml/exp1_results.txt](file:///c:/Users/riyaa/Documents/code/aqua_edge/tinyml/exp1_results.txt).
+Implemented in [tinyml/exp1_multivariate_anomaly.py](exp1_multivariate_anomaly.py) with results in [tinyml/exp1_results.txt](exp1_results.txt).
+
+The `int8` autoencoder uses one fixed activation scale per layer, calibrated on the training set, so a reading's score does not depend on what else is scored with it.
 
 Each detector was trained only on normal readings, calibrated at the 98th percentile (`2%` target FPR) on a held-out normal validation slice, and evaluated on:
 - **GECCO 2019 (second 50%, `N_test=108,147`, `476` event minutes across `28` events)** vs. German *TrinkwV* fixed limits.
-- **Kenya `Safe` + In-Range Correlated Anomalies (`N_test=12,096`, `6,048` anomalies)** constructed strictly inside IS 10500 limits (`pH 6.52-8.48`, `TDS 380-495 ppm`, `Turbidity 2.5-4.9 NTU`).
+- **Kenya `Safe` + In-Range Synthetic Anomalies (`N_test=12,096`, `6,048` anomalies)** constructed strictly inside IS 10500 limits (`pH 6.52-8.48`, clustered near both ends; `TDS 380-495 ppm`; `Turbidity 2.5-4.9 NTU`; temperature `15-32 °C`). Each channel is drawn independently, so these are unusual corner combinations rather than modelled correlations (the results file calls them "Correlated"). `Safe` rows are shuffled and split `60/20/20` into train, validation and test.
 
 **Key findings:**
-- On **Kenya in-range anomalies**, `Fixed Threshold (IS_10500)` scored `F1 = 0.000` (missing `100%` of anomalies by definition), while `Mahalanobis Distance` (`80 bytes` parameters, `F1 = 0.991`) and `TinyML Autoencoder (int8)` (`184 bytes` weights+biases, `F1 = 0.989`) detected them cleanly.
-- On **GECCO 2019**, `Fixed Threshold (TRINKW_V)` caught only **`1 / 28` events** (`R = 0.004`), whereas static multivariate detectors caught `25-28 / 28` events (`AUC = 0.711-0.846`).
-- **Why Experiment 1 was not chosen for production:** On GECCO 2019, normal water temperature, pH, and conductivity drifted slowly between the first half and second half of the dataset. Because Experiment 1 used a frozen static baseline, normal readings in the second half triggered **`37.4%` to `100%` false-positive rates**, making static models unsuitable for long-running utility deployments.
-- **Edge storage note:** `TinyML Autoencoder (int8)` requires `184 bytes` for weights+biases and `Mahalanobis` requires `80 bytes` for covariance+mean, compared to `592.8 KB` pickled for `Isolation Forest (50 trees)` (note: these figures measure model parameters/serialized objects, not full Python process RAM).
+- On **Kenya in-range anomalies**, `Fixed Threshold (IS_10500)` scored `F1 = 0.000` (missing `100%` of anomalies by definition), while `Mahalanobis Distance` (`80 bytes` parameters, `F1 = 0.991`) and `TinyML Autoencoder (int8)` (`184 bytes` weights+biases, `F1 = 0.990`) detected them cleanly.
+- On **GECCO 2019**, `Fixed Threshold (TRINKW_V)` caught only **`1 / 28` events** (`R = 0.004`), whereas static multivariate detectors caught `25-28 / 28` events (`AUC = 0.709-0.846`).
+- **Why Experiment 1 was not chosen for production:** On GECCO 2019, normal water temperature, pH, and conductivity drifted slowly between the first half and second half of the dataset. Because Experiment 1 used a frozen static baseline, normal readings in the second half triggered **`37.4%` to `96.1%` false-positive rates**, making static models unsuitable for long-running utility deployments.
+- **Edge storage note:** `TinyML Autoencoder (int8)` requires `184 bytes` for weights+biases and `Mahalanobis` requires `80 bytes` for covariance+mean, compared to `593.0 KB` pickled for `Isolation Forest (50 trees)` (note: these figures measure model parameters/serialized objects, not full Python process RAM).
 
 ---
 
 ## 10. Experiment 2: Temporal TinyML Anomaly Detection
 
-Implemented in [tinyml/exp2_temporal_anomaly.py](file:///c:/Users/riyaa/Documents/code/aqua_edge/tinyml/exp2_temporal_anomaly.py) with results in [tinyml/exp2_results.txt](file:///c:/Users/riyaa/Documents/code/aqua_edge/tinyml/exp2_results.txt).
+Implemented in [tinyml/exp2_temporal_anomaly.py](exp2_temporal_anomaly.py) with results in [tinyml/exp2_results.txt](exp2_results.txt).
 
 To absorb slow seasonal drift while catching sudden spikes and persistent changes over time, we built an 8-feature causal temporal representation at each step:
 - **Short-term delta (4 features):** `z_t - EWMA_short(z)` with `alpha_short = 1/15` (~15-minute window at 1-min sampling).
 - **Persistent deviation (4 features):** `z_t - EWMA_long(z)` with `alpha_long = 1/720` (~12-hour window at 1-min sampling).
-- **Model:** `8 -> 12 -> 4 -> 12 -> 8` Temporal Autoencoder (`432 bytes` of `int8` weights and `float` biases, `0.4 µs` per sample on host), trained only on normal sequences and quantized with static per-layer activation scales calibrated on the training set.
+- **Model:** `8 -> 12 -> 4 -> 12 -> 8` Temporal Autoencoder (`288` `int8` weights + `36` float biases counted at 4 bytes each = `432 bytes`, excluding scales, normalisation statistics and threshold; `3,029 bytes` in `temporal_model.json`; about `37 µs` per `TemporalModel.step()` in pure Python on a Linux development host), trained only on normal sequences and quantized with static per-layer activation scales calibrated on the training set.
 
-### Temporal Leakage Audit (All 4 Checks Verified in Code)
+### Temporal Leakage Audit
+Checks 1 and the event-boundary part of 4 are `assert` statements. Checks 2, 3 and the validation-only thresholds follow from how the script slices the data and are not separately tested (the `PASS` line in the results file is fixed text).
+
 1. **Causal EWMA:** Perturbing future inputs (`z[50000:] += 100.0`) leaves `z_temp[:50000]` bit-for-bit identical.
 2. **Chronological split:** Train (`first 40%` normal) -> Validation (`next 10%` normal) -> Test (`final 50%`, `75.1 days` at `dt = 1.0 min/sample`).
 3. **Train-only normalization and quantization calibration:** `mu`, `sd`, and activation scales `sa` are computed solely from `train`.
 4. **Validation-only thresholds & boundary check:** Quantile thresholds are selected solely on `validation`, and `assert not (gev[mid - 1] and gev[mid])` verifies no labelled event straddles the split.
 
+The offline GECCO evaluation computes the EWMAs continuously over the rows left after dropping missing values. It does not apply the firmware's warm-up or timestamp-gap reset, so the figures below are not a replay of `TemporalModel`.
+
 ### GECCO 2019 Precision-Recall Trade-Off & Baselines (`N_test = 108,147`, `28` events, `dt = 1.0 min`)
+The two non-ML baselines use the same split and a `q = 0.99` validation threshold: the largest absolute residual from a clipped 720-sample EWMA mean and variance, and a one-sided CUSUM (`k = 1.5`) of those residuals.
+
 At the initial `q = 0.9900, confirm = 1` threshold, precision was only `0.198` because event prevalence in GECCO's test half is just `0.44%` (`476 / 108,147` minutes), so even a `1.47%` FPR generated `7.19` false alert episodes per day. Raising the validation quantile and requiring **3 consecutive anomalous samples (`confirm = 3`)** substantially reduced false alerts:
 
 | Detector / Configuration | Precision | Recall | F1 | Normal FPR | ROC-AUC | Events Caught | Delay (samples / min) | False Alerts / Day |
 |---|---|---|---|---|---|---|---|---|
-| Moving-Avg Residual (`EWMA Z`, `q=0.99, c=1`) | `0.099` | `0.074` | `0.084` | `0.003` | `0.889` | `9 / 28` | `0 samp` (`0 min`) | - |
-| Change-Point (`CUSUM`, `q=0.99, c=1`) | `0.000` | `0.000` | `0.000` | `0.012` | `0.731` | `0 / 28` | `n/a` | - |
+| Moving-Avg Residual (`EWMA Z`, `q=0.99, c=1`) | `0.099` | `0.074` | `0.084` | `0.003` | `0.889` | `9 / 28` | `0 samp` (`0 min`) | `0.48` |
+| Change-Point (`CUSUM`, `q=0.99, c=1`) | `0.000` | `0.000` | `0.000` | `0.012` | `0.731` | `0 / 28` | `n/a` | `0.03` |
 | Temporal TinyML AE (`int8`, `q=0.9900, c=1`) | `0.198` | `0.824` | `0.319` | `0.0147` | `0.913` | `25 / 28` | `0 samp` (`0 min`) | `7.19` |
 | Temporal TinyML AE (`int8`, `q=0.9950, c=1`) | `0.342` | `0.754` | `0.471` | `0.0064` | `0.913` | `25 / 28` | `0 samp` (`0 min`) | `4.38` |
 | Temporal TinyML AE (`int8`, `q=0.9980, c=1`) | `0.419` | `0.672` | `0.516` | `0.0041` | `0.913` | `23 / 28` | `0 samp` (`0 min`) | `3.08` |
@@ -194,7 +206,7 @@ At the initial `q = 0.9900, confirm = 1` threshold, precision was only `0.198` b
 | **Temporal TinyML AE (`int8`, `q=0.9990, c=3`)** | **`0.642`** | `0.569` | **`0.604`** | **`0.0014`** | **`0.913`** | `21 / 28` | `2 samp` (`2 min`) | **`0.23`** |
 
 ### Loddon Catchment Temporal Evaluation (`dt = 60 min`, `N_test = 3,300`, `207` storm samples)
-Trained on the storm-free period (`indices 3300..8322`) and tested on `0..3299` (`24` storm windows): `AUC = 0.747`, achieving `P=0.256, R=0.256, F1=0.256` (`9/24` storm windows, `0.35` false alerts/day) at `q=0.95, confirm=1`, and `P=0.362, F1=0.158` (`0.05` false alerts/day) at `q=0.99, confirm=2`. As noted in Section 5, Loddon's storm autosampler metadata marks sample collection times rather than verified contamination, so Loddon is not a suitable basis for judging drinking-water temporal detection performance, and no tuning was performed against it.
+This is a separately trained model (not the exported one), with `alpha_short = 1/6` and `alpha_long = 1/168` for hourly data. Trained on the storm-free period (`indices 3300..8322`) and tested on `0..3299` (`24` storm windows): `AUC = 0.747`, achieving `P=0.256, R=0.256, F1=0.256` (`9/24` storm windows, `0.35` false alerts/day) at `q=0.95, confirm=1`, and `P=0.362, F1=0.158` (`0.05` false alerts/day) at `q=0.99, confirm=2`. As noted in Section 5, Loddon's storm autosampler metadata marks sample collection times rather than verified contamination, so Loddon is not a suitable basis for judging drinking-water temporal detection performance, and no tuning was performed against it.
 
 **Decision:** Experiment 2 (`q=0.9990, confirm=3`) is the preferred experimental ML approach for temporal water-quality anomaly detection, subject to further validation on additional drinking-water time series.
 
@@ -207,10 +219,10 @@ Using the six project selection criteria across our three experiments:
 | Criterion | Exp 1: Static Multivariate (`int8` AE / Mahalanobis) | Exp 2: Temporal TinyML (`int8` AE, `q=0.999, c=3`) | Exp 3: 3-Class Classifier (`4->16->8->3` `int8` MLP) |
 |---|---|---|---|
 | **Detection performance** | `F1 = 0.99` on Kenya in-range; `F1 = 0.01` on GECCO | **`F1 = 0.604` (`21/28` events, `AUC = 0.913`)** on GECCO | 5-Fold CV `F1 = 0.984`; `99.44%` in synthetic overlap |
-| **False alarms** | High under drift (`37%` to `100%` on GECCO) | **`0.23` false alerts/day (`FPR = 0.0014`)** on GECCO | `0.0000` FPR on Kenya Safe & IS-compliant GECCO; `0.0218` on CSU ROSS |
+| **False alarms** | High under drift (`37%` to `96%` on GECCO) | **`0.23` false alerts/day (`FPR = 0.0014`)** on GECCO | `0.0000` FPR on Kenya Safe & IS-compliant GECCO; `0.0218` on CSU ROSS |
 | **Added value over rules** | Catches in-range anomalies (`0%` by rules) | **Catches `21-24/28` GECCO events vs. `1/28` by *TrinkwV*** | **Distinguishes `RUNOFF` vs. `CHEMICAL`** beyond binary limits |
-| **Generalisation** | Fails under multi-week seasonal drift | Adapts to slow drift via causal EWMAs (proven on GECCO) | Generalises to IS-compliant water; raw rivers exceed IS 10500 |
-| **Edge suitability (Pi 4)** | `80-184 B` params, `< 1 µs` host | **`432 B` params, `0.4 µs` host** | **`324 B` params, `37 µs` host** |
+| **Generalisation** | Fails under multi-week seasonal drift | Adapts to slow drift via causal EWMAs (shown on GECCO only) | Generalises to IS-compliant water; raw rivers exceed IS 10500 |
+| **Edge suitability (host; no Pi 4 measurement)** | `80-184 B` params, `< 1 µs` (NumPy, batched) | **`432 B` params, `~37 µs` (pure Python)** | **`324 B` params, `37 µs` (pure Python, `results.txt`)** |
 | **Offline operation** | `100%` offline | `100%` offline | `100%` offline |
 
 Because `QualityModel` relies partly on synthetic contamination mixtures, it is retained as a **secondary contamination-pattern classifier**, never as the primary regulatory safety mechanism.
@@ -220,11 +232,11 @@ Because `QualityModel` relies partly on synthetic contamination mixtures, it is 
 ## 12. Final Architecture and Design Decisions
 
 JalRakshak's water-quality monitoring separates responsibilities across three offline modules inside `QualityMonitor` ([firmware/quality_model.py](../firmware/quality_model.py)):
-1. **Module 1: Standards Checker (`check_standards`)** - Authoritative, deterministic regulatory safety check against configured IS 10500 / *TrinkwV* limits. Never overridden by ML scores.
-2. **Module 2: Temporal TinyML Autoencoder (`TemporalModel`, [firmware/temporal_model.json](../firmware/temporal_model.json))** - Primary ML anomaly detector. Runs on causal 15-minute and 12-hour EWMA features, suppresses alerts during startup warm-up (`< 15` samples), skips missing/`NaN` readings, and re-warms across timestamp gaps (`> 1800 s`), emitting `QUALITY_TEMPORAL_ANOMALY` / `QUALITY_TEMPORAL_CLEARED` separately in [firmware/packet.py](../firmware/packet.py).
-3. **Module 3: Three-Class Classifier (`QualityModel`, [firmware/quality_model.json](../firmware/quality_model.json))** - Secondary contamination-pattern attribution (`NORMAL`, `RUNOFF`, `CHEMICAL`) after 3-sample moving-average smoothing and 3-reading confirmation.
+1. **Module 1: Standards Checker (`check_standards`)** - Authoritative, deterministic regulatory safety check against IS 10500 (the default) or *TrinkwV* limits, chosen by the `standard` argument of `QualityMonitor`; `EdgeRuntime` does not expose it, so nodes use IS 10500. Never overridden by ML scores: it confirms, alerts (`QUALITY_LIMIT_VIOLATION`, carrying pH, TDS, turbidity and which limits were broken) and clears independently of both models. It does not need temperature.
+2. **Module 2: Temporal TinyML Autoencoder (`TemporalModel`, [firmware/temporal_model.json](../firmware/temporal_model.json))** - Primary ML anomaly detector. Runs on unsmoothed readings with causal EWMA features (15-minute and 12-hour at one reading per minute), suppresses alerts during startup warm-up (`< 15` samples, much shorter than the 12-hour EWMA window), skips readings with any missing/`NaN` value (including temperature), and after a timestamp gap (`> 1800 s`) discards both EWMAs and its confirmation counts and warms up again as at startup, emitting `QUALITY_TEMPORAL_ANOMALY` / `QUALITY_TEMPORAL_CLEARED` separately in [firmware/packet.py](../firmware/packet.py).
+3. **Module 3: Three-Class Classifier (`QualityModel`, [firmware/quality_model.json](../firmware/quality_model.json))** - Secondary contamination-pattern attribution (`NORMAL`, `RUNOFF`, `CHEMICAL`) after 3-sample moving-average smoothing and 3-reading confirmation. It is skipped when temperature is missing.
 
-Their outputs are combined as separate, interpretable signals (`QUALITY_LIMIT_VIOLATION`, `QUALITY_RUNOFF`, `QUALITY_CHEMICAL`, and `QUALITY_TEMPORAL_ANOMALY`) for local buzzer alerts and signed binary LoRa transmission, without treating ML predictions as confirmed root causes.
+Their outputs stay separate, interpretable signals (`QUALITY_LIMIT_VIOLATION`, `QUALITY_RUNOFF`, `QUALITY_CHEMICAL`, and `QUALITY_TEMPORAL_ANOMALY`) for the node's alert LED and signed binary LoRa transmission, without treating ML predictions as confirmed root causes. One reading that is both over a limit and classified as contamination raises both alerts. `QUALITY_CLEARED` is sent once no limit or classifier alert remains active. A local buzzer is planned but **not yet implemented**: the runtime only drives `hal.led`, and `firmware/hal/` has no buzzer adapter.
 
 ---
 
@@ -236,7 +248,7 @@ Their outputs are combined as separate, interpretable signals (`QUALITY_LIMIT_VI
 - **Regulatory-standard differences:** GECCO 2019 demonstrates that a model trained on IS 10500 flags compliant water from utilities operating under higher pH limits (*TrinkwV*).
 - **Low event prevalence in GECCO:** With `0.44%` event prevalence, even `0.14%` FPR yields `0.23` false alerts/day (`P = 0.642`), and `4-7` of `28` events are still missed at high-precision thresholds.
 - **Temporal model scope:** Tested primarily on GECCO 2019; it is not yet proven to eliminate seasonal drift across all water utilities.
-- **No physical sensors or Pi 4 hardware benchmarks yet:** Current hardware runs replay datasets rather than physical probes, and execution times (`0.4-37 µs`) were measured on the host laptop, not yet on physical Raspberry Pi 4 hardware.
+- **No physical sensors or Pi 4 hardware benchmarks yet:** There is no physical sensor or Pi 4 hardware layer yet (`firmware/hal/` holds only a README); replays and timings (about `37 µs` per model call in pure Python) are from development machines.
 
 ---
 
@@ -245,18 +257,19 @@ Their outputs are combined as separate, interpretable signals (`QUALITY_LIMIT_VI
 | Component | File(s) | Status |
 |---|---|---|
 | Module 1: Deterministic Standards Checker (`check_standards`) | [firmware/quality_model.py](../firmware/quality_model.py) | **Implemented & integrated** |
-| Module 2: Temporal TinyML AE (`TemporalModel`) + export | [tinyml/exp2_temporal_anomaly.py](../tinyml/exp2_temporal_anomaly.py), [firmware/temporal_model.json](../firmware/temporal_model.json), [firmware/quality_model.py](../firmware/quality_model.py), [firmware/packet.py](../firmware/packet.py), [firmware/aqua_edge.py](../firmware/aqua_edge.py) | **Implemented & integrated** (parity verified: max diff `1.11e-16` over `3,000` GECCO samples) |
+| Module 2: Temporal TinyML AE (`TemporalModel`) + export | [tinyml/exp2_temporal_anomaly.py](../tinyml/exp2_temporal_anomaly.py), [firmware/temporal_model.json](../firmware/temporal_model.json), [firmware/quality_model.py](../firmware/quality_model.py), [firmware/packet.py](../firmware/packet.py), [firmware/aqua_edge.py](../firmware/aqua_edge.py) | **Implemented & integrated** (parity over `3,000` GECCO samples: max diff `1.11e-16` where the model was exported; the test retrains, so on another machine export again with Experiment 2 first, or small floating-point differences exceed its `1e-6` tolerance) |
 | Module 3: 3-Class Classifier (`QualityModel`) | [tinyml/train_quality.py](../tinyml/train_quality.py), [firmware/quality_model.json](../firmware/quality_model.json), [firmware/quality_model.py](../firmware/quality_model.py) | **Implemented & integrated** (frozen baseline) |
 | Experiment 1: Static Multivariate Benchmark | [tinyml/exp1_multivariate_anomaly.py](../tinyml/exp1_multivariate_anomaly.py), [tinyml/exp1_results.txt](../tinyml/exp1_results.txt) | **Archived benchmark** (not used in production) |
-| Unified multi-task node execution (`FlatNode` + `TankNode` merge) | [firmware/aqua_edge.py](../firmware/aqua_edge.py) | **Pending** (currently `QualityMonitor` runs on `TankNode` only) |
+| Unified multi-task node execution (`FlatNode` + `TankNode` merge) | [firmware/aqua_edge.py](../firmware/aqua_edge.py) | **Implemented in software** (`EdgeRuntime` `combined` mode, for resource validation). Deployment keeps them separate: `QualityMonitor` runs on `TankNode`, not on flat nodes |
+| Local buzzer output | `firmware/hal/` | **Pending** |
 | Raspberry Pi 4 RAM/CPU/latency hardware benchmark | `firmware/hal/` | **Pending** |
 
 ---
 
 ## 15. Future Work
 
-1. Unify `FlatNode` and `TankNode` in [firmware/aqua_edge.py](../firmware/aqua_edge.py) so every edge node can run water-quality, leakage, and abnormal-consumption detection jointly.
-2. Benchmark full runtime RAM, flash, and per-minute CPU time on physical Raspberry Pi 4 hardware using the dataset-replay HAL.
+1. Write the Raspberry Pi 4 dataset-replay HAL, including the buzzer output.
+2. Benchmark full runtime RAM, flash, and per-minute CPU time on physical Raspberry Pi 4 hardware using that HAL.
 3. Validate `QualityModel` and `TemporalModel` against physically measured, NTU-calibrated contamination experiments if sensor calibration data becomes available.
 4. Evaluate `TemporalModel` on additional continuous drinking-water utility time series beyond GECCO 2019.
 

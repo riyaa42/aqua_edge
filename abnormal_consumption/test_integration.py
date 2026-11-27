@@ -122,6 +122,7 @@ def main():
     got_types = {(n, a) for n, a, _ in a3}
     assert ("B-401", "UNUSUAL_NIGHT_CONSUMPTION") in got_types, a3
     assert ("B-201", "ABNORMAL_CONSUMPTION") in got_types, a3
+    assert ("B-201", "SUDDEN_CONSUMPTION_CHANGE") in got_types, a3
     assert "PIPE_LEAK" not in e3 and "LEAK_TANK_DRAIN" not in e3, e3
     print("3. Multi-household simultaneous + 3.5h LoRa outage: PASS", sorted(got_types))
 

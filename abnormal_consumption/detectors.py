@@ -33,7 +33,7 @@ EVENT_TYPES = (
 
 
 class HourlyBaseline:
-    """Lightweight per-hour mean/std + EWMA (mirrors firmware Baseline)."""
+    """Lightweight per-hour mean/std + EWMA (like firmware Baseline, but blends std, not squares)."""
 
     def __init__(self, alpha=1 / 14):
         self.alpha = alpha
@@ -125,11 +125,15 @@ class BaseConsumptionDetector:
         self.hour = 0
         self.clean = True
         self.active = {}  # event_type -> last_triggered_t
+        self.last_t = None  # time of the last reading actually received
 
     def step(self, t_s, flow_lps, missing=False):
         """Process one 1-minute observation causally. Returns list of (event_type, info)."""
         if missing or flow_lps is None or math.isnan(flow_lps):
             return []
+        if self.last_t is not None and t_s - self.last_t > 90:
+            self._on_gap(t_s - self.last_t)
+        self.last_t = t_s
         hour = int((t_s % DAY_S) // HOUR_S)
         if hour != self.hour:
             self.base.blend(self.hour, self.clean)
@@ -144,6 +148,9 @@ class BaseConsumptionDetector:
         if events:
             self.clean = False
         return events
+
+    def _on_gap(self, gap_s):
+        """At least one 1-minute reading is missing (marked missing, or never passed in)."""
 
     def _learn_extra(self, t_s, hour, flow_lps):
         pass
@@ -172,6 +179,11 @@ class StatisticalBaselineDetector(BaseConsumptionDetector):
         self.night_run = 0
         self.win_6h = deque(maxlen=360)
         self.day_mean_6h = 0.0
+
+    def _on_gap(self, gap_s):
+        self.high_run = self.night_run = 0      # "for N minutes" means N consecutive readings
+        if gap_s > HOUR_S:
+            self.win_6h.clear()                 # too old to count as the last 6 hours
 
     def _learn_extra(self, t_s, hour, flow_lps):
         self.win_6h.append(flow_lps)
@@ -217,6 +229,10 @@ class StatisticalZeroFlowDetector(StatisticalBaselineDetector):
         # 24 h continuous zero-flow avoids false alarms from overnight sleep + 10 h workday absences.
         self.active_zero_min = active_zero_min
         self.zero_run = 0
+
+    def _on_gap(self, gap_s):
+        super()._on_gap(gap_s)
+        self.zero_run = 0                       # unknown flow is not zero flow
 
     def _check(self, t_s, hour, flow_lps):
         out = super()._check(t_s, hour, flow_lps)

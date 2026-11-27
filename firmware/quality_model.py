@@ -132,16 +132,11 @@ class TemporalModel:
 
         f = features(float(temp_c), float(ph), float(tds_ppm), float(turbidity_ntu))
 
-        if self.ewma_short is None:
+        gap = ts_s is not None and self.last_ts is not None and (ts_s - self.last_ts) > self.max_gap_s
+        if self.ewma_short is None or gap:
+            # First reading, or first after an outage: drop all history and warm up again
             self.ewma_short = list(f)
             self.ewma_long = list(f)
-            self.warmup_seen = 1
-            self.last_ts = ts_s
-            return False, 0.0, False
-
-        if ts_s is not None and self.last_ts is not None and (ts_s - self.last_ts) > self.max_gap_s:
-            # Timestamp gap (e.g. after outage): re-anchor short-term EWMA & re-warm
-            self.ewma_short = list(f)
             self.warmup_seen = 1
             self.last_ts = ts_s
             return False, 0.0, False
@@ -170,52 +165,76 @@ class QualityMonitor:
         self.confirm_n = confirm_n
         self.clear_n = clear_n
         self.standard = standard
-        self.bad_run = 0
-        self.good_run = 0
-        self.active_class = None
+        # [bad_run, good_run, active label]: limits and classifier confirm and clear separately,
+        # so an ML class can never replace or hide a standards violation
+        self.limit_state = [0, 0, None]
+        self.class_state = [0, 0, None]
         self.t_bad_run = 0
         self.t_good_run = 0
         self.temporal_active = False
 
+    @property
+    def limit_active(self):
+        return self.limit_state[2] is not None
+
+    @property
+    def active_class(self):
+        return self.class_state[2]
+
+    def _confirm(self, state, label):
+        """Advance one alert track with this reading's label (None = fine).
+        Returns ("ALERT" or "CLEARED", label), or None."""
+        if label is not None:
+            state[0] += 1
+            state[1] = 0
+            if state[0] >= self.confirm_n and state[2] is None:
+                state[2] = label
+                return "ALERT", label
+        else:
+            state[0] = 0
+            state[1] += 1
+            if state[2] is not None and state[1] >= self.clear_n:
+                cleared, state[2] = state[2], None
+                return "CLEARED", cleared
+        return None
+
     def update(self, temp_c, ph, tds_ppm, turbidity_ntu, ts_s=None):
         """Process one reading.
 
-        Returns (ml_class, compliant, violations, reg_event, temporal_event).
+        Returns (ml_class, compliant, violations, limit_event, class_event, temporal_event).
+        Without pH, TDS or turbidity nothing runs (compliant is None: unknown). Without
+        temperature only the standards check runs (ml_class is None); both ML modules skip.
         """
-        if not _is_valid_reading(temp_c, ph, tds_ppm, turbidity_ntu):
-            return "NORMAL", True, [], None, None
+        values = (ph, tds_ppm, turbidity_ntu)
+        if any(v is None or not math.isfinite(float(v)) for v in values):
+            return None, None, [], None, None, None
+        has_temp = _is_valid_reading(temp_c, *values)
 
         # Stage 1: short moving-average smoothing for Module 1 + Module 3
-        self.buf.append((float(temp_c), float(ph), float(tds_ppm), float(turbidity_ntu)))
+        self.buf.append((float(temp_c) if has_temp else None, *map(float, values)))
         n = len(self.buf)
-        avg = tuple(sum(r[i] for r in self.buf) / n for i in range(4))
+        temps = [r[0] for r in self.buf if r[0] is not None]
+        avg = (sum(temps) / len(temps) if has_temp else None,
+               *(sum(r[i] for r in self.buf) / n for i in range(1, 4)))
 
         # Module 1: Authoritative deterministic standards check (never overridden by ML)
         compliant, violations = check_standards(avg[1], avg[2], avg[3], self.standard)
-        # Module 3: Secondary contamination classification
-        ml_class = self.model.classify(*avg)
+        ev = self._confirm(self.limit_state, None if compliant else "LIMIT_VIOLATION")
+        limit_event = ev and (*ev, avg, violations)
 
-        is_bad = (not compliant) or (ml_class != "NORMAL")
-        effective_class = ml_class if ml_class != "NORMAL" else ("LIMIT_VIOLATION" if not compliant else "NORMAL")
-
-        reg_event = None
-        if is_bad:
-            self.bad_run += 1
-            self.good_run = 0
-            if self.bad_run >= self.confirm_n and self.active_class is None:
-                self.active_class = effective_class
-                reg_event = ("ALERT", effective_class, avg, violations)
-        else:
-            self.bad_run = 0
-            self.good_run += 1
-            if self.active_class is not None and self.good_run >= self.clear_n:
-                self.active_class = None
-                reg_event = ("CLEARED", "NORMAL", avg, violations)
+        # Module 3: Secondary contamination classification (needs a real temperature)
+        ml_class, class_event = None, None
+        if has_temp:
+            ml_class = self.model.classify(*avg)
+            ev = self._confirm(self.class_state, None if ml_class == "NORMAL" else ml_class)
+            class_event = ev and (*ev, avg, violations)
 
         # Module 2: Primary ML temporal anomaly detection (independent of Module 1/3)
         temporal_event = None
         if self.temporal is not None:
             ready, score, t_anom = self.temporal.step(temp_c, ph, tds_ppm, turbidity_ntu, ts_s=ts_s)
+            if self.temporal.warmup_seen == 1:     # (re)initialised: old runs don't carry over
+                self.t_bad_run = self.t_good_run = 0
             if ready and t_anom:
                 self.t_bad_run += 1
                 self.t_good_run = 0
@@ -229,7 +248,7 @@ class QualityMonitor:
                     self.temporal_active = False
                     temporal_event = ("TEMPORAL_CLEARED", score, (temp_c, ph, tds_ppm, turbidity_ntu))
 
-        return ml_class, compliant, violations, reg_event, temporal_event
+        return ml_class, compliant, violations, limit_event, class_event, temporal_event
 
 
 if __name__ == "__main__":
@@ -257,15 +276,24 @@ if __name__ == "__main__":
     ready, _, anom = tmod.step(None, float("nan"), 140.0, 0.2, ts_s=1000)
     assert not ready and not anom
 
-    # 3. Timestamp gap (> max_gap_s): resets short-term EWMA & re-warms
+    # 3. Timestamp gap (> max_gap_s): drops all EWMA history & re-warms
     ready, _, anom = tmod.step(20.0, 7.5, 200.0, 1.0, ts_s=1000 + tmod.max_gap_s + 60)
     assert not ready and not anom, "Must re-warm after large timestamp gap"
+    assert tmod.ewma_short == tmod.ewma_long == features(20.0, 7.5, 200.0, 1.0), "no history across a gap"
 
     # 4. Standards checker never overridden by temporal model
     mon = QualityMonitor(model=model, temporal_model=TemporalModel())
     for i in range(3):
-        _, comp, viol, reg_ev, _ = mon.update(25.0, 9.1, 200.0, 0.5, ts_s=i * 60)
+        ml, comp, viol, limit_ev, class_ev, _ = mon.update(25.0, 9.1, 200.0, 0.5, ts_s=i * 60)
         assert not comp and "pH" in viol
-    assert reg_ev is not None and reg_ev[0] == "ALERT"
+    assert ml == "CHEMICAL" and class_ev[:2] == ("ALERT", "CHEMICAL")
+    assert limit_ev[:2] == ("ALERT", "LIMIT_VIOLATION") and limit_ev[3] == ["pH"], "ML must not hide the violation"
+
+    # 5. Missing temperature: standards still checked, both ML modules skipped (no stand-in value)
+    mon = QualityMonitor(model=model, temporal_model=TemporalModel())
+    for i, temp in enumerate((None, float("nan"), None)):
+        ml, comp, _, limit_ev, class_ev, t_ev = mon.update(temp, 9.1, 200.0, 0.5, ts_s=i * 60)
+        assert ml is None and class_ev is None and t_ev is None and not comp
+    assert limit_ev[0] == "ALERT" and mon.temporal.ewma_short is None
 
     print("quality model self-check passed")

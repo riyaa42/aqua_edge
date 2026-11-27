@@ -8,9 +8,9 @@ Verifies zero temporal leakage:
 
 Evaluates:
   - Precision-Recall trade-off across validation-calibrated quantiles (99.0% .. 99.99%) + 3-sample confirmation
-  - Actual sampling interval from timestamps (1 min in GECCO, 15 min in CSU ROSS, 60 min in Loddon)
+  - Actual sampling interval from timestamps (1 min in GECCO, 60 min in Loddon)
   - Detection delay in BOTH samples and minutes, event detection rate, and false alert episodes/day
-  - External temporal evaluation on Loddon Catchment (storm windows) and CSU ROSS 2019 (false alert rate/day).
+  - External temporal evaluation on Loddon Catchment (storm windows).
 """
 import csv
 import json
@@ -285,6 +285,17 @@ def main():
         p, r, f1, fpr, hit, tot, ds, dm, fpd = eval_scores(y_test, ae_te, thr, dt_g, confirm=conf)
         lbl = f"q={q_val:.4f}, confirm={conf}"
         say(f"  {lbl:26s} | {p:6.3f} {r:6.3f} {f1:6.3f} {fpr:6.4f} | {hit:2d}/{tot:2d}   {ds:>11s} {dm:>10s} {fpd:9.2f}")
+
+    # Non-ML baselines on the same split, with thresholds from the same validation slice
+    res = rolling_ewma_z(zg)
+    say("  Baselines (q=0.99, confirm=1):")
+    for name, scores in (("Moving-Avg Residual (EWMA Z)", np.max(np.abs(res), axis=1)),
+                         ("Change-Point (CUSUM)", cusum_scores(res))):
+        cal = scores[:mid][norm_1][c_idx:]
+        te = scores[mid:]
+        p, r, f1, fpr, hit, tot, ds, dm, fpd = eval_scores(y_test, te, np.quantile(cal, 0.99), dt_g)
+        say(f"  {name:28s} | P={p:.3f} R={r:.3f} F1={f1:.3f} FPR={fpr:.4f} AUC={roc_auc_score(y_test, te):.3f} | "
+            f"Events={hit}/{tot} | Delay={ds} ({dm}) | FA_ep/day={fpd:.2f}")
 
     # 2. Loddon Catchment (second continuous temporal dataset, 1-hour sampling)
     # All 207 storm samples fall in indices 83..3247; indices 3300..8322 are 100% storm-free.

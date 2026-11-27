@@ -1,6 +1,6 @@
 # Aqua Edge: Firmware
 
-The real code for the nodes and the gateway. It only uses the Python standard library, and it never talks to hardware directly: it calls a small hardware layer (`hal`) for sensors, radio, clock, SD card and buzzer/LED. There are no valves in this project: the response to a problem is the buzzer, the LED and an alert to the gateway. The simulation (`../simulation/`) plugs in a simulated hardware layer; the real hardware will get its own: one for the Raspberry Pi 4 nodes (USB powered), and one on the gateway laptop that exchanges packets with the ESP32 radio bridge over USB serial.
+The real code for the nodes and the gateway. It only uses the Python standard library, and it never talks to hardware directly: it calls a small hardware layer (`hal`) for sensors, radio, clock, SD card and buzzer/LED. There are no valves in this project: the response to a problem is the buzzer, the LED and an alert to the gateway (the buzzer is not implemented yet: the firmware only drives the LED). The simulation (`../simulation/`) plugs in a simulated hardware layer; the real hardware will get its own: one for the Raspberry Pi 4 nodes (USB powered), and one on the gateway laptop that exchanges packets with the ESP32 radio bridge over USB serial.
 
 | File | Runs on | What it does |
 |---|---|---|

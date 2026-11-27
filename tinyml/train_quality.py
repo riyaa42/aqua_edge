@@ -7,7 +7,7 @@ Method and sources: tinyml/README.md.
 
 Design:
   - 4 inputs matching Sharma et al. [1]: [Temperature_C, pH, log1p(TDS_ppm), log1p(Turbidity_NTU)]
-  - Temperature sampled from an identical overlapping distribution (10-35 C) across all 3 classes.
+  - Temperature sampled from an identical overlapping distribution (4-35 C) across all 3 classes.
   - Expanded contamination mixtures:
       * RUNOFF: varied concentrations (including low-turbidity 2-300 NTU, pH 5.4-7.4, low TDS)
       * CHEMICAL: acidic (pH 2.0-5.0), neutral high-TDS (pH 6.5-8.5), and alkaline (pH 9.5-12.5),

@@ -122,7 +122,8 @@ def score(gw, nodes):
     lines.append(f"E2 power cut: gateway supply event {'at ' + hhmm(sup['t']) if sup else 'NOT raised'}")
     unexplained = [m for m in alerts if (m["n"], m["a"]) not in {
         ("B-203", "LEAK_NIGHT_FLOW"), ("B-203", "LEAK_CONTINUOUS_FLOW"), ("B-203", "ABNORMAL_CONSUMPTION"), ("B-TANK", "ABNORMAL_SUPPLY"),
-        ("B-TANK", "QUALITY_RUNOFF"), ("B-TANK", "QUALITY_CHEMICAL"), ("B-TANK", "QUALITY_CLEARED")}]
+        ("B-TANK", "QUALITY_RUNOFF"), ("B-TANK", "QUALITY_CHEMICAL"), ("B-TANK", "QUALITY_CLEARED"),
+        ("B-TANK", "QUALITY_LIMIT_VIOLATION")}]    # planted E4/E5 water also breaks the limits
     lines.append(f"Alerts not explained by a planted event: {len(unexplained)}")
     for m in unexplained:
         lines.append(f"   {m['n']} {m['a']} at {hhmm(m['t'])}")

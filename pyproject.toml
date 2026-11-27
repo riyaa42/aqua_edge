@@ -8,6 +8,7 @@ dependencies = [
     "matplotlib>=3.8",
     "numpy>=2.0",
     "pandas>=2.0",
+    "scikit-learn>=1.9.1",
     "streamlit>=1.66.1",
     "wntr>=1.5",
 ]

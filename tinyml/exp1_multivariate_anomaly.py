@@ -10,7 +10,7 @@ Compares:
 Evaluates on:
   A. GECCO 2019 real utility data (train on first 50% normal, test on second 50% + labelled events)
   B. Kenya Safe + In-Range Correlated Anomalies (strictly inside IS 10500 limits)
-  C. Edge suitability (bytes / RAM, inference time per reading, offline operation)
+  C. Edge suitability (parameter bytes and host inference time per reading)
 
 Writes tinyml/exp1_results.txt.
 """
@@ -98,18 +98,19 @@ class TinyAutoencoder:
         rec = self.forward(z)[-1]
         return np.mean((rec - z) ** 2, axis=1)
 
-    def quantize_int8(self):
-        self.Wq = []
-        self.sw = []
-        for w in self.W:
+    def quantize_int8(self, z_cal):
+        """int8 weights plus one fixed activation scale per layer, calibrated once on training data."""
+        acts = self.forward(z_cal)
+        self.Wq, self.sw, self.sa = [], [], []
+        for l, w in enumerate(self.W):
             s = max(np.abs(w).max() / 127.0, 1e-12)
             self.sw.append(s)
+            self.sa.append(max(np.percentile(np.abs(acts[l]), 99.9) / 127.0, 1e-12))
             self.Wq.append(np.round(w / s).astype(np.int8))
 
     def mse_int8(self, z):
         a = z
-        for l, (wq, sw, b) in enumerate(zip(self.Wq, self.sw, self.B)):
-            sa = max(np.abs(a).max() / 127.0, 1e-12)
+        for l, (wq, sw, sa, b) in enumerate(zip(self.Wq, self.sw, self.sa, self.B)):
             aq = np.clip(np.round(a / sa), -128, 127).astype(np.int32)
             out = (aq @ wq.astype(np.int32)) * (sa * sw) + b
             a = np.maximum(out, 0) if l < len(self.Wq) - 1 else out
@@ -163,7 +164,7 @@ def run_benchmark(name, x_tr_norm, x_cal_norm, x_test, y_test, standard_name):
     # 5. TinyML Autoencoder (float32 + int8)
     ae = TinyAutoencoder((4, 8, 2, 8, 4))
     ae.fit(z_trn, epochs=80, lr=0.01)
-    ae.quantize_int8()
+    ae.quantize_int8(z_trn)
     ae_cal = ae.mse(z_caln)
     ae_te = ae.mse(z_ten)
     ae8_cal = ae.mse_int8(z_caln)
