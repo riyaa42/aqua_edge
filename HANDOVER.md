@@ -21,7 +21,7 @@ Aqua Edge (CSD457 Internet of Things; earlier names: JalRakshak, HydroDrive) is 
 | `leak_detection/README.md` | How leak detection works: checks, math, timing, results, known problems. |
 | `leak_detection/compare_leaks.py` | Flow vs pressure experiment (35 runs). Run from `simulation/`. Results go to `leak_detection/results/` (not in git). |
 | `tinyml/` | Water-quality model: `train_quality.py` (data, training, 8-bit quantization, tests), results, datasets. The node runs `firmware/quality_model.py`. |
-| `simulation/live/` | **Main test system.** Live simulation: water engine, timekeeper, one process or Docker container per node, LoRa radio model, control panel, checker, scenarios. |
+| `simulation/live/` | **Main test system.** Live simulation: water engine, timekeeper, one process or Docker container per node, LoRa radio model, dashboard, checker, scenarios. |
 | `simulation/ns3/` | ns-3 (research network simulator) with the LoRaWAN module, in Docker. Produces the radio link table and replays live runs to cross-check the radio model. |
 | `simulation/webots/` | Older 3D test bench (Webots), the pre-made 48 h sensor scenario, and `run_offline.py` (fast firmware test without Webots). Parked, see section 6. |
 | `simulation/scripts/build_society.py` | Builds the building B water network used everywhere. |
@@ -87,7 +87,7 @@ Airtime is about 67 ms per 29-byte summary and 46 ms per 14-byte ACK at SF7 (was
 
 | Setup | Water | Radio | Use |
 |---|---|---|---|
-| **Live simulation** (`simulation/live/`) | EPANET through WNTR (Python library driving the EPANET pipe simulator), stepped minute by minute, so leaks can be added mid-run | `live/radio.py`: airtime, collisions, cuts, weak links; checked against ns-3 replay | **Main test.** Real firmware in 22 processes, or 24 Docker containers (nodes, gateway, timekeeper, control panel) |
+| **Live simulation** (`simulation/live/`) | EPANET through WNTR (Python library driving the EPANET pipe simulator), stepped minute by minute, so leaks can be added mid-run | `live/radio.py`: airtime, collisions, cuts, weak links; checked against ns-3 replay | **Main test.** Real firmware in 22 processes, or 24 Docker containers (nodes, gateway, timekeeper, dashboard) |
 | **Offline test** (`simulation/webots/run_offline.py`) | Pre-made 48 h file `webots/data/sensors.csv` | Outage times only | 1-second firmware regression test |
 | **Webots** (`simulation/webots/`) | Same pre-made file | Simple in range / out of range | 3D view only; parked |
 
@@ -166,7 +166,7 @@ Settled on 11 November 2026: nodes on mains power, gateway = LoRa + ESP32 + lapt
 **Simulation only from 2026-11-27: no hardware.** The project is shown through the simulation and the dashboard. `firmware/pi_hal.py` stays as the written design for a real node (untested); the Pi test, the gateway laptop's USB layer and the ESP32 bridge are dropped.
 
 1. **Encryption:** done (2026-11-27). Packet bodies are encrypted with AES-128 in counter mode (`firmware/packet.py`).
-2. **Dashboard leak demo** (next): pick one flat, choose how bad the leak is, and fast-forward the simulation until that flat's alert reaches the gateway. Show when the leak started, which check caught it, how long that took and when the gateway knew. Caretaker view first (every flat as a green/yellow/red tile, alerts, tank); radio numbers in a second tab. Builds on the Streamlit control panel (`simulation/live/control_panel.py`). Still to decide: choose the leak's start time or not; three fixed sizes or a slider; race through the learning day automatically.
+2. **Dashboard leak demo:** done (2026-11-27). `python3 live/dashboard.py`, then open localhost:8080 (standard library only, works offline; replaces the Streamlit control panel). Press Start simulation: the flats race through their learning day and the run pauses at day 2, 00:00. Pick a flat on the building, pick Small / Medium / Severe or any size on the slider (0.01 to 2 L/s), start it now or at a set hour, and the simulation runs ahead until that flat's alert reaches the gateway, then stops. The result shows when the leak started, which check caught it, how long that took and when the gateway knew. Also: gateway feed, tank level and quality, water-quality and radio-cut buttons, and a Radio tab. Example: a small leak (0.05 L/s) in flat 203 at midnight was caught by the night-flow check at 01:29 and reached the gateway at 01:30.
 3. **Security demo:** an attacker in the radio model that sends forged packets, replays old ones and listens in, plus a checker line proving all forged and replayed packets were rejected and the bodies were unreadable. Also make `NetHAL` (simulated node) check the ACK signature before setting its clock, as `pi_hal.py` already does.
 4. **Retry storm:** wait longer between re-sends the longer a radio cut lasts (about 13,000 re-send attempts in a 3.5 h cut today).
 5. **Realistic water use:** test the leak checks on real household data (Cache County HydroShare, 31 homes, 4-second readings), because the simulated use is too smooth for "0 false alarms" to mean much.
@@ -190,8 +190,8 @@ From `simulation/`:
 ```
 sh live/run_local.sh --scenario live/scenarios/standard.jsonl     # live run, no Docker (~1 min)
 python3 live/check_comms.py                                       # PASS/FAIL report for the last run
-docker compose -f live/compose.yaml up                            # one container per node; panel at localhost:8501
-uv run streamlit run live/control_panel.py                        # control panel for the no-Docker run
+docker compose -f live/compose.yaml up                            # one container per node; dashboard at localhost:8080
+python3 live/dashboard.py                                        # dashboard and leak test at localhost:8080
 python3 webots/run_offline.py                                     # 1-second firmware test
 uv run python ../leak_detection/compare_leaks.py                  # flow vs pressure (~5 min; see note in file)
 sh ns3/run_ns3.sh                                                 # ns-3 link table (first build 20-30 min)

@@ -56,8 +56,9 @@ class Water:
 
     # --- events (called by the timekeeper between minutes) ---
     def start_leak(self, where, size):
-        """Leak hole sized so it gives `size` L/s at the junction's current pressure."""
-        lps = LEAK_SIZES_LPS[size]
+        """Leak hole sized so it gives `size` L/s at the junction's current pressure. size is a
+        name from LEAK_SIZES_LPS or a number of L/s."""
+        lps = LEAK_SIZES_LPS.get(size, size)
         p = max(self._last("node", "pressure", where), 0.5)
         j = self.wn.get_node(where)
         # ponytail: private WNTR attributes (stock WNTR only adds leaks before a run); pinned to wntr 1.5.0
@@ -121,6 +122,10 @@ if __name__ == "__main__":
     w.fix_leak("B-203")
     w.step()
     assert w.leak_lps("B-203") == 0
+    w.start_leak("B-203", 0.2)                                   # any size in L/s
+    w.step(); w.step()
+    assert abs(w.leak_lps("B-203") - 0.2) < 0.02, w.leak_lps("B-203")
+    w.fix_leak("B-203")
     # 3. Quality event switches on and back off
     w.set_quality("chemical", 2)
     assert w.readings()["B-TANK"]["tds_ppm"] > 600

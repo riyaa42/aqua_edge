@@ -1,6 +1,6 @@
 # The live simulation, one container per node:
 #   docker compose -f live/compose.yaml up        (run from simulation/)
-# Control panel: http://localhost:8501   Results: live/run/ (score with python3 live/check_comms.py)
+# Dashboard: http://localhost:8080   Results: live/run/ (score with python3 live/check_comms.py)
 # Scenario and speed: AQUA_SCENARIO=live/scenarios/standard.jsonl AQUA_DELAY=0.5 docker compose ... up
 x-env: &env
   AQUA_TIMEKEEPER: timekeeper
@@ -18,10 +18,10 @@ services:
     build: {context: .., dockerfile: live/Dockerfile}
     environment: {<<: *env, AQUA_BIND: 0.0.0.0}      # listen for the other containers
     command: python3 live/timekeeper.py --scenario ${AQUA_SCENARIO:-live/scenarios/standard.jsonl} --delay ${AQUA_DELAY:-0}
-  control-panel:
+  dashboard:
     <<: *node
-    command: streamlit run live/control_panel.py --server.address 0.0.0.0 --server.headless true
-    ports: ["8501:8501"]
+    command: python3 live/dashboard.py --host 0.0.0.0
+    ports: ["8080:8080"]
   gateway: {<<: *node, environment: {<<: *env, NODE_ID: GATEWAY}}
   # ponytail: one line per node, written from ns3/positions.csv; regenerate if the building changes
   b-101: {<<: *node, environment: {<<: *env, NODE_ID: B-101}}

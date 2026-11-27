@@ -6,11 +6,15 @@ panel (or a scenario file), and keeps every node in step.
 Each minute: send every node only its own readings and its radio inbox, wait until all of them
 have run their firmware, pass what they sent through the radio model, then step the water.
 Commands are lines of JSON appended to run/commands.jsonl, e.g.
-    {"do": "leak", "where": "B-203", "size": "small"}           size: small | medium | large
+    {"do": "leak", "where": "B-203", "size": "small"}           size: small | medium | large | L/s
     {"do": "fix", "where": "B-203"}
     {"do": "quality", "kind": "runoff", "minutes": 60}          kind: runoff | chemical
     {"do": "radio_cut", "who": "all", "minutes": 210}           who: a node name or "all"
     {"do": "speed", "delay_s": 0.5}     {"do": "pause"}     {"do": "resume"}     {"do": "stop"}
+    {"do": "until_alert", "node": "B-203", "from_s": 93600}
+        run as fast as possible until an alert from B-203 made at or after from_s reaches the
+        gateway, then pause one minute later (once the gateway has logged it); gives up and
+        pauses after WATCH_MAX_S. The timekeeper only reads the packet's header (readable).
 Add "at_s": <simulation seconds> to schedule a command instead of applying it straight away.
 """
 import argparse
@@ -22,9 +26,11 @@ from multiprocessing.connection import Listener
 
 from water import Water, LEAK_SIZES_LPS
 from radio import Radio, GATEWAY
-from node import RUN, ADDRESS, AUTHKEY
+from node import RUN, ADDRESS, AUTHKEY, peek
 
 DAY = 86400
+WATCH_MAX_S = DAY              # until_alert gives up after this long
+MAX_LEAK_LPS = 5.0
 
 
 class Commands:
@@ -45,7 +51,9 @@ class Commands:
 def apply(c, t, water, radio, applied):
     do = c["do"]
     if do == "leak":
-        if c["where"] not in water.leak_sites or c["size"] not in LEAK_SIZES_LPS:
+        size = c.get("size")
+        ok_size = size in LEAK_SIZES_LPS or (isinstance(size, (int, float)) and 0 < size <= MAX_LEAK_LPS)
+        if c["where"] not in water.leak_sites or not ok_size:
             print(f"ignored bad command {c}")
             return
         water.start_leak(c["where"], c["size"])
@@ -89,6 +97,7 @@ def main(args):
 
     readings_of = lambda name, r: r.get(name, {}) if name != GATEWAY else {}
     inbox, delay, paused, end = {}, args.delay, False, args.hours * 3600
+    watch = pause_at = None              # until_alert: {"node", "from_s", "delay"}; minute to pause at
     start = time.time()
     while water.t < end:
         t = water.t
@@ -99,11 +108,14 @@ def main(args):
                 paused = c["do"] == "pause"
             elif c["do"] == "stop":
                 end = t
+            elif c["do"] == "until_alert":
+                watch = {"node": c["node"], "from_s": c.get("from_s", t), "delay": delay}
+                delay, paused, pause_at = 0, False, None
             else:
                 apply(c, t, water, radio, applied)
-        with open(os.path.join(RUN, "clock.json"), "w") as f:      # for the control panel
+        with open(os.path.join(RUN, "clock.json"), "w") as f:      # for the dashboard
             json.dump({"t": t, "end": end, "paused": paused, "delay_s": delay, "leaks": water.leaks,
-                       "quality": water.water_quality}, f)
+                       "quality": water.water_quality, "watching": watch and {k: watch[k] for k in ("node", "from_s")}}, f)
         if paused:
             time.sleep(0.2)
             continue
@@ -112,6 +124,13 @@ def main(args):
             c.send({"t": t, "r": readings_of(name, r), "inbox": inbox.get(name, [])})
         outs = {name: c.recv() for name, c in conns.items()}
         inbox = radio.transmit(t, outs)
+        if watch:
+            heard = any(h["k"] == "ALERT" and h["n"] == watch["node"] and h["t"] >= watch["from_s"]
+                        for h in map(peek, inbox.get(GATEWAY, [])))
+            if heard or t >= watch["from_s"] + WATCH_MAX_S:
+                pause_at, delay, watch = t + 60, watch["delay"], None    # the gateway logs it next minute
+        if pause_at is not None and t >= pause_at:
+            paused, pause_at = True, None
         water.step()
         if t % 3600 == 0:
             print(f"day {t // DAY + 1} {t % DAY // 3600:02d}:00  ({time.time() - start:.0f} s)", flush=True)

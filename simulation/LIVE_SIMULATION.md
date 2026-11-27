@@ -8,7 +8,7 @@ The earlier offline test fed every node a pre-made 48-hour file of sensor values
 
 - Every node runs the **real node firmware** (the same code the Raspberry Pi will run).
 - Water values come from a **water model that runs minute by minute**, so events can be triggered while it runs.
-- A **control panel** triggers events (leaks, water-quality changes, radio cuts). It does not type in sensor values. The water model decides what the sensors would read.
+- A **dashboard** (web page) triggers events (leaks, water-quality changes, radio cuts). It does not type in sensor values. The water model decides what the sensors would read.
 - The LoRa radio is modelled realistically (airtime, collisions, signal strength), and checked against **ns-3**, a standard network simulator.
 - A **checker** decides, with pass marks, whether communication worked.
 
@@ -21,14 +21,14 @@ The earlier offline test fed every node a pre-made 48-hour file of sensor values
 | Nodes and gateway | `live/node.py` | One process (or container) per node, running the real firmware |
 | Firmware | `../firmware/aqua_edge.py`, `gateway.py` | Detection rules, alerts, sending, re-sending, SD card storage, gateway analysis |
 | Radio model | `live/radio.py` | Decides which packets arrive: airtime, collisions, a gateway that cannot hear while it sends, radio cuts, weak links |
-| Control panel | `live/control_panel.py` | Streamlit web page to trigger events and watch alerts |
+| Dashboard | `live/dashboard.py`, `live/dashboard.html` | Web page (standard library only, works offline) showing the building as the gateway sees it, with the leak test: pick a flat and a leak size, and the simulation runs ahead until that flat's alert reaches the gateway. Also triggers water-quality events and radio cuts, and shows the radio numbers |
 | Checker | `live/check_comms.py` | Scores a finished run with PASS/FAIL lines |
 | ns-3 | `ns3/aqua_lora.cc`, `ns3/run_ns3.sh` | Builds the link table for building B and replays live runs |
 | Containers | `live/Dockerfile`, `live/compose.yaml` | One Docker container per node, gateway, timekeeper and panel |
 
 ### How one simulated minute works
 
-1. The timekeeper applies any commands that are due (from the control panel or a scenario file).
+1. The timekeeper applies any commands that are due (from the dashboard or a scenario file).
 2. It sends every node **only its own readings** plus any radio messages addressed to it.
 3. Every node runs one step of its firmware and replies with the packets it wants to send, and when.
 4. The radio model decides which packets arrive. Arrivals are delivered in the next minute.
@@ -143,8 +143,8 @@ From the `simulation/` folder:
 
 ```
 sh live/run_local.sh --scenario live/scenarios/standard.jsonl   # no Docker, one process per node
-docker compose -f live/compose.yaml up                          # one container per node; panel at localhost:8501
-uv run streamlit run live/control_panel.py                      # control panel for the no-Docker run
+docker compose -f live/compose.yaml up                          # one container per node; dashboard at localhost:8080
+python3 live/dashboard.py                                      # dashboard and leak test at localhost:8080
 python3 live/check_comms.py                                     # PASS/FAIL report for the last run
 sh ns3/run_ns3.sh                                               # ns-3 link table (first time builds ns-3, 20 to 30 min)
 sh ns3/run_ns3.sh replay                                        # ns-3 replay of the last live run

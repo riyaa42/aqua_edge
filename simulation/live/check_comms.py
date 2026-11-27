@@ -3,7 +3,7 @@
     python3 live/check_comms.py
 
 Reads tx_log.csv (every radio attempt), gateway_log.jsonl (what arrived), events_applied.jsonl
-(ground truth from the control panel or scenario) and the nodes' SD queues. Exits with an error
+(ground truth from the dashboard or scenario) and the nodes' SD queues. Exits with an error
 if a pass mark is missed. Pass marks are placeholders until the team agrees on them.
 """
 import csv

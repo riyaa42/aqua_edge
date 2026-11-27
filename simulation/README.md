@@ -6,7 +6,7 @@ Full write-up of mechanisms, results and next steps: [`LIVE_SIMULATION.md`](LIVE
 
 | Folder | What is in it |
 |---|---|
-| `live/` | Live simulation: water engine (WNTR), timekeeper, one process or container per node, LoRa radio model, control panel, checker, scenarios |
+| `live/` | Live simulation: water engine (WNTR), timekeeper, one process or container per node, LoRa radio model, dashboard, checker, scenarios |
 | `ns3/` | ns-3 (LoRaWAN module, in Docker): signal strength and spreading factor per node, and replay of live runs |
 | `webots/` | Building B network and sensor scenario (`make_scenario.py`), 3D world, offline firmware test (`run_offline.py`) |
 | `scripts/build_society.py` | Builds the water network (rooftop tank, downtake, 4 flats per floor); `make_scenario.py` uses building B from it |
@@ -18,8 +18,8 @@ Uses [uv](https://docs.astral.sh/uv/). From this `simulation/` folder:
 ```
 sh live/run_local.sh --scenario live/scenarios/standard.jsonl     # no Docker: one process per node, 48 h in ~1 min
 sh live/run_local.sh --scenario live/scenarios/flow_leaks.jsonl   # three flow leaks (see ../leak_detection/)
-docker compose -f live/compose.yaml up                            # one container per node; panel at localhost:8501
-uv run streamlit run live/control_panel.py                        # control panel for the no-Docker run
+docker compose -f live/compose.yaml up                            # one container per node; dashboard at localhost:8080
+python3 live/dashboard.py                                        # dashboard and leak test at localhost:8080
 python3 live/check_comms.py                                       # PASS/FAIL report for the last run
 sh ns3/run_ns3.sh                                                 # ns-3 link table (first run builds ns-3: ~20-30 min)
 sh ns3/run_ns3.sh replay                                          # ns-3 replay of the last live run

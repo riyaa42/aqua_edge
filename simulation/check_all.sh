@@ -12,6 +12,8 @@ step "water-quality model self-check"
 python3 ../firmware/quality_model.py
 step "real node hardware layer self-check (fake radio, no hardware)"
 python3 ../firmware/pi_hal.py --check
+step "dashboard self-check (status, leak test result, command checks)"
+python3 live/dashboard.py --check
 step "radio self-check"
 python3 live/radio.py
 step "water engine self-check"
