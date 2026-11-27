@@ -11,7 +11,7 @@
 5. TDS sensor
 6. Turbidity sensor
 7. Water temperature sensor
-8. Water flow sensor
+8. Water flow sensor (flats 301, 201, 101 and G01 also wire a second one, on the down pipe above their floor)
 9. Water pressure sensor
 10. 8-channel ADC (Analog-to-Digital Converter)
 11. RTC (Real-Time Clock) module

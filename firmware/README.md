@@ -32,6 +32,7 @@ Raspberry Pi OS (Bookworm). The Pi 4 and the Pi Zero 2 W have the same pins, so 
 | DS3231 clock | VCC, GND, SDA, SCL | 3V3 (17), GND (9), GPIO2 (3), GPIO3 (5) |
 | LEDs (each with a 330 ohm resistor to GND) | green, yellow, red | GPIO17 (11), GPIO27 (13), GPIO5 (29) |
 | Active buzzer | + | GPIO18 (12) |
+| Down pipe flow meter (flats 301, 201, 101, G01 only) | pulse | a spare GPIO, e.g. GPIO6 (31) |
 
 Pins and radio settings are knobs at the top of `pi_hal.py`. The gateway's ESP32 radio must use the same radio settings (433.175 MHz, SF7, 125 kHz, 4/5, sync word 0x12, 10 dBm: India allows 10 mW and 10% time on air in 433.05 to 434.79 MHz).
 

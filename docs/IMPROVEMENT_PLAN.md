@@ -155,6 +155,8 @@ Defaults chosen when building: **4-byte tag** (`TAG_BYTES`, the same size LoRaWA
 
 ### 4.3 Finding where the leak is
 
+- **Done (2026-11-27), option A.** Pressure (B) was measured first and is not enough: a leak on floor 4 drops every floor's pressure by the same amount (4.5 cm at 0.5 L/s), and a 0.005 L/s leak moves it under 1 mm. So the down pipe now has a flow meter above each lower floor, wired to flat 301, 201, 101 or G01's node (no new radios), and the gateway balances each floor's stretch: a fast check (more than 30 L lost in 15 minutes) and a night check (more than 20 L, 02:00 to 04:00), both naming the floor. Details in `leak_detection/README.md` 5.4. Kept below for the record.
+
 - **Today.** The building check uses water in vs water out, following Ali et al. [6] (we use their main-pipe vs branch flow comparison for our building check). It can only say "pipe leak somewhere in building B". Building B is one rooftop tank, one downtake pipe, then 5 floors with 4 flats each.
 - **Options:**
   - **A. Floor meters.** One extra flow meter on each floor branch (5 meters) and a water balance per floor. The leak is then found to the floor. A New York building study found meters on each riser (vertical pipe) to be the best value for finding leaks.

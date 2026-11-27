@@ -21,7 +21,7 @@ Only water quality uses a model. Leaks and abnormal usage use simple statistics 
 - **8-bit (int8) numbers:** after training, every weight is rounded to a whole number from -127 to 127, with one scale per layer. The node only does whole-number multiplications and sums, the same scheme as TensorFlow Lite Micro. 200 weights + 27 biases = **308 bytes**.
 - **Speed:** 24 microseconds per reading on the laptop, about 0.4 ms on a Pi Zero 2 W (assumed 15x slower). The node reads once a minute, so this is nothing.
 - **Why plain Python, not TensorFlow Lite:** the firmware uses only the Python standard library. The Pi Zero 2 W has full Linux, so it is not limited to microcontroller tools, but a 308-byte model does not need a 100 MB library. The integer math is the same.
-- **Temperature is not an input.** Sharma et al. [1] use it, but no labelled data links temperature to contamination. In the Kenya data, the unsafe sources are simply warmer (26 vs 22 °C), so a model with temperature would learn "warm = unsafe", which is wrong. Temperature still matters for the TDS probe, which corrects its own reading for temperature.
+- **Temperature is not an input.** Sharma et al. [1] use it, but no labelled data links temperature to contamination. In the Kenya data, the unsafe sources are simply warmer (26 vs 22 °C), so a model with temperature would learn "warm = unsafe", which is wrong. Temperature still matters for the TDS probe, which corrects its own reading for temperature. The tank node checks temperature on its own with a plain limit instead: above 35 °C gives `QUALITY_HOT` (Legionella bacteria grow fastest near 37 °C).
 
 ## 2. The data
 

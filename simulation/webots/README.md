@@ -23,7 +23,7 @@ EPANET (through WNTR) simulates the water. Webots runs the **real node firmware*
 |---|---|---|
 | E1 02:00 | Leak in flat B-203 (0.05 L/s) | B-203 node: continuous night flow |
 | E2 09:00 to 17:00 | Power cut, pump cannot run | Tank node reports low tank, gateway declares a supply event, no false alerts |
-| E3 18:00 | Pipe burst on the 1st-floor downtake (1.5 L/s) | Tank node: abnormal supply (14 min); the gateway's night check (Ali et al. [6], mass balance of supply vs branch flows) runs 02:00 to 04:00, after this burst ended, so it must stay quiet |
+| E3 18:00 | Pipe burst on the 1st-floor downtake (1.5 L/s) | Tank node: abnormal supply (14 min); the gateway's night check (Ali et al. [6], mass balance of supply vs branch flows) runs 02:00 to 04:00, after this burst ended, so it must stay quiet (whole-pipe check: this offline data has no down pipe meters, so no per-floor checks) |
 | E4 06:00 | Rainwater-like water in the tank | Tank node quality check (2 min), the 8-bit model following Sharma et al. [1] (8-bit neural network on the device that classifies water quality) |
 | E5 20:00 | Chemical contamination | Tank node quality check (2 min) |
 | O1 01:30 to 05:00 | No node can reach the gateway | E1 alert stored on the node's SD card and delivered at 05:01, following Mariadhason et al. [4] (timestamped store-and-forward to SD card) |
