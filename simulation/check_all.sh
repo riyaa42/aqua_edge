@@ -10,6 +10,8 @@ step "gateway self-check (re-arm, silent node, clock)"
 python3 ../firmware/gateway.py
 step "water-quality model self-check"
 python3 ../firmware/quality_model.py
+step "real node hardware layer self-check (fake radio, no hardware)"
+python3 ../firmware/pi_hal.py --check
 step "radio self-check"
 python3 live/radio.py
 step "water engine self-check"

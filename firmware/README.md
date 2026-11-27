@@ -7,10 +7,50 @@ The real code for the nodes and the gateway. It only uses the Python standard li
 | `aqua_edge.py` | Every node (20 flats + tank), Raspberry Pi Zero 2 W | Learns normal on day 1 (saved to SD hourly, so a power cut keeps it), leak checks with flow only (flat: night, continuous flow, too much), water quality and tank outflow checks (tank), store-and-forward to SD card (saved safely, so a power cut never leaves half a file), sending in time slots, re-sending |
 | `quality_model.py` + `quality_model.json` | Tank node | Water-quality model: 8-bit neural network (308 bytes), pH + TDS + turbidity in, NORMAL / RUNOFF / CHEMICAL out; integer-only, plain Python. Trained by `../tinyml/train_quality.py` |
 | `packet.py` | Nodes and gateway | Radio packets: compact binary (about a third of the JSON size), signed with a 4-byte tag (HMAC-SHA256) using a key shared between each node and the gateway; a message counter that never repeats |
+| `pi_hal.py` | Every real node (Raspberry Pi Zero 2 W; a Pi 4 for testing) | The real hardware layer: SX1276 / RFM95 LoRa radio over SPI (send, listen before talk, receive), clock (UTC from the DS3231, Indian hours), sensor readings fed row by row from a CSV (sensors are simulated), green/yellow/red LEDs and buzzer. Sets its clock only from signed ACKs |
 | `gateway.py` | Gateway laptop (LoRa module on an ESP32 bridges the radio) | Replies to every message (with the time), building check (water in = water out), silent-node alerts, supply-event rule, new vs repeat alerts, clock check |
 
 Checks run once a minute; alarms are sent the moment they fire, summaries every 15 minutes in each node's time slot (details and timings: `../leak_detection/README.md` section 7b).
-Self-checks: `python3 aqua_edge.py` (power-cut-safe saves, baseline survives a restart, continuous-flow check, forged ACK ignored), `python3 quality_model.py` (normal, runoff and chemical readings classified right), `python3 packet.py` (packets come back unchanged, one changed bit or a wrong key is rejected), `python3 gateway.py` (includes: forged packet dropped, replay ignored even after a gateway restart).
+Self-checks: `python3 aqua_edge.py` (power-cut-safe saves, baseline survives a restart, continuous-flow check, forged ACK ignored), `python3 quality_model.py` (normal, runoff and chemical readings classified right), `python3 packet.py` (packets come back unchanged, one changed bit or a wrong key is rejected), `python3 gateway.py` (includes: forged packet dropped, replay ignored even after a gateway restart), `python3 pi_hal.py --check` (with a fake radio: the planted leak goes out on air, signed ACK sets the clock and a forged one doesn't, time slot wait, busy channel).
 
 How the leak checks work, with the math: [`../leak_detection/README.md`](../leak_detection/README.md).
 Water-quality model, data and test results: [`../tinyml/README.md`](../tinyml/README.md).
+
+## Running on the Pi
+
+Raspberry Pi OS (Bookworm). The Pi 4 and the Pi Zero 2 W have the same pins, so everything below is the same for both.
+
+**Wiring** (BCM numbers; physical pin in brackets). **Power the radio from 3.3 V, never 5 V, and screw the antenna on before it ever transmits** (sending without an antenna can damage the module).
+
+| Part | Pin on the part | Pi |
+|---|---|---|
+| RFM95 / SX1276 | 3.3V, GND | 3V3 (1), GND (6) |
+| | MOSI, MISO, SCK | GPIO10 (19), GPIO9 (21), GPIO11 (23) |
+| | NSS | CE0, GPIO8 (24) |
+| | RESET | GPIO22 (15) |
+| | DIO0 | not needed |
+| DS3231 clock | VCC, GND, SDA, SCL | 3V3 (17), GND (9), GPIO2 (3), GPIO3 (5) |
+| LEDs (each with a 330 ohm resistor to GND) | green, yellow, red | GPIO17 (11), GPIO27 (13), GPIO5 (29) |
+| Active buzzer | + | GPIO18 (12) |
+
+Pins and radio settings are knobs at the top of `pi_hal.py`. The gateway's ESP32 radio must use the same radio settings (865.0625 MHz, SF7, 125 kHz, 4/5, sync word 0x12).
+
+**Setup, once per Pi**
+1. `sudo raspi-config` -> Interface Options -> turn on **SPI** and **I2C**.
+2. Clock: add `dtoverlay=i2c-rtc,ds3231` to `/boot/firmware/config.txt` and reboot. `sudo hwclock -r` should print a time. While the Pi is online, `sudo hwclock -w` copies the correct time into the DS3231 once. If the time is wrong after a reboot without internet, `sudo apt purge fake-hwclock`.
+3. `sudo apt install python3-spidev python3-gpiozero` (usually already installed).
+4. `git clone` this repository onto the Pi.
+5. Keys, on the laptop: make `aqua_keys.json` with the command in `load_keys` (`packet.py`). Keep it on the gateway. Give each node a file with only its own key:
+   `python3 -c "import json; k = json.load(open('aqua_keys.json')); json.dump({'B-203': k['B-203']}, open('B-203_keys.json', 'w'))"`
+   Key files never go into git (`*keys.json` is in `.gitignore`).
+
+**Run**
+```sh
+python3 firmware/pi_hal.py --radio-test        # expect: SX1276 found (version 0x12), channel free, sent
+python3 firmware/pi_hal.py B-203 --keys ~/B-203_keys.json --sd ~/aqua --step-s 1     # fast demo
+python3 firmware/pi_hal.py B-203 --keys ~/B-203_keys.json --sd ~/aqua --slot 5 20    # real time
+```
+- **Fast demo** (`--step-s 1`): one CSV row per second, and the clock follows the CSV, so the learning day takes 24 minutes. With the default CSV (`simulation/webots/data/sensors.csv`), B-203 gets its planted leak on day 2 at 02:00: the LED turns red and the buzzer beeps about 26 minutes in.
+- **Real time**: one row per minute on the minute, UTC clock, Indian hours for the night check, sends in its own time slot (`--slot INDEX COUNT`, assigned at installation).
+- Until the gateway exists, nothing replies: the LED shows yellow (messages waiting) and messages stay in the queue on the SD card (`~/aqua/B-203.jsonl`). The node keeps resending its oldest messages; alerts still go first.
+- A Pi 4 is much faster than a Zero 2 W and has more memory, so speed and memory measured on it look better than they will on the real nodes.
