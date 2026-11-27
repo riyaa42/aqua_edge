@@ -26,6 +26,7 @@
   --body: "Nunito", ui-rounded, system-ui, sans-serif;
 }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }     /* .steps and .verdict set display, which would beat it */
 html { background: var(--bg); }
 body { margin: 0; color: var(--ink); font: 16px/1.5 var(--body); background: var(--bg); min-height: 100vh; }
 h1, h2, h3 { font-family: var(--display); font-weight: 600; margin: 0; letter-spacing: .005em; }
