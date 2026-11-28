@@ -46,6 +46,7 @@ import random
 
 
 from detection.consumption.detectors import StatisticalZeroFlowDetector
+from hal.link import MessageLink
 from hal.lora433 import (BEACON_S, FLUSH_ROUTINE_AFTER_S, FLUSH_STEP_S, HEARD_S,  # noqa: F401
                      AirtimeBudget, airtime_s, retry_wait)
 from hal.packet import NAMES, pack, unpack, violation_mask
@@ -257,6 +258,8 @@ class Node:
         slot = getattr(hal, "slot", None)
         self.index = slot[0] if slot else NAMES.index(node_id) if node_id in NAMES else 0
         self.beacon_key = hal.key("GATEWAY")
+        # these two keys are all this node can read: packets to or from other nodes are rejected
+        self.link = MessageLink(hal, {node_id: self.key, "GATEWAY": self.beacon_key}.get)
         self.heard_at, self.gateway_boot, self.last_beacon_gt = None, None, -1
         self.airtime = AirtimeBudget()
         self.ok_minutes = {}           # recovery message -> minutes in a row its problem looked over

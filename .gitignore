@@ -26,6 +26,8 @@ detection/consumption/results/
 
 # Downloaded datasets (large, and licensed separately: see detection/quality/README.md)
 detection/quality/data/
+tinyml/quality/data/
+tinyml/*/results/
 
 # Secret radio keys and runtime dashboard state
 *keys.json
