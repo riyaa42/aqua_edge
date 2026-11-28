@@ -59,7 +59,7 @@ The NodeMCU connects to the computer with a USB data cable, which also powers it
 ## What exists
 | Layer | State |
 |---|---|
-| Node, Raspberry Pi: `pi_hal.py` | SX1278 SPI driver (in `lora_pi.py`), tested with a fake radio chip, not on hardware (`python3 -m hal.lora_pi --check`, from the repository root). The node runner is `../edge/edge_based.py`. Setup: [Running on the Pi](#running-on-the-pi) |
+| Node, Raspberry Pi: `pi_hal.py` | SX1278 SPI driver (in `lora_pi.py`), tested with a fake radio chip, not on hardware (`python3 -m hal.lora_pi --check`, from the repository root). The node runners are `../edge/edge_based.py` and `../edge/cloud_based.py`. Setup: [Running on the Pi](#running-on-the-pi) |
 | Gateway laptop + ESP8266: `gate_hal.py` | Radio link written (`esp8266_passthrough.py` and the ESP sketch), tested with a fake radio chip, not on hardware. The gateway server that uses it is [`../gateway/edge_based.py`](../gateway/README.md#running-the-server): until it runs, a real node gets no beacon, acknowledgement or gateway alert. Setup: [Gateway modem (ESP8266)](#gateway-modem-esp8266) |
 
 ## Files
@@ -140,6 +140,7 @@ Plain LoRa protects nothing, so `packet.py` encrypts and authenticates packets b
 - **Header:** kind, node, counter and time. It stays readable so that the receiver can pick the key, but changing it makes the packet fail the check.
 - **AES-SIV** (RFC 5297, from the `cryptography` package) with the header as associated data. It needs no nonce, which matters here: one counter value is used by several kinds of packet (an alert and its acknowledgement), and a node's counter starts again if its SD card is wiped. If exactly the same packet is made twice, the two are identical on the air; that is all a repeat reveals.
 - **Keys:** each node shares one 16-byte secret with the gateway. The 32-byte AES-SIV key is derived from it with HKDF-SHA256 (no salt, label `aqua-edge packet encryption v1`). This does not make the secret any stronger.
+- **Cloud-based solution:** two more kinds, `RAW` (raw readings or a valve report, node to server; 44 bytes for a flat, 69 for the tank) and `SET` (wanted valve, light and buzzer, 43 bytes), encrypted like the rest.
 - **Beacons are not encrypted.** They carry only the gateway's clock and boot number, are signed with the shared `GATEWAY` key, and are not allowed to carry any message fields.
 - A packet that is changed, cut short, made with another key or in another format is rejected: `unpack` returns `None`, and `MessageLink.receive` counts it as rejected.
 
@@ -223,7 +224,7 @@ The method list is at the top of `../edge/aqua_edge.py`. A real layer must:
 
 Wiring: [Node: Raspberry Pi](#node-raspberry-pi).
 
-`lora_pi.py` drives the SX1278 on the Pi's GPIO pins, and `../edge/edge_based.py` runs a node on top of it. **None of this has been tested on real hardware.** On a Pi the node runs directly, not in a container (`Dockerfile.edge` is for [virtual nodes](../edge/README.md#run-virtual-nodes) only). What its LEDs and valve do: [notification levels](../edge/README.md#notification-levels-and-the-valve).
+`lora_pi.py` drives the SX1278 on the Pi's GPIO pins, and `../edge/edge_based.py` (or `../edge/cloud_based.py`, which [only streams readings](../edge/README.md#the-cloud-based-node)) runs a node on top of it. **None of this has been tested on real hardware.** On a Pi the node runs directly, not in a container (`Dockerfile.edge` is for [virtual nodes](../edge/README.md#run-virtual-nodes) only). What its LEDs and valve do: [notification levels](../edge/README.md#notification-levels-and-the-valve).
 
 For a node without a radio module, `udp.py` carries the same encrypted packets over a network to a gateway started with `--udp-listen` (`--radio udp --gateway host:1700 --actuators sim`). It does not simulate airtime or packet loss.
 
@@ -232,7 +233,7 @@ For a node without a radio module, `udp.py` carries the same encrypted packets o
 Enable SPI once (`sudo raspi-config`, Interface Options, SPI). Then use **one** of these:
 
 - **uv:** `uv sync --extra pi` installs `spidev`, `gpiozero` and `lgpio`. `spidev` is compiled during the install, which needs `sudo apt install build-essential python3-dev`. `uv run` keeps these installed, but a later plain `uv sync` removes them. Not tried on a Pi yet.
-- **Raspberry Pi OS packages:** `sudo apt install python3-spidev python3-gpiozero python3-lgpio python3-cryptography`, then use `python3 -m ...` instead of the `uv run` scripts. The node needs only `edge/`, `hal/`, `detection/`, `gateway/__init__.py`, `gateway/topology.py` and `gateway/building_B.json`, plus a sensor CSV (the default is `simulation/webots/data/sensors.csv`; use `--csv` for another path).
+- **Raspberry Pi OS packages:** `sudo apt install python3-spidev python3-gpiozero python3-lgpio python3-cryptography`, then use `python3 -m ...` instead of the `uv run` scripts. The node needs only `edge/`, `hal/`, `detection/` (not for a cloud-based node), `gateway/__init__.py`, `gateway/topology.py` and `gateway/building_B.json`, plus a sensor CSV (the default is `simulation/webots/data/sensors.csv`; use `--csv` for another path).
 
 Real nodes need a key file with this node's key and the `GATEWAY` key: see [Setting up keys](#setting-up-keys). The keys are secrets, so **keep the file outside the repository**.
 
@@ -241,7 +242,8 @@ Real nodes need a key file with this node's key and the `GATEWAY` key: see [Sett
 | With uv | With system Python | What it does |
 |---|---|---|
 | `uv run pi-radio-test` | `python3 -m hal.lora_pi --radio-test` | Checks the module is found, sends one test packet, listens 10 s |
-| `uv run prod-edge-edge B-203 --keys <file> --sd <folder> --slot 5 20` | `python3 -m edge.edge_based B-203 ...` | Runs a node in real time. Add `--step-s 1` for a fast demo |
+| `uv run prod-edge-edge B-203 --keys <file> --sd <folder> --slot 5 20` | `python3 -m edge.edge_based B-203 ...` | Runs an edge-based node in real time. Add `--step-s 1` for a fast demo |
+| `uv run prod-cloud-edge B-203 --keys <file> --csv <file> --sd <folder> --slot 5 20` | `python3 -m edge.cloud_based B-203 ...` | Runs a cloud-based node; its gateway must be cloud-based too |
 | `uv run python -m hal.lora_pi --check` | `python3 -m hal.lora_pi --check` | Self-check with a fake radio chip, on any computer |
 
 To check that two modules hear each other, start the radio test on one, then on the other within 10 s. The one started first prints the other's packet as hex. Swap the order to test the other direction.

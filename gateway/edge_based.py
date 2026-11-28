@@ -74,8 +74,8 @@ def run(gateway, stop, log=print, data=None):
         stop.wait(max(MIN_WAIT_S, min(wake - gateway.hal.now(), POLL_S)))
 
 
-def parse_args(argv=None):
-    ap = argparse.ArgumentParser(description="Run the Aqua Edge gateway (edge-based solution).")
+def parse_args(argv=None, mode="edge", options=None):
+    ap = argparse.ArgumentParser(description=f"Run the Aqua Edge gateway ({mode}-based solution).")
     ap.add_argument("--keys", required=True, help="key file with GATEWAY and every node (load_keys, hal/packet.py)")
     ap.add_argument("--data", default="gateway-data", help="folder for the gateway's saved state")
     ap.add_argument("--port", default=os.environ.get("AQUA_RADIO_PORT") or "/dev/ttyUSB0",
@@ -92,6 +92,8 @@ def parse_args(argv=None):
                     help="the dashboard's ingest address; without it, nothing is sent")
     ap.add_argument("--dashboard-id", default=os.environ.get("DASHBOARD_GATEWAY_ID"),
                     help="this gateway's name on the dashboard (default: building-<building>)")
+    if options:
+        options(ap)
     return ap.parse_args(argv)
 
 
@@ -127,8 +129,10 @@ def open_radios(port, udp_listen):
     return radios[0] if len(radios) == 1 else Radios(radios)
 
 
-def main(argv=None):
-    a = parse_args(argv)
+def main(argv=None, mode="edge", options=None, wrap=None):
+    """mode: the label on the dashboard's frames. options(parser) adds to the command line, and
+    wrap(radio, keys, topology, args) gives the radio the Gateway is to use (cloud_based.py)."""
+    a = parse_args(argv, mode, options)
     try:
         topology = Topology.load(a.tree)
         keys = load_gateway_keys(a.keys, topology)
@@ -137,6 +141,8 @@ def main(argv=None):
     building = a.building or topology.data["building"]
     os.makedirs(a.data, exist_ok=True)
     radio = open_radios(a.port, a.udp_listen)
+    if wrap:
+        radio = wrap(radio, keys, topology, a)
     gateway = Gateway(GatewayBoard(radio, keys, os.path.join(a.data, "gateway.jsonl")), topology)
 
     mqtt = None
@@ -155,7 +161,7 @@ def main(argv=None):
         gateway_id = a.dashboard_id or f"building-{building}"
         token = os.environ.get("AQUA_DASHBOARD_TOKEN", "")
         shipper = DashboardShipper(a.dashboard_url, os.path.join(a.data, "dashboard-outbox"),
-                                   gateway_id=gateway_id, mode="edge", auth_token=token)
+                                   gateway_id=gateway_id, mode=mode, auth_token=token)
         try:
             commands = DashboardCommands(a.dashboard_url, gateway_id, token,
                                          os.path.join(a.data, "dashboard-commands.json"))

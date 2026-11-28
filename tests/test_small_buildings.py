@@ -10,6 +10,7 @@ import signal
 import tempfile
 
 import edge.edge_based as node_program
+import edge.loop as node_loop
 import gateway.edge_based as server
 from comms.gateway import GatewayComms
 from edge.aqua_edge import DAY, FlatNode, TankNode
@@ -218,14 +219,14 @@ def check_programs():
         def close(self):
             Radio.closed = True
 
-    saved = node_program.open_radio, node_program.NodeBoard, node_program.make_node, server.open_radio
+    saved = node_loop.open_radio, node_program.make_node, server.open_radio
     saved_env = os.environ.pop("AQUA_TOPOLOGY_PATH", None), os.environ.pop("MQTT_HOST", None)
     handlers = {s: signal.getsignal(s) for s in (signal.SIGINT, signal.SIGTERM)}
     made = []
     try:
         import comms.gateway
-        real_make, real_connect = saved[2], comms.gateway.connect
-        node_program.open_radio = lambda: type("Quiet", (), {"send": lambda self, r, c=False: True,
+        real_make, real_connect = saved[1], comms.gateway.connect
+        node_loop.open_radio = lambda: type("Quiet", (), {"send": lambda self, r, c=False: True,
                                                               "receive": lambda self: []})()
         node_program.make_node = lambda *a: made.append(real_make(*a)) or made[-1]
         import sys
@@ -260,7 +261,7 @@ def check_programs():
                 raise AssertionError(f"started with {args}")
         assert set(load_keys(keys)) == {"GATEWAY", "prog-tank", "prog-flat"}
     finally:
-        node_program.open_radio, node_program.NodeBoard, node_program.make_node, server.open_radio = saved
+        node_loop.open_radio, node_program.make_node, server.open_radio = saved
         comms.gateway.connect = real_connect
         for variable, value in zip(("AQUA_TOPOLOGY_PATH", "MQTT_HOST"), saved_env):
             os.environ.pop(variable, None)

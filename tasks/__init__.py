@@ -21,6 +21,7 @@ CONSUMPTION = [("detection.consumption.test_integration",)]
 LEAKAGE = [("detection.leakage.test_regression",), ("detection.leakage.test_offline_supply",),
            ("detection.leakage.test_supply_robustness",), ("detection.leakage.compare_leaks", "--check")]
 RUNTIME = [("tests.test_unified_runtime",)]
+CLOUD = [("tests.test_cloud_baseline",)]       # several minutes: it runs the real programs too
 
 
 def _call(module, *args):
@@ -44,7 +45,7 @@ def _suite(checks):
 
 # tests
 def test_all():
-    _suite(HAL + EDGE + GATEWAY + COMMS + DASHBOARD + QUALITY + CONSUMPTION + LEAKAGE + RUNTIME)
+    _suite(HAL + EDGE + GATEWAY + COMMS + DASHBOARD + QUALITY + CONSUMPTION + LEAKAGE + RUNTIME + CLOUD)
 
 
 def test_hal():
@@ -77,6 +78,10 @@ def test_leakage():
 
 def test_runtime():
     _suite(RUNTIME)
+
+
+def test_cloud():
+    _suite(CLOUD)
 
 
 def test_parity():

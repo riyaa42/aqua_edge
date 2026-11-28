@@ -88,7 +88,7 @@ def check_deploy_guards():
         json.dump({"GATEWAY": sim_key("GATEWAY").hex()}, f)
     assert "no key for" in prod.problems(good, modem=False)[0]
     service = prod.unit("B-203", "/k y/keys.json", "/data/s.csv", "/var/lib/a%b", (5, 20), user="aqua", root="/opt/aqua")
-    assert 'ExecStart="/opt/aqua/.venv/bin/python" "-m" "edge.edge_based" "B-203" "--keys" "/k y/keys.json"' in service
+    assert 'ExecStart="/opt/aqua/.venv/bin/python" "-m" "edge.cloud_based" "B-203" "--keys" "/k y/keys.json"' in service
     assert '"/var/lib/a%%b"' in service and '"--actuators" "gpio"' in service and "User=aqua" in service
     assert "Restart=on-failure" in service and "--exit-at-end" not in service
 

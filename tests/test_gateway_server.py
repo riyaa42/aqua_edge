@@ -146,7 +146,9 @@ def check_compose_files():
     assert ".env" in read(".gitignore").split()
     compose = read("compose.yaml")
     assert '"127.0.0.1:${MQTT_PORT:-1883}:1883"' in compose, "the broker is published to this computer only"
-    assert "./gateway/mosquitto:/config:ro" in compose and '"gateway.edge_based"' in compose
+    assert "./gateway/mosquitto:/config:ro" in compose and '"gateway.cloud_based"' in compose
+    assert "cloud-gateway-data:/data" in compose and "cloud-dashboard-data:/data" in compose, \
+        "the control case never reuses an edge-based deployment's data"
     assert '"127.0.0.1:${DASHBOARD_PORT:-8000}:8000"' in compose, "the dashboard too: reading it needs no token"
     assert "--group dashboard" in dockerfile and "dashboard.server:create_app" in compose and "dashboard" in copied
     assert compose.count("AQUA_DASHBOARD_TOKEN: ${AQUA_DASHBOARD_TOKEN:?") == 2, "no default token in this setup"
@@ -161,13 +163,14 @@ def check_compose_files():
     for source in sources:
         assert os.path.exists(os.path.join(ROOT, source)) and any(
             source == i[1:] or source.startswith(i[1:] + "/") for i in ignored if i.startswith("!")), source
+    assert "detection" not in sources, "the cloud-based node runs no detector"
     assert ignored.index("!simulation/webots/data/sensors.csv") > ignored.index("**/data")
     nodes = compose[compose.index("x-node:"):]
     assert "devices:" not in nodes and '"gpio"' not in nodes and '"lora"' not in nodes
     # one node or three, and a tree for each with exactly those nodes
     services = dict(re.findall(r"^  (node-[a-z0-9]+):.*?\n(.*?)(?=^  \S|^\S)", compose, re.M | re.S))
     for profile, tree in (("one-node", "virtual_1node.json"), ("three-nodes", "virtual_3node.json")):
-        started = {re.search(r'"edge\.edge_based", "([^"]+)"', body).group(1) for body in services.values()
+        started = {re.search(r'"edge\.cloud_based", "([^"]+)"', body).group(1) for body in services.values()
                    if profile in (re.search(r"profiles: \[(.+)\]", body) or
                                   re.search(r"x-node:.*?profiles: \[(.+?)\]", compose, re.S)).group(1)}
         assert started == Topology.load(os.path.join(ROOT, "gateway", tree)).devices, (profile, started)

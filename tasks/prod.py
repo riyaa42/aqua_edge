@@ -4,6 +4,9 @@
     uv run prod-status / prod-logs / prod-down
     uv run prod-node-service ...    a Pi: prints a systemd service that keeps its node running
 
+On this branch they deploy the cloud-based solution (the control case): the building computer does
+all the deciding, and a Pi only streams its readings.
+
 prod-up checks the settings first, starts compose.yaml with the ESP8266's file (never the virtual
 nodes), and waits until the dashboard has heard from the gateway. No script prints a secret, and
 none deletes data. Standard library and the project's own modules only.
@@ -142,13 +145,13 @@ def logs():
 # --- a Pi ---
 def unit(node, keys, csv, sd, slot, tree=None, user="pi", root=ROOT):
     """A systemd service running one node on a Pi, with the real radio and GPIO."""
-    command = [os.path.join(root, ".venv", "bin", "python"), "-m", "edge.edge_based", node,
+    command = [os.path.join(root, ".venv", "bin", "python"), "-m", "edge.cloud_based", node,
                "--keys", keys, "--csv", csv, "--sd", sd, "--slot", str(slot[0]), str(slot[1]),
                "--radio", "lora", "--actuators", "gpio", *(["--tree", tree] if tree else [])]
     quoted = " ".join('"' + part.replace("\\", "\\\\").replace('"', '\\"').replace("%", "%%").replace("$", "$$") + '"'
                       for part in command)
     return f"""[Unit]
-Description=Aqua Edge node {node}
+Description=Aqua Edge node {node} (cloud-based: streams readings)
 After=local-fs.target
 
 [Service]
@@ -173,7 +176,7 @@ def node_service():
     ap.add_argument("--keys", required=True, help="this node's key file")
     ap.add_argument("--csv", required=True,
                     help="the sensor data. There are no sensor drivers yet: the node REPLAYS this file, "
-                         "and moves the real valve by what is in it")
+                         "and the real valve is moved by what is in it")
     ap.add_argument("--sd", required=True, help="folder for the node's queue and saved state")
     ap.add_argument("--slot", nargs=2, type=int, required=True, metavar=("INDEX", "COUNT"))
     ap.add_argument("--tree", help="the building tree, if not building B")

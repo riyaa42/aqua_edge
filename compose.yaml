@@ -1,5 +1,7 @@
-# Aqua Edge on the building's computer: the edge-based gateway, its MQTT broker and the dashboard
-# server. Setup: gateway/README.md, "Run with Docker Compose".
+# Aqua Edge on the building's computer: the CLOUD-BASED gateway (the control case: it does all the
+# detecting and deciding), its MQTT broker and the dashboard server. Its data volumes are its own:
+# an edge-based deployment's are left alone (a new gateway's frames would look like repeats to an
+# old dashboard database). Setup: gateway/README.md, "Run with Docker Compose".
 #   cp .env.example .env   # set the passwords, the dashboard token and the key file
 #   docker compose up -d --build
 # With the ESP8266 radio modem, add its file:  -f compose.yaml -f compose.esp8266.yaml
@@ -16,8 +18,6 @@ x-node: &node
   environment:
     AQUA_PRIME_S: ${NODE_PRIME_S:-86400}      # learn from the first day of the data at once
     AQUA_STEP_S: ${NODE_STEP_S:-}             # empty: one reading a minute
-    AQUA_REOPEN_AFTER_S: ${NODE_REOPEN_AFTER_S:-1800}   # normal this long (data time) before a valve reopens
-    AQUA_TRIAL_REOPEN: ${NODE_TRIAL_REOPEN:-0}          # 1: shut flats reopen on trial (edge/README.md)
   depends_on: [gateway]
   restart: unless-stopped
   read_only: true
@@ -42,7 +42,7 @@ services:
   gateway:
     image: aqua-edge
     build: .
-    command: ["python", "-m", "gateway.edge_based", "--keys", "/run/keys/gateway_keys.json", "--data", "/data"]
+    command: ["python", "-m", "gateway.cloud_based", "--keys", "/run/keys/gateway_keys.json", "--data", "/data"]
     environment:
       MQTT_HOST: mqtt
       MQTT_USER: gateway
@@ -53,8 +53,11 @@ services:
       AQUA_DASHBOARD_TOKEN: ${AQUA_DASHBOARD_TOKEN:?set it in .env}
       AQUA_RADIO_PORT: none                  # compose.esp8266.yaml sets the modem's port
       UDP_LISTEN: 0.0.0.0:1700               # virtual nodes; not published outside this setup
+      # when the nodes' valves reopen: decided here, for every node
+      AQUA_REOPEN_AFTER_S: ${NODE_REOPEN_AFTER_S:-1800}   # normal this long (data time) before a valve reopens
+      AQUA_TRIAL_REOPEN: ${NODE_TRIAL_REOPEN:-0}          # 1: shut flats reopen on trial (edge/README.md)
     volumes:
-      - gateway-data:/data                                    # state: keep it across restarts
+      - cloud-gateway-data:/data                                    # state: keep it across restarts
       - ${GATEWAY_KEYS:?set it in .env}:/run/keys/gateway_keys.json:ro
       - ${GATEWAY_TREE:-./gateway/building_B.json}:/run/config/tree.json:ro
     depends_on: [mqtt]                                        # start order only: the radio never waits
@@ -78,7 +81,7 @@ services:
     ports:
       - "127.0.0.1:${DASHBOARD_PORT:-8000}:8000"      # this computer only: reading needs no token
     volumes:
-      - dashboard-data:/data
+      - cloud-dashboard-data:/data
       - ${GATEWAY_TREE:-./gateway/building_B.json}:/run/config/tree.json:ro
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=3)"]
@@ -94,7 +97,7 @@ services:
   node-b203:                      # the flat with the planted night leak: closes its valve
     <<: *node
     profiles: [one-node, three-nodes]
-    command: ["python", "-m", "edge.edge_based", "B-203", "--keys", "/run/keys/node_keys.json", "--sd", "/data",
+    command: ["python", "-m", "edge.cloud_based", "B-203", "--keys", "/run/keys/node_keys.json", "--sd", "/data",
               "--radio", "udp", "--gateway", "gateway:1700", "--actuators", "sim"]
     volumes:
       - node-b203-data:/data
@@ -102,7 +105,7 @@ services:
 
   node-b101:                      # a flat with no planted leak (continuous flow still closes it)
     <<: *node
-    command: ["python", "-m", "edge.edge_based", "B-101", "--keys", "/run/keys/node_keys.json", "--sd", "/data",
+    command: ["python", "-m", "edge.cloud_based", "B-101", "--keys", "/run/keys/node_keys.json", "--sd", "/data",
               "--radio", "udp", "--gateway", "gateway:1700", "--actuators", "sim"]
     volumes:
       - node-b101-data:/data
@@ -110,7 +113,7 @@ services:
 
   node-tank:                      # closes the tank valve on a water-quality alert
     <<: *node
-    command: ["python", "-m", "edge.edge_based", "B-TANK", "--keys", "/run/keys/node_keys.json", "--sd", "/data",
+    command: ["python", "-m", "edge.cloud_based", "B-TANK", "--keys", "/run/keys/node_keys.json", "--sd", "/data",
               "--radio", "udp", "--gateway", "gateway:1700", "--actuators", "sim"]
     volumes:
       - node-tank-data:/data
@@ -121,5 +124,5 @@ volumes:
   node-b203-data:
   node-b101-data:
   node-tank-data:
-  gateway-data:
-  dashboard-data:
+  cloud-gateway-data:
+  cloud-dashboard-data:

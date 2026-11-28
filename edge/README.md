@@ -11,9 +11,29 @@ The code for the nodes (the gateway's is in [`../gateway/`](../gateway/README.md
 | `valve.py` | Every node | Command to [reopen the valve](#notification-levels-and-the-valve) at the node |
 | `sensors/` | Every node | The node's [sensor readings](#sensor-readings), replayed from a recorded dataset |
 | `board.py` | Every node | The `hal` that `aqua_edge.py` calls, apart from the radio: two [clocks](#clocks-and-what-the-node-stores), time slot, keys, storage path and the actuators |
-| `cloud_based.py` | Every node | Entry point, cloud-based solution: the Pi only buffers and streams sensor data; all ML and every decision happen in the cloud. `uv run cloud-based-node`. **Placeholder, not implemented yet** |
+| `cloud_based.py` | Every node | Entry point, [cloud-based solution](#the-cloud-based-node) (the control case): streams raw readings and does as the server says. `uv run prod-cloud-edge` (same as `cloud-based-node`). Tested over a radio in memory and over the network (`tests/test_cloud_baseline.py`) |
+| `loop.py`, `store.py` | Every node | What both kinds of node share: the run loop and command line, the queue on the SD card and safe saving. No detection code |
 
-The rest of this README describes the node logic that exists today, which belongs to the edge-based solution.
+The rest of this README describes the node logic, as the edge-based node runs it. The cloud-based solution runs [the same logic on the server](../gateway/README.md#the-cloud-based-gateway).
+
+## The cloud-based node
+
+`cloud_based.py` is the control case ([Baseline A](../planning/baselines.md)). It loads no detection code and judges no reading.
+
+| It does | How |
+|---|---|
+| Stream | Each reading goes to the server as it is (`RAW`), with its time and whether the valve was shut. `--slot` spreads the nodes over each minute |
+| Keep what is not confirmed | On the SD card, sent in order, one at a time, because the server counts readings "in a row". The newest 7 days are kept |
+| Apply | The valve, light and buzzer the server asks for (`SET`). It remembers them across restarts, and ignores a `SET` already seen |
+| Report | `VALVE_CLOSED`, `VALVE_OPENED` or `VALVE_FAULT`, only after moving the valve or failing to |
+| Reopen by hand | [`valve.py`](#notification-levels-and-the-valve) works at once, also with no server. An order to close decided before it is ignored |
+| Show delivery trouble | Messages not getting through: yellow, one blink, unless already red. Only the node can know this |
+
+**With no server it decides nothing.** The valve stays where it is and no new leak or bad water closes it, however long the outage lasts. When the link returns, the stored readings are processed in order, alerts keep the times of their readings, and the valve moves then. A node that cannot reach the server during a [trial reopening](#trial-reopening-flats) also stays open until it can.
+
+- An operator's order to open that the node gets more than 15 minutes after the server acted on it is not carried out.
+- `--prime-s 86400` here streams the first day marked "only learn from this". One virtual node takes a few minutes to do it. **Do not use it over the real radio:** the gateway's replies would exceed its transmit-time limit.
+- A node keeps its files as `<node>.cloud*`, apart from an edge-based node's in the same `--sd` folder.
 
 Checks run once a minute; alarms are sent the moment they fire, summaries every 15 minutes, first tried in each node's time slot.
 Self-check, from the repository root: `python3 -m edge.aqua_edge`. The other modules list their own.
@@ -103,7 +123,7 @@ The light stays red until the alert clears by its usual recovery rule, even whil
 
 ## Run virtual nodes
 
-`Dockerfile.edge` and the root `compose.yaml` run one or three virtual nodes next to the [gateway, broker and dashboard](../gateway/README.md#run-with-docker-compose). They replay the dataset, send the same encrypted packets over the Compose network (`../hal/udp.py`, port not published), and **only log** what their LEDs and valve would do. This image is not for a Raspberry Pi: [run the node directly there](../hal/README.md#running-on-the-pi).
+On this branch, `Dockerfile.edge` and the root `compose.yaml` run one or three virtual **cloud-based** nodes next to the [gateway, broker and dashboard](../gateway/README.md#run-with-docker-compose). They replay the dataset, send the same encrypted packets over the Compose network (`../hal/udp.py`, port not published), and **only log** what their LEDs and valve would do. This image is not for a Raspberry Pi: [run the node directly there](../hal/README.md#running-on-the-pi).
 
 | Profile | Nodes | `GATEWAY_TREE` |
 |---|---|---|
@@ -124,8 +144,8 @@ The light stays red until the alert clears by its usual recovery rule, even whil
    docker compose --profile three-nodes down
    ```
 
-- A first start learns day 1 at once (`NODE_PRIME_S`, default 86400), then plays day 2 at one row a minute: the tank closes its valve after about 20 minutes, `B-203` after about 2.5 hours and `B-101` after about 8. For a quick demo set `NODE_STEP_S`, for example `0.4` (about 10 seconds, 1 minute and 3 minutes).
-- After the last row a node keeps running: it sends what is left and takes orders. Each node's volume keeps its place, valve and learning across restarts. `down -v` deletes them and starts over.
+- A first start sends day 1 for the server to learn from (`NODE_PRIME_S`, default 86400; **allow a few minutes**, the node's light is yellow meanwhile), then plays day 2 at one row a minute: counted from then, the tank closes its valve after about 20 minutes, `B-203` after about 2.5 hours and `B-101` after about 8. For a quicker demo set `NODE_STEP_S`, for example `0.4` (about 10 seconds, 1 minute and 3 minutes).
+- After the last row a node keeps running: it sends what is left and takes orders. Each node's volume keeps its place, valve and unsent readings across restarts, and the gateway's keeps what was learned. `down -v` deletes them and starts over.
 - **Use separate volumes for each tree**, with `docker compose -p <name> ...` or `down -v` first: the gateway and dashboard keep saved state. In the commands above, add the same `-p` and `--profile` each time.
 - The three-node tree says its tank also feeds homes that have no node, so the gateway does not compare tank and flats: **no pipe-leak detection** in these demos.
 - Replayed data cannot react to a valve, so a shut node reads zero flow. Radio airtime, range, collisions and packet loss are not simulated.

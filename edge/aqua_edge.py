@@ -57,12 +57,13 @@ from datetime import datetime, timezone
 import json
 import math
 import os
-import random
 import time
 
 
 from detection.consumption.detectors import StatisticalZeroFlowDetector
 from edge import policy
+from edge.store import (MAX_SUMMARIES, ORDER_SLACK_S, PRIORITY, STUCK_S, SUMMARY_S,  # noqa: F401
+                        Store, save_atomic, saved_sample_time)
 from hal.link import MessageLink
 from hal.lora433 import (BEACON_S, FLUSH_ROUTINE_AFTER_S, FLUSH_STEP_S, HEARD_S,  # noqa: F401
                      AirtimeBudget, airtime_s, retry_wait)
@@ -73,18 +74,14 @@ DAY, HOUR = 86400, 3600
 LEARN_S = DAY                 # first day: learn this node's normal pattern
 EWMA_A = 1 / 14               # after day 1, each clean hour moves the baseline 1/14 of the way to
                               # today's value: remembers about 2 weeks (Phyn learns in 21 days, Moen 7)
-SUMMARY_S = 900               # send a summary every 15 minutes
-STUCK_S = 30                  # unacknowledged this long: yellow, one blink
 STALE_S = 180                 # no new reading this long: the sensor data is stale (yellow, two blinks)
 SLOT_GUARD_S = 0.2            # a summary starts this far into our time slot, margin for clock error
 SUPPLY_STATES = {"SUPPLY_EVENT", "LEAK_TANK_DRAIN", "SUPPLY_UNCERTAIN"}    # one at a time
 COMMAND_ENDS = {"PIPE_LEAK_CLEARED": {"PIPE_LEAK"}, "PIPE_LEAK_CAUSE_CLEARED": {"PIPE_LEAK_CAUSE"},
                 "SUPPLY_CLEARED": SUPPLY_STATES}
 REMEMBER_COMMANDS = 200
-MAX_SUMMARIES = 7 * 86400 // SUMMARY_S    # kept while unsent: 7 days, as far back as the gateway's balance check goes
 VALVE_ORDERS = {"VALVE_CLOSE": True, "VALVE_OPEN": False}
 LED_ORDERS = {"ALERT_LED_ON": True, "ALERT_LED_OFF": False}
-ORDER_SLACK_S = 1             # a command's time is sent in whole seconds
 REOPEN_AFTER_S = 1800         # tolerance: this long normal (readings in a row) before a valve reopens
 # Trial reopening (flats only, off unless asked for): a shut flat has no flow to show its problem is over
 TRIAL_AFTER_S = 6 * 3600      # shut this long before the first trial
@@ -122,129 +119,6 @@ RECOVERY_ENDS = {             # a node's recovery message -> the conditions it s
     "QUALITY_CLEARED": {"QUALITY_LIMIT_VIOLATION", "QUALITY_CHEMICAL", "QUALITY_RUNOFF"},
     "QUALITY_TEMPORAL_CLEARED": {"QUALITY_TEMPORAL_ANOMALY"}}
 
-PRIORITY = {"ALERT": 0, "FLAG": 1, "SUM": 2}       # FLAG: the tank's SUPPLY_LOW and SUPPLY_RECOVERED
-
-
-def save_atomic(path, text):
-    """Write a file so a power cut leaves either the old version or the new one, never half.
-    No battery on the nodes, so a power cut can land in the middle of any save."""
-    tmp = path + ".tmp"
-    with open(tmp, "w") as f:
-        f.write(text)
-        f.flush()
-        os.fsync(f.fileno())          # new contents really on the SD card
-    if os.name == "nt":
-        for attempt in range(10):
-            try:
-                os.replace(tmp, path)
-                break
-            except PermissionError:
-                if attempt == 9:
-                    raise
-                time.sleep(0.015)
-    else:
-        os.replace(tmp, path)             # atomic swap: old file or new file, nothing in between
-    if os.name != "nt":               # POSIX: fsync parent directory; Windows does not support os.open on dirs
-        fd = os.open(os.path.dirname(os.path.abspath(path)), os.O_RDONLY)
-        try:
-            os.fsync(fd)              # the swap itself really on the SD card
-        finally:
-            os.close(fd)
-
-
-class Store:
-    """Store-and-forward queue, mirrored to a file (the SD card) so a reboot loses nothing.
-    Also owns the message counter: saved in the same file (first line), so it never repeats,
-    even after a power cut with an empty queue. The gateway drops a repeated number as a
-    duplicate or replay, so a counter starting again from 1 would silence the node."""
-
-    def __init__(self, path, seed=0):
-        self.path, self.queue, self.next_try, self.retries, self.seq = path, [], {}, {}, 0
-        self.queued_at = {}                     # seq -> monotonic enqueue time (in-memory only, for stuck check)
-        self.total_resends, self.dropped = 0, 0       # dropped: old summaries given up for room
-        self.rng = random.Random(seed)
-        if path and os.path.exists(path):
-            with open(path) as f:
-                for line in f:
-                    if line.strip():
-                        d = json.loads(line)
-                        if "k" in d:
-                            self.queue.append(d)
-                        else:
-                            self.seq, self.dropped = d["seq"], d.get("dropped", 0)
-        self.seq = max([self.seq] + [m["s"] for m in self.queue])
-
-    def _save(self):
-        # ponytail: rewrites the whole file on change; switch to an append log if the queue gets long
-        if self.path:
-            save_atomic(self.path, json.dumps({"seq": self.seq, "dropped": self.dropped}) + "\n"
-                        + "".join(json.dumps(m) + "\n" for m in self.queue))
-
-    def add(self, msg, mono_now=None):
-        """Give the message the next counter value and keep it until acknowledged. Alerts and
-        flags are never given up; of the summaries only the newest MAX_SUMMARIES are kept."""
-        self.seq += 1
-        self.queue.append({**msg, "s": self.seq})
-        if mono_now is not None:
-            self.queued_at[self.seq] = mono_now
-        summaries = [m["s"] for m in self.queue if m["k"] == "SUM"]
-        if len(summaries) > MAX_SUMMARIES:
-            old = set(summaries[:len(summaries) - MAX_SUMMARIES])
-            self.queue = [m for m in self.queue if m["s"] not in old]
-            for s in old:
-                self.next_try.pop(s, None)
-                self.retries.pop(s, None)
-                self.queued_at.pop(s, None)
-            self.dropped += len(old)
-        self._save()
-
-    def ack(self, seq):
-        before = len(self.queue)
-        self.queue = [m for m in self.queue if m["s"] != seq]
-        self.next_try.pop(seq, None)
-        self.retries.pop(seq, None)
-        self.queued_at.pop(seq, None)
-        if len(self.queue) != before:
-            self._save()
-
-    @staticmethod
-    def urgent(m):
-        return m["k"] != "SUM"                  # alerts and the tank's flags
-
-    def eligible(self):
-        """What may be on air: every unacknowledged alert and flag; with none waiting, only the
-        oldest summary (one at a time, so a long backlog does not flood the channel)."""
-        pending = sorted((m for m in self.queue if self.urgent(m)), key=lambda m: (PRIORITY[m["k"]], m["t"]))
-        if pending or not self.queue:
-            return pending
-        return [min(self.queue, key=lambda m: (m["t"], m["s"]))]
-
-    def due(self, now, heard):
-        """The messages to send now; each is scheduled to be sent again unless acknowledged."""
-        ready = [m for m in self.eligible() if now >= self.next_try.get(m["s"], -1e18)]
-        for m in ready:
-            s = m["s"]
-            tries = self.retries.get(s, 0)
-            if tries:
-                self.total_resends += 1
-            self.next_try[s] = now + retry_wait(tries, self.urgent(m), heard, self.rng)
-            self.retries[s] = tries + 1
-        return ready
-
-    def wake(self, now):
-        """When something next needs sending, or None."""
-        times = [self.next_try.get(m["s"], now) for m in self.eligible()]
-        return min(times) if times else None
-
-    def flush(self, now, index):
-        """The gateway is back: send what is waiting, node by node so they do not all collide.
-        Only ever brings a retry forward."""
-        for m in self.queue:
-            s = m["s"]
-            if self.retries.get(s):
-                start = now + index * FLUSH_STEP_S + (0 if self.urgent(m) else FLUSH_ROUTINE_AFTER_S)
-                self.next_try[s] = min(self.next_try[s], start)
-                self.retries[s] = 0
 
 
 class Baseline:
@@ -278,16 +152,6 @@ class Baseline:
     def std(self, hour):
         m = self.mean(hour)
         return max(self.ss[hour] / max(self.n[hour], 1) - m * m, 0.0) ** 0.5
-
-
-def saved_sample_time(storage_path):
-    """The time of the last reading a node's saved state includes, or None. Replayed data
-    resumes after it."""
-    path = storage_path and os.path.splitext(storage_path)[0] + "_state.json"
-    if not path or not os.path.exists(path):
-        return None
-    with open(path) as f:
-        return json.load(f).get("last_sample")
 
 
 class Node:
@@ -544,9 +408,9 @@ class Node:
             self.note(f"valve: trial failed, {reason}")
             self.set_valve(True, run["why"])
 
-    def check_trial_watched(self, now):
+    def check_trial_watched(self, mono_now):
         """No readings, no trial: nothing would ever shut the valve again."""
-        if self.trial["run"] and self.reading_at is not None and now - self.reading_at > STALE_S:
+        if self.trial["run"] and self.reading_at is not None and mono_now - self.reading_at > STALE_S:
             self.fail_trial("the readings stopped")
 
     def open_valve(self):
@@ -794,7 +658,7 @@ class Node:
     def radio_poll(self):
         """Call when a packet arrives, and at the time this returns. Never touches the sensors."""
         now, mono_now = self.hal.now(), self._mono()
-        self.check_trial_watched(now)
+        self.check_trial_watched(mono_now)      # reading_at is on the monotonic clock
         self.receive(now, mono_now)
         return self.transmit(now, mono_now)
 

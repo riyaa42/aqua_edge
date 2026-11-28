@@ -12,9 +12,45 @@
 | `order.py` | Gateway | Command that sends a node a [valve or alert-LED order](#orders-to-a-node) |
 | `virtual_1node.json`, `virtual_3node.json` | Gateway | Trees for the [virtual-node demos](../edge/README.md#run-virtual-nodes) |
 | `mosquitto/` | Gateway | The MQTT broker's settings and access rules, used by [Docker Compose](#run-with-docker-compose) |
-| `cloud_based.py` | Gateway | Server entry point, cloud-based solution: nodes only buffer and stream sensor data, and all ML and every decision happen on this side. Will reach the LoRa antenna through an ESP8266. `uv run cloud-based-gateway`. **Placeholder, not implemented yet** |
+| `cloud_based.py` + `cloud_host.py` | Gateway | Server entry point, [cloud-based solution](#the-cloud-based-gateway) (the control case): nodes only stream readings, and every detector and decision runs here. `uv run prod-cloud-gateway` (same as `cloud-based-gateway`), and what [Docker Compose](#run-with-docker-compose) runs on this branch. Not tested on real hardware |
 
-The rest of this README describes the gateway logic that exists today, which belongs to the edge-based solution.
+The rest of this README describes the gateway itself, which both solutions run.
+
+## The cloud-based gateway
+
+The control case ([Baseline A](../planning/baselines.md)): only *where* the deciding happens differs from the edge-based solution.
+
+```
+thin node --RAW readings--> CloudHost: one "brain" per node --in memory--> Gateway --> dashboard, MQTT
+          <--SET valve, light--        (FlatNode / TankNode)              (core.py)
+```
+
+- A **brain** is the edge-based node's own code (`../edge/aqua_edge.py`), run here for one node and fed by its readings. So the detectors, thresholds and [valve rules](../edge/README.md#notification-levels-and-the-valve) are the same, not copies.
+- `CloudHost` is the radio of an unchanged `Gateway`. So the [dashboard](../dashboard/README.md), [reopen requests](../dashboard/API_SPEC.md#7-manual-valve-reopen), [orders](#orders-to-a-node) and [MQTT](../comms/README.md) work as before. Dashboard frames are labelled `cloud`.
+- A brain's clock is the time of the reading it is processing. Its idea of whether the valve is shut is what the node last reported. The gateway's commands reach it only while its node has been heard in the last 90 seconds, so they are repeated and expire as before.
+- `--reopen-after-s` and `--trial-reopen` are set here, for every node. A trial counts only readings taken after the node has really opened.
+- Every reading is saved before it is confirmed. State is in `--data` (default `cloud-gateway-data`), including `brains/`. **A folder an edge-based gateway has used is refused.** If this state is lost, the server learns again and moves no valve until it decides to; a valve that was shut stays shut until a person [orders it open](#orders-to-a-node).
+- With the ESP8266, replies keep to the 10% transmit-time limit. With only network nodes (`--port none`) there is no limit.
+
+### Compared with the edge-based solution
+
+`uv run test-cloud` runs both on the same data, clock and radio (`../tests/cloud_world.py`).
+
+- **With a perfect link** (five nodes with the planted dataset, and a made-up pipe leak): the same alerts, gateway decisions, valve moves and lights at the same times. All 21 nodes were compared once the same way, with the same result.
+- **Expected differences:** in the minute a valve closes, an edge-based node leaves that reading out of its 15-minute litres, while the server counts it. A valve move ordered by the gateway takes one more trip over the radio.
+- **With a broken link** the edge-based node still closes its valve on time. The cloud-based one closes it only after the link returns.
+
+Radio use for the 21 nodes over one simulated day of live readings (computed from packet sizes; **collisions, loss and range are not simulated**):
+
+| | Edge-based | Cloud-based |
+|---|---|---|
+| Bytes sent by the nodes | 83 kB | 1,368 kB |
+| Bytes sent by the gateway | 297 kB | 1,060 kB |
+| Each flat on air | about 0.3 s an hour | 5.6 s an hour (0.15%) |
+| Gateway on air (limit: 360 s an hour) | 39 s an hour | 118 s an hour |
+| Shared channel busy | 1.3% | 6.6% |
+
+Use `--slot` so that the nodes do not all send at once. A reading then waits up to a minute for its node's turn, which also delays what the server decides from it. An edge-based node's alarm does not wait.
 
 Self-checks, from the repository root: `python3 -m gateway.topology`, `python3 -m gateway.core`.
 
@@ -115,7 +151,7 @@ To use a tree:
 3. **Pi.** Copy the same tree to it: `uv run edge-based-node pi-flat --keys pi-flat_keys.json --tree lab.json --csv sensors.csv`. The tree decides whether the node runs the tank or the flat checks. The CSV needs columns named for this node, such as `pi-flat:flow_lps`.
 4. **Virtual nodes** started the same way need nothing more. Code that builds a `FlatNode` or `TankNode` itself must first call `hal.packet.add_names(topology.radio_ids)`. The live simulation (`../simulation/live/`) still runs building B only.
 
-**Use a new data folder (`--data`) for a different building.** Saved state remembers which message numbers were seen for each name, so a node reusing a name with a fresh counter would be treated as a replay. With Docker Compose the state is in the `gateway-data` volume, which stays when you change `GATEWAY_TREE`; `docker compose -p <another name> up` gives a building its own volumes. The dashboard also keeps what it was sent under the gateway's name.
+**Use a new data folder (`--data`) for a different building.** Saved state remembers which message numbers were seen for each name, so a node reusing a name with a fresh counter would be treated as a replay. With Docker Compose the state is in the `cloud-gateway-data` volume, which stays when you change `GATEWAY_TREE`; `docker compose -p <another name> up` gives a building its own volumes. The dashboard also keeps what it was sent under the gateway's name.
 
 ## Running the server
 
@@ -134,7 +170,7 @@ This runs without MQTT. To publish to a broker you run yourself, add `--mqtt-hos
 
 ### Run with Docker Compose
 
-This starts the gateway server, a Mosquitto broker and the [dashboard server](../dashboard/README.md) together, using `compose.yaml` and `Dockerfile` at the repository root. The gateway and dashboard share one image, in which `uv` installs the locked libraries: the project's required ones, the `gateway` extra and the `dashboard` group. It leaves out the `research` and `test` groups ([Python setup](../README.md#python-setup)). From the repository root:
+On this branch this starts the **cloud-based** gateway server, a Mosquitto broker and the [dashboard server](../dashboard/README.md) together, using `compose.yaml` and `Dockerfile` at the repository root. The gateway and dashboard share one image, in which `uv` installs the locked libraries: the project's required ones, the `gateway` extra and the `dashboard` group. It leaves out the `research` and `test` groups ([Python setup](../README.md#python-setup)). From the repository root:
 
 ```sh
 cp .env.example .env      # set both passwords, the dashboard token and the full path of the key file
@@ -161,7 +197,7 @@ docker compose logs -f gateway
 
 - **Subscribe** from this computer at `127.0.0.1:1883` as `viewer`, or: `docker compose exec mqtt mosquitto_sub -V 5 -u viewer -P <password> -t 'aqua/v1/#' -v`. Topics and payloads: [`../comms/README.md`](../comms/README.md). The broker is not reachable from other computers.
 - **Dashboard:** read it from this computer at `http://127.0.0.1:8000/api/v1/health` ([all addresses](../dashboard/README.md#running-it)). The image also builds the web page, served at `http://127.0.0.1:8000/`. It is not reachable from other computers.
-- **State** is in the `gateway-data` and `dashboard-data` volumes. `docker compose down` keeps them; **`down -v` deletes them**, including the record of which packets were already seen, the commands not yet confirmed and the dashboard's history. Do not delete `gateway-data` alone: [the dashboard would ignore new data](../dashboard/README.md#how-the-gateway-sends). If you do, also set a new `DASHBOARD_GATEWAY_ID`.
+- **State** is in the `cloud-gateway-data` and `cloud-dashboard-data` volumes, apart from an edge-based deployment's `gateway-data` and `dashboard-data`. `docker compose down` keeps them; **`down -v` deletes the volumes**, including the record of which packets were already seen, what the server has learned, the commands not yet confirmed and the dashboard's history. Do not delete `cloud-gateway-data` alone: [the dashboard would ignore new data](../dashboard/README.md#how-the-gateway-sends). If you do, also set a new `DASHBOARD_GATEWAY_ID`.
 - **With `compose.esp8266.yaml`**, the gateway container cannot start if the serial port does not exist.
 - **After unplugging the ESP8266**, the container may not see the device again, or it may return as another port: check the port, then run `docker compose up -d --force-recreate gateway`.
 - If the broker or dashboard stops, the gateway keeps working over the radio. It reconnects to the broker, and sends the dashboard what it kept.

@@ -7,11 +7,14 @@ ever see the finished bytes and need no keys.
     every packet but BEACON
         header  type(1) node(1) counter(4) time(4)      10 bytes, readable, authenticated
         sealed  AES-SIV: tag(16) + encrypted(format version(1) + fields)
-                fields, each: field number(1) + value   (ALERT, FLAG, SUM, CMD; none for ACK, GOT)
+                fields, each: field number(1) + value   (ALERT, FLAG, SUM, CMD, RAW, SET; none for ACK, GOT)
     BEACON
         header  as above                                10 bytes, readable
         tag     first 4 bytes of HMAC-SHA256(beacon key, header)
 
+- RAW and SET belong to the cloud-based solution (edge/cloud_based.py, gateway/cloud_host.py). RAW:
+  one minute's raw readings, or what the node's valve did, confirmed by ACK. SET: the valve, light
+  and buzzer the node should show now, confirmed by GOT; counter = a number that only grows.
 - Node packets: node = sender, counter = the node's sequence number, time = node clock.
 - ACK: node = the node being answered, counter = the sequence number it acknowledges,
   time = gateway clock ("gt"). Made with that node's key, so nobody else can fake it.
@@ -50,7 +53,8 @@ SIV_INFO = b"aqua-edge packet encryption v1"    # HKDF label: both ends must use
 FORMAT = b"\x01"                               # first encrypted byte; also means there is always one
 HEADER = struct.Struct(">BBII")
 KINDS = ["", "ALERT", "FLAG", "SUM", "ACK",                # up: ALERT FLAG SUM GOT; down: ACK
-         "BEACON", "CMD", "GOT"]                                    # down: BEACON CMD (append only)
+         "BEACON", "CMD", "GOT",                                    # down: BEACON CMD (append only)
+         "RAW", "SET"]                                              # cloud-based: RAW up, SET down
 GATEWAY_CLOCK = ("ACK", "BEACON")           # kinds whose time field is the gateway's clock, "gt"
 # A packet names its node by one number. Building B's names are built in: a name's number is its
 # position in NAMES (append only). Any other name needs a number from CUSTOM_IDS, set in the building
@@ -78,7 +82,18 @@ VIOLATIONS = ["pH", "TDS", "TURBIDITY"]     # "viol" is a bit mask of broken lim
 # field name -> how its value is packed; its number on air is its position here; "B" = index into ALERTS/FLAGS
 FIELDS = {"a": "B", "f": "B", "i": ">I", "vol_l": ">f", "p_min": ">f", "in_l": ">f", "level_m": ">f",
           "flow": ">f", "ph": ">f", "tds": ">f", "level": ">f", "inflow": ">f", "score": ">f", "p_mean": ">f",
-          "turb": ">f", "viol": ">B", "over": ">B"}      # append only: a field's position is its number on air
+          "turb": ">f", "viol": ">B", "over": ">B",
+          # cloud-based, RAW: the sensor readings (r_...), the time of those readings, DEV_ bits
+          "r_flow": ">f", "r_pres": ">f", "r_level": ">f", "r_in": ">f", "r_out": ">f", "r_ph": ">f",
+          "r_tds": ">f", "r_turb": ">f", "r_temp": ">f", "st": ">I", "dev": ">B",
+          # cloud-based, SET: SET_ code, the valve decision's number and time, index into LAMPS, buzz
+          "valve": ">B", "vrev": ">I", "vt": ">I", "lamp": ">B", "beep": ">B"}   # append only: a field's position is its number on air
+READING_FIELDS = {"flow_lps": "r_flow", "pressure_m": "r_pres", "level_m": "r_level", "inflow_lps": "r_in",
+                  "outflow_lps": "r_out", "ph": "r_ph", "tds_ppm": "r_tds", "turbidity_ntu": "r_turb",
+                  "temp_c": "r_temp"}                           # sensor name -> RAW field
+DEV_SHUT, DEV_HAND, DEV_PRIME = 1, 2, 4   # valve shut at this reading; opened by hand; only to learn from
+SET_OPEN, SET_CLOSE, SET_OPEN_ORDER = 0, 1, 2                   # ORDER: an operator asked, so it can expire
+LAMPS = [("green", 0), ("yellow", 1), ("yellow", 2), ("red", 1), ("red", 2), ("red", 0), ("yellow", 0)]  # append only
 FIELD_NAMES = list(FIELDS)
 CODES = {"a": ALERTS, "f": FLAGS}
 HEADER_KEYS = {"k", "n", "s", "t", "gt"}
@@ -199,6 +214,12 @@ def _open(raw, kind, node, key):
     return plain[len(FORMAT):] if plain.startswith(FORMAT) else None
 
 
+def _decimals(name, v):
+    """A float32 as the number that was sent: 4 decimals. Raw readings keep 5 (4 from 128 up), so
+    the cloud-based detectors see what an edge-based node would have read."""
+    return round(v, 5 if name.startswith("r_") and abs(v) < 128 else 4)
+
+
 def unpack(raw, key_for):
     """Received bytes -> message dict, or None if the packet is broken, changed, made with another
     key, or in another format.
@@ -214,7 +235,7 @@ def unpack(raw, key_for):
             name = FIELD_NAMES[body[pos]]
             (v,) = struct.unpack_from(FIELDS[name], body, pos + 1)
             pos += 1 + struct.calcsize(FIELDS[name])
-            m[name] = CODES[name][v] if name in CODES else round(v, 4) if isinstance(v, float) else v
+            m[name] = CODES[name][v] if name in CODES else _decimals(name, v) if isinstance(v, float) else v
         return m
     except (IndexError, KeyError, struct.error):    # KeyError: a node number unknown here
         return None
@@ -237,7 +258,14 @@ if __name__ == "__main__":
                    {"n": "B-TANK", "s": 11, "t": 360, "k": "FLAG", "f": "SUPPLY_RECOVERED", "level": 1.5}]
     msgs[-1:-1] = [{"n": "GATEWAY", "s": 1700, "k": "BEACON", "gt": 93720},
                    {"n": "B-203", "s": 1701, "t": 93000, "k": "CMD", "a": "PIPE_LEAK", "over": 1},
-                   {"n": "B-203", "s": 1701, "t": 93721, "k": "GOT"}]
+                   {"n": "B-203", "s": 1701, "t": 93721, "k": "GOT"},
+                   {"n": "B-TANK", "s": 12, "t": 420, "k": "RAW", "st": 420, "dev": DEV_SHUT, "r_level": 1.92682,
+                    "r_in": 2.54057, "r_out": 1.79661, "r_ph": 8.91904, "r_tds": 937.3216, "r_turb": 25.0,
+                    "r_temp": 28.23806},
+                   {"n": "B-203", "s": 13, "t": 480, "k": "RAW", "st": 480, "dev": 0, "r_flow": 0.06851,
+                    "r_pres": 17.11641},
+                   {"n": "B-203", "s": 93721, "t": 93721, "k": "SET", "valve": SET_CLOSE, "vrev": 93721,
+                    "vt": 93720, "lamp": LAMPS.index(("red", 2)), "beep": 1}]
     for m in msgs:
         raw = pack(m, keys(m["n"]))
         assert unpack(raw, keys) == m, (unpack(raw, keys), m)          # same message back

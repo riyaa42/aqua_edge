@@ -11,14 +11,14 @@ Run `uv sync` once, then `uv run <script>` from anywhere in the repository. The 
 There are two solutions, and `edge/` and `gateway/` each have an entry point for both:
 
 - **Edge-based:** alerts that need only one node's data are decided on the node. The gateway decides what needs several nodes' data.
-- **Cloud-based:** the Pi only buffers and streams sensor data. All ML and every decision happen in the cloud.
+- **Cloud-based:** the Pi only buffers and streams sensor data, and moves its valve and lights as told. All ML and every decision happen on the server: here, the gateway computer. This is the control case, [Baseline A](planning/baselines.md).
 
 | Solution | Node (Pi) | Gateway server |
 |---|---|---|
 | Edge-based | `uv run prod-edge-edge`, or `uv run edge-based-node` (`edge/edge_based.py`) | `uv run prod-edge-gateway`, or `uv run edge-based-gateway` (`gateway/edge_based.py`) |
-| Cloud-based | `uv run cloud-based-node` (`edge/cloud_based.py`) | `uv run cloud-based-gateway` (`gateway/cloud_based.py`) |
+| Cloud-based | `uv run prod-cloud-edge`, or `uv run cloud-based-node` (`edge/cloud_based.py`) | `uv run prod-cloud-gateway`, or `uv run cloud-based-gateway` (`gateway/cloud_based.py`) |
 
-**The two edge-based programs run; the two cloud-based ones do not.** They are placeholders: each prints "not implemented yet" and exits with an error. `edge-based-node` replays a CSV in place of sensors and runs the node checks on the node. It runs on a Raspberry Pi with an SX1278, or [as a virtual node](edge/README.md#run-virtual-nodes) with Docker Compose (options: `uv run edge-based-node --help`); `uv run test-edge` tests it with a fake radio. On the Pi, first run `uv sync --extra pi`, then `uv run pi-radio-test` checks the LoRa module. Wiring and setup: [Running on the Pi](hal/README.md#running-on-the-pi).
+**All four programs run; none has been tried on real hardware.** Both kinds of node replay a CSV in place of sensors, on a Raspberry Pi with an SX1278 or as a virtual node. `edge-based-node` runs the node checks on the node ([virtual nodes on this branch](edge/README.md#run-virtual-nodes) are cloud-based ones). The cloud-based node [only streams](edge/README.md#the-cloud-based-node), and the cloud-based gateway [runs those same checks for it](gateway/README.md#the-cloud-based-gateway), so the two solutions differ in where the deciding happens. A node's two kinds are not interchangeable: run the same solution at both ends. `uv run test-edge` tests the edge-based node with a fake radio, and `uv run test-cloud` compares the two solutions. On the Pi, first run `uv sync --extra pi`, then `uv run pi-radio-test` checks the LoRa module. Wiring and setup: [Running on the Pi](hal/README.md#running-on-the-pi).
 
 The gateway computer reaches the nodes through an ESP8266 on USB. After flashing it, run `uv sync --extra gateway`, then `uv run gate-radio-test` checks the modem (`--port` if it is not `/dev/ttyUSB0`). Wiring and flashing: [Gateway modem (ESP8266)](hal/README.md#gateway-modem-esp8266). `uv run dashboard-server` runs the [dashboard API](dashboard/README.md#running-it). To run the gateway, with or without Docker Compose: [Running the server](gateway/README.md#running-the-server). What the two ends publish over MQTT: [`comms/README.md`](comms/README.md).
 
@@ -37,6 +37,7 @@ A group runs all its checks even if one fails, then lists the failures.
 | `uv run test-quality` | Water-quality model self-check |
 | `uv run test-consumption` | Abnormal-consumption integration tests |
 | `uv run test-leakage` | Leak regression, LoRa-outage and supply-robustness tests, and the comparison's scoring self-check |
+| `uv run test-cloud` | The cloud-based control case against the edge-based solution, its failure cases, and the real programs with the dashboard server. Takes several minutes |
 | `uv run test-runtime` | Unified runtime replay and benchmark. Also part of `test-all`; both rewrite `tests/unified_runtime_metrics.json` |
 | `uv run test-parity` | Temporal model parity check. Needs the GECCO data, and **currently fails** (difference 7.84e-06, limit 1e-6) |
 
@@ -66,10 +67,10 @@ The comparisons against the baselines planned in [`planning/experiments.md`](pla
 | `planning/circuit_plan.md` | Updated hardware components and connections: Raspberry Pi 3B nodes on 5 V USB power, a laptop gateway with an ESP8266 interface to its LoRa module, and the dataset-replay layer (replacing physical sensors, ADC, and battery HAT) |
 | `planning/archive/branch_reference.md` | Checklist of technical alignments for porting `live-simulation` and the full experimentation plan |
 | `planning/archive/` | Older planning and handover notes (`IMPROVEMENT_PLAN.md`, `HANDOVER.md`) kept for history |
-| `edge/` | The Python code for the Raspberry Pi 3B nodes (`aqua_edge.py`). `edge_based.py` runs a node on the Pi, with its clocks, LEDs, buzzer and valve in `board.py` and `actuators.py`, its alert levels in `policy.py` and its sensor readings replayed from a recorded dataset by [`sensors/`](edge/README.md#sensor-readings), in place of physical sensors; `cloud_based.py` is a placeholder for the other node entry point |
-| `gateway/` | The Python code for the laptop gateway (`core.py`, `analytics.py`). The gateway reads the building's pipes and valves as a tree of nodes from `gateway/building_B.json` (schema in `gateway/README.md`). `edge_based.py` is the edge-based gateway server, also run with Docker Compose (`compose.yaml`); `cloud_based.py` is a placeholder |
+| `edge/` | The Python code for the Raspberry Pi 3B nodes (`aqua_edge.py`). `edge_based.py` runs a node on the Pi, with its clocks, LEDs, buzzer and valve in `board.py` and `actuators.py`, its alert levels in `policy.py` and its sensor readings replayed from a recorded dataset by [`sensors/`](edge/README.md#sensor-readings), in place of physical sensors; `cloud_based.py` is the cloud-based node, which only streams and does as told (it uses `loop.py` and `store.py`, and no detection code) |
+| `gateway/` | The Python code for the laptop gateway (`core.py`, `analytics.py`). The gateway reads the building's pipes and valves as a tree of nodes from `gateway/building_B.json` (schema in `gateway/README.md`). `edge_based.py` is the edge-based gateway server; `cloud_based.py`, which Docker Compose (`compose.yaml`) runs on this branch, is the same server with every node's checks run on it (`cloud_host.py`) |
 | `hal/` | Radio packets and SX1278 433 MHz settings (`packet.py`, `lora433.py`) and the hardware adapters (`pi_hal.py`) so the same detection code runs unchanged in simulation and on the Pi; placeholder for the gateway's ESP8266 passthrough |
-| `compose.yaml`, `Dockerfile`, `.env.example` | Docker Compose setup for the building's computer: gateway server, MQTT broker and dashboard server ([how to run](gateway/README.md#run-with-docker-compose)). `compose.esp8266.yaml` adds the radio modem |
+| `compose.yaml`, `Dockerfile`, `.env.example` | Docker Compose setup for the building's computer: cloud-based gateway server, MQTT broker and dashboard server ([how to run](gateway/README.md#run-with-docker-compose)). `compose.esp8266.yaml` adds the radio modem |
 | `Dockerfile.edge` | Image of a virtual node: `compose.yaml` runs [one or three](edge/README.md#run-virtual-nodes) |
 | `comms/` | How the Pi and gateway communicate: the specification (`comms/README.md`) and the code for its MQTT topics and publishing |
 | `detection/` | The three detection subsystems: `quality/` (IS 10500 + `int8` TinyML), `leakage/` (flow/pressure rules + mass balance) and `consumption/` (statistical + Lempel–Ziv) |
@@ -85,11 +86,13 @@ The comparisons against the baselines planned in [`planning/experiments.md`](pla
 
 ## Deploy
 
-The edge-based solution in production. **Not tested on real hardware** (no ESP8266, SX1278, Pi or valve), and the building setup has been tried only with Podman, not Docker.
+On this branch these scripts deploy the **cloud-based** solution, the control case. **Not tested on real hardware** (no ESP8266, SX1278, Pi or valve), and the building setup has been tried only with Podman, not Docker.
 
-> **The nodes have no sensor drivers yet.** A node replays a CSV file, and on a Pi it moves a real valve by what is in that file. Do not connect a real water supply until real sensor reading exists.
+> **The nodes have no sensor drivers yet.** A node replays a CSV file, and on a Pi its real valve moves by what is in that file. Do not connect a real water supply until real sensor reading exists.
+>
+> **A cloud-based node protects nothing on its own.** While it cannot reach the gateway computer, no leak or bad water closes any valve.
 
-**1. Building computer** (gateway, MQTT broker and dashboard, in containers). It needs Docker or Podman with Compose, the [flashed ESP8266](hal/README.md#gateway-modem-esp8266), the [key file](hal/README.md#setting-up-keys) and the right time.
+**1. Building computer** (cloud-based gateway, MQTT broker and dashboard, in containers). It needs Docker or Podman with Compose, the [flashed ESP8266](hal/README.md#gateway-modem-esp8266), the [key file](hal/README.md#setting-up-keys) and the right time.
 
 ```sh
 cp .env.example .env                    # fill it in: gateway/README.md, "Run with Docker Compose"
@@ -115,7 +118,9 @@ uv run --no-default-groups --extra pi prod-node-service B-203 --keys /home/pi/ke
 
 `prod-node-service` checks the node, key and data files, then **only prints** a systemd service and the commands that install it, which need `sudo`. `--csv` has no default, so the simulated data is never used by accident. Add `--tree` for another building and `--user` if the account is not `pi`.
 
-Without containers, `uv run prod-edge-gateway` and `uv run dashboard-server` run the two programs in the foreground; `uv run prod-edge-edge` does the same for a node.
+Without containers, `uv run prod-edge-gateway` and `uv run dashboard-server` run the two programs in the foreground; `uv run prod-edge-edge` does the same for a node. The two `prod-edge-*` scripts take their settings from `.env` (see `.env.example`): the gateway uses `GATEWAY_KEYS`, `GATEWAY_TREE` and `GATEWAY_SERIAL`; a node needs `NODE_NAME`, `NODE_KEYS` and `NODE_CSV`, and can set `NODE_SD` and `NODE_SLOT`. Options typed on the command line win; a node name goes first. The `edge-based-*` scripts do not read `.env`.
+
+For this branch's solution without containers, use `uv run prod-cloud-gateway` and `uv run prod-cloud-edge`. The cloud-based gateway keeps its state in its own folder (`cloud-gateway-data`) and Compose volumes, apart from an edge-based deployment's: deploying here neither reads nor deletes the edge-based data.
 
 ## Python setup
 
