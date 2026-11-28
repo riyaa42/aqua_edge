@@ -627,6 +627,10 @@ const ADVICE = {
   QUALITY_HOT: "Tell residents not to drink tap water: bacteria such as Legionella grow fast in stored water this warm. Shade the tank and flush it once it cools."};
 const LEARN_S = 86400;
 const ORDER = {Critical: 0, High: 1, Medium: 2, Low: 3};
+const REOPEN_TITLE = "Tank valve can be reopened";
+const REOPEN_ADVICE = "The water has read clean for 30 minutes. Test it by hand; if the test is clean, press Reopen valve. The valve does not open by itself.";
+const valveTitle = m => m.a === "VALVE_CLOSED" && S.health.reopen_ok ? REOPEN_TITLE : ALERTS[m.a] || m.a;
+const valveAdvice = m => m.a === "VALVE_CLOSED" && S.health.reopen_ok ? REOPEN_ADVICE : ADVICE[m.a] || "";
 let S = null, R = null, polls = 0, picked = null, size = "small", lps = 0.05, startAt = "now", tiles = {}, dg = null;
 
 function describe(v) {
@@ -812,11 +816,11 @@ function renderAlarm() {
   const list = S.running ? S.active || [] : [], box = $("#alarm");
   box.classList.toggle("calm", !list.length);
   $("#alarm-title").textContent = !list.length ? "Nothing needs attention" : list.length === 1 ? "Needs attention" : `${list.length} problems need attention`;
-  $("#alarm-list").innerHTML = list.map(m => `<li><b>${flatName(m.n)}: ${ALERTS[m.a] || m.a}</b>` +
-    `<p>${m.missing_l ? `${m.missing_l} litres lost ${m.check === "fast" ? "in 15 minutes" : "between 2 and 4 am"}. ` : ""}${ADVICE[m.a] || ""}${S.led[m.n] === "red" ? " The node's buzzer is beeping." : ""}</p>` +
+  $("#alarm-list").innerHTML = list.map(m => `<li><b>${flatName(m.n)}: ${valveTitle(m)}</b>` +
+    `<p>${m.missing_l ? `${m.missing_l} litres lost ${m.check === "fast" ? "in 15 minutes" : "between 2 and 4 am"}. ` : ""}${valveAdvice(m)}${S.led[m.n] === "red" ? " The node's buzzer is beeping." : ""}</p>` +
     `<time>Gateway heard it<br> ${when(m.rx)}</time></li>`).join("") ||
     `<li>Problems the gateway knows about show up here, with what to do, until they are fixed.</li>`;
-  const keys = list.map(m => m.n + m.a + m.rx), fresh = heard && keys.some(k => !heard.has(k));
+  const keys = list.map(m => m.n + m.a + m.rx + (m.a === "VALVE_CLOSED" && S.health.reopen_ok ? "ok" : "")), fresh = heard && keys.some(k => !heard.has(k));
   if (fresh) { beep(); box.classList.remove("fresh"); void box.offsetWidth; box.classList.add("fresh"); }
   heard = new Set(keys);
 }
@@ -873,7 +877,8 @@ function renderWater() {
   $("#verdict-text").textContent = !heard ? "No report yet" : bad ? `${QUALITY[S.quality]}: not safe to drink` : "Clean, safe to drink";
   const shut = S.valve_open === false, H = S.health;
   $("#valve-chip").textContent = shut ? "Valve shut" : "Valve open"; $("#valve-chip").classList.toggle("bad", shut);
-  $("#valve-text").textContent = shut ? `Shut ${when(H.valve_since)}: flats get no tank water until someone tests it and reopens.`
+  $("#valve-text").textContent = shut && H.reopen_ok ? `Clean for 30 minutes since ${when(H.reopen_at - 1800).split(", ")[1]}: test the water by hand, then press Reopen valve.`
+    : shut ? `Shut ${when(H.valve_since)}: flats get no tank water until someone tests it and reopens.`
     : "The tank node shuts it at once if the water breaks a limit or looks like runoff or a chemical.";
   $("#reopen").hidden = !(live && shut);
   $("#verdict-sub").textContent = bad ? `Raised by the tank node, gateway heard it ${when(S.quality_since)}. What to do is under Needs attention.`
@@ -998,7 +1003,7 @@ function renderHealth() {
     : "No open problems. Every node checks its own water every minute.";
   const fresh = {Live: "", Paused: "", Stale: "bad", "No run": ""}[H.freshness];
   $("#h-facts").innerHTML = `<span class="chip ${fresh}">${H.freshness === "Stale" ? "Stale: simulation stopped" : H.freshness}</span>` +
-    (c ? `<span class="chip">${when(now)}</span>` : "") + `<span class="chip ${H.valve_open ? "" : "bad"}">Tank valve ${H.valve_open ? "open" : "shut"}</span>` +
+    (c ? `<span class="chip">${when(now)}</span>` : "") + `<span class="chip ${H.valve_open || H.reopen_ok ? "" : "bad"}">Tank valve ${H.valve_open ? "open" : H.reopen_ok ? "shut, can be reopened" : "shut"}</span>` +
     `<span class="chip ${S.quality === "QUALITY_CLEARED" ? "" : "bad"}">Water ${S.quality === "QUALITY_CLEARED" ? "clean" : "not safe"}</span>`;
   // Water check
   $("#h-valve").textContent = H.valve_open ? "Valve open" : "Valve shut"; $("#h-valve").classList.toggle("bad", !H.valve_open);
@@ -1007,14 +1012,14 @@ function renderHealth() {
   const limits = H.broken.map(k => READ.find(r => r[0] === k)[1]);
   $("#h-cause").innerHTML = (limits.length ? `<b>Limits broken: ${limits.join(", ")}.</b> ` : H.water.ph != null ? "<b>Every limit met.</b> " : "") +
     (H.cause ? `What it looks like (model on the node): <b>${H.cause === "QUALITY_RUNOFF" ? "runoff" : "chemical"}</b>.` : "") +
-    (!H.valve_open ? ` Valve shut ${when(H.valve_since)}.` : "");
+    (!H.valve_open ? ` Valve shut ${when(H.valve_since)}.` : "") + (H.reopen_ok ? ` <b>${REOPEN_ADVICE}</b>` : "");
   const ws = H.water_series;
   $("#h-charts").innerHTML = [["pH", 1, 6.5, 8.5, [6.5, 8.5]], ["TDS, ppm", 2, 0, 500, [0, 500]], ["Turbidity, NTU", 3, 0, 5, [0, 5]], ["Temperature, &deg;C", 4, 20, 35, [0, 35]]]
     .map(([name, i, lo, hi, band]) => `<div class="chart"><small>${name}</small>${chart(ws.map(r => [r[0], r[i]]), lo, hi, band, "#4a5fc4")}</div>`).join("");
   // Fix first
-  $("#h-fix").innerHTML = H.fix_first.map((p, i) => `<li><span class="rank">${i + 1}</span><b>${flatName(p.n)}: ${ALERTS[p.a] || p.a}</b>` +
+  $("#h-fix").innerHTML = H.fix_first.map((p, i) => `<li><span class="rank">${i + 1}</span><b>${flatName(p.n)}: ${valveTitle(p)}</b>` +
     `<span class="lvl" data-level="${p.level}">${p.level} ${p.score}</span>` +
-    `<p>${p.flats} flat${p.flats === 1 ? "" : "s"} affected, open ${ago(p.rx)}${p.missing_l ? `, ${p.missing_l} L lost` : ""}${p.flow ? `, ${p.flow} L/s` : ""}. ${ADVICE[p.a] || ""}</p></li>`).join("")
+    `<p>${p.flats} flat${p.flats === 1 ? "" : "s"} affected, open ${ago(p.rx)}${p.missing_l ? `, ${p.missing_l} L lost` : ""}${p.flow ? `, ${p.flow} L/s` : ""}. ${valveAdvice(p)}</p></li>`).join("")
     || `<li class="empty" style="background:none;box-shadow:none">Nothing to fix. New problems appear here, most urgent first.</li>`;
   // Tank and down pipe
   const ts = H.tank_series;

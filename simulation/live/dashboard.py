@@ -129,6 +129,17 @@ def score(p, now, flats):
     return value, next(name for lo, name in LEVELS if value >= lo), round(share * len(flats))
 
 
+REOPEN_ADVICE_S = 1800      # water clean this long with the valve shut: suggest reopening (the valve never opens itself)
+
+
+def reopen_after(log, open_p, valve):
+    """Time from which the dashboard suggests reopening the shut tank valve, or None."""
+    if not valve or valve[-1]["a"] != "VALVE_CLOSED" or any(p["a"] in QUALITY_KINDS for p in open_p):
+        return None
+    clean = [m for m in log if m["k"] == "ALERT" and m["a"] == "QUALITY_CLEARED" and m["t"] >= valve[-1]["t"]]
+    return clean[-1]["t"] + REOPEN_ADVICE_S if clean else None
+
+
 def health(log, gw, open_p, closed_p, clock, nodes, running):
     """Numbers for the Building health tab."""
     now = clock["t"] if clock else 0
@@ -149,6 +160,7 @@ def health(log, gw, open_p, closed_p, clock, nodes, running):
     delays = [m["rx"] - m["t"] for m in log]
     alert_delays = [m["rx"] - m["t"] for m in log if m["k"] == "ALERT"]
     balance = [[e["i"], e["lost"]] for e in gw if e["event"] == "BALANCE"][-96:]
+    reopen_at = reopen_after(log, open_p, valve)
     return {
         "status": ranked[0]["level"] if ranked else "Normal",
         "freshness": "Live" if running and not clock.get("paused") else "Paused" if running else "Stale" if clock else "No run",
@@ -156,6 +168,7 @@ def health(log, gw, open_p, closed_p, clock, nodes, running):
         "water": water, "broken": broken, "cause": cause,
         "valve_open": valve[-1]["a"] == "VALVE_OPENED" if valve else True,
         "valve_since": valve[-1]["rx"] if valve else None,
+        "reopen_at": reopen_at, "reopen_ok": reopen_at is not None and now >= reopen_at,
         "water_series": [[m["t"], *(m.get(k) and round(m[k], 2) for k in dp)] for m in tank if "ph" in m][-96:],
         "tank_series": [[m["t"], m.get("level_m"), round(m.get("in_l", 0) / 900, 3)] for m in tank][-96:],
         "balance": balance,
@@ -446,8 +459,16 @@ def check():
     assert s["quality"] == "QUALITY_LIMIT_VIOLATION" and s["status"]["B-TANK"] == "alert"
     assert h["balance"] == [[122, {"2": 1.0, "1": 0.5}]] and not any(e["event"] == "BALANCE" for e in s["feed"])
     assert h["usage"] == [["B-203", 40]] and h["tank_series"][-1] == [110700, 1.6, 1.0]
+    assert not h["reopen_ok"] and h["reopen_at"] is None                 # water still bad: no reopen advice
+    add("gateway_log.jsonl", [{"k": "ALERT", "n": "B-TANK", "s": 18, "t": 111000, "a": "QUALITY_CLEARED", "rx": 111060}])
+    clock = lambda t: w("clock.json", json.dumps({"t": t, "paused": True, "delay_s": 0, "leaks": {}, "quality": "normal", "watching": None}))
+    clock(111000 + REOPEN_ADVICE_S - 60)
+    h = state(run)["health"]
+    assert not h["valve_open"] and h["reopen_at"] == 111000 + REOPEN_ADVICE_S and not h["reopen_ok"], h["reopen_at"]
+    clock(111000 + REOPEN_ADVICE_S)
+    h = state(run)["health"]
+    assert h["reopen_ok"] and not h["valve_open"]                        # advice only: the valve stays shut
     add("gateway_log.jsonl", [
-        {"k": "ALERT", "n": "B-TANK", "s": 18, "t": 111000, "a": "QUALITY_CLEARED", "rx": 111060},
         {"k": "ALERT", "n": "B-TANK", "s": 19, "t": 111500, "a": "VALVE_OPENED", "valve": 1, "rx": 111560},
         {"k": "ALERT", "n": "B-203", "s": 20, "t": 111600, "a": "FLAT_LEAK_CLEARED", "rx": 111660}])
     s = state(run)
