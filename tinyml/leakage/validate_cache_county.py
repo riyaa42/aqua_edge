@@ -28,7 +28,7 @@ ROOT = os.path.dirname(os.path.dirname(HERE))
 
 from edge.aqua_edge import FlatNode, DAY, CONT_FLOW_LPS, CONT_FLOW_MIN  # noqa: E402
 from gateway.core import Gateway, Topology  # noqa: E402
-from hal.offline_radio import exchange  # noqa: E402
+from tests.offline_radio import exchange  # noqa: E402
 from hal.packet import sim_key  # noqa: E402
 
 DATA = os.path.join(ROOT, "simulation", "data", "cache_county")

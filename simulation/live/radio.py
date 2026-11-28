@@ -75,7 +75,7 @@ class Radio:
             sf = self.link(src)["sf"] if src != GATEWAY else None
             free_at = t
             for offset, msg, cad in sorted(((*s, False)[:3] for s in sends), key=lambda s: s[0]):
-                h = peek(msg)                                   # packets are signed binary (hal/packet.py)
+                h = peek(msg)                                   # binary, header readable (hal/packet.py)
                 nbytes = len(msg)
                 dsts = [h["n"]] if src == GATEWAY and h["k"] == "ACK" else \
                     [n for n in outs if n != GATEWAY] if src == GATEWAY else [GATEWAY]

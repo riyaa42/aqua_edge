@@ -30,7 +30,7 @@ sys.path[:0] = [
 
 from edge.aqua_edge import EdgeRuntime, FlatNode, TankNode, DAY  # noqa: E402
 from gateway.core import Gateway, Topology  # noqa: E402
-from hal.offline_radio import exchange  # noqa: E402
+from tests.offline_radio import exchange  # noqa: E402
 from hal.packet import pack, sim_key  # noqa: E402
 from tinyml.leakage import compare_leaks as CL  # noqa: E402
 import make_scenario as M  # noqa: E402

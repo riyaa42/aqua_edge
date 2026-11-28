@@ -1,29 +1,52 @@
-"""Aqua Edge radio packets: compact binary, signed. Used by the nodes and the gateway.
+"""Aqua Edge radio packets: compact binary, encrypted and authenticated. Used by the nodes and the
+gateway. Needs the cryptography package.
 
-Plain LoRa has no security, so we borrow two ideas from LoRaWAN (docs/IMPROVEMENT_PLAN.md
-section 3): a short signature (tag) on every packet, and a counter that never repeats.
+Plain LoRa has no security, so every packet is protected here. Radio drivers, and the ESP8266, only
+ever see the finished bytes and need no keys.
 
-    header  type(1) node(1) counter(4) time(4)      10 bytes
-    body    fields, each: field number(1) + value    (ALERT, FLAG, SUM; none for ACK)
-    tag     first 4 bytes of HMAC-SHA256(key, header + body)
+    every packet but BEACON
+        header  type(1) node(1) counter(4) time(4)      10 bytes, readable, authenticated
+        sealed  AES-SIV: tag(16) + encrypted(format version(1) + fields)
+                fields, each: field number(1) + value   (ALERT, FLAG, SUM, CMD; none for ACK, GOT)
+    BEACON
+        header  as above                                10 bytes, readable
+        tag     first 4 bytes of HMAC-SHA256(beacon key, header)
 
 - Node packets: node = sender, counter = the node's sequence number, time = node clock.
 - ACK: node = the node being answered, counter = the sequence number it acknowledges,
-  time = gateway clock ("gt"). Signed with that node's key, so nobody else can fake it.
-- Signed only, not encrypted: anyone can read a packet, nobody can forge or change one.
-- Each node shares one secret 16-byte key with the gateway: hal.key(name). The gateway's
-  BEACON goes to everyone, so it is signed with a building-wide beacon key, hal.key("GATEWAY").
+  time = gateway clock ("gt"). Made with that node's key, so nobody else can fake it.
+- Each node shares one secret 16-byte key with the gateway: hal.key(name). The AES-SIV key is
+  derived from it with HKDF-SHA256 (SIV_INFO), which adds no strength to the secret.
+- AES-SIV (RFC 5297) needs no nonce. That matters: one counter value is used by several kinds
+  of packet, and a node's counter starts again if its SD card is wiped. The worst a repeat can
+  do is show that two packets were exactly the same.
+- The gateway's BEACON goes to everyone and holds only its clock and boot number. It is signed,
+  not encrypted, with a building-wide beacon key, hal.key("GATEWAY"), and can carry no fields.
   A beacon only makes nodes send (it never deletes anything), so a leaked beacon key could
   cause extra transmissions, no more.
+- NOT hidden: which node, the kind of packet (an ALERT is visibly an ALERT), the counter, the
+  time and the length.
+- NOT prevented: sending an old packet again. The node and the gateway check for that.
+- No forward secrecy: whoever gets a node's key can also read that node's recorded packets,
+  and can pose as that node or as the gateway towards it.
 
     python3 -m hal.packet      # self-check
 """
+import functools
 import hashlib
 import hmac
 import json
 import struct
 
-TAG_BYTES = 4                                   # LoRaWAN also uses a 4-byte check
+from cryptography.exceptions import InvalidTag
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.ciphers.aead import AESSIV
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+
+BEACON_TAG_BYTES = 4                            # LoRaWAN also uses a 4-byte check
+SIV_BYTES = 16                                  # AES-SIV's tag, in front of the encrypted bytes
+SIV_INFO = b"aqua-edge packet encryption v1"    # HKDF label: both ends must use the same
+FORMAT = b"\x01"                               # first encrypted byte; also means there is always one
 HEADER = struct.Struct(">BBII")
 KINDS = ["", "ALERT", "FLAG", "SUM", "ACK",                # up: ALERT FLAG SUM GOT; down: ACK
          "BEACON", "CMD", "GOT"]                                    # down: BEACON CMD (append only)
@@ -71,22 +94,36 @@ def load_keys(path):
     return keys
 
 
-def _tag(key, data):
-    return hmac.new(key, data, hashlib.sha256).digest()[:TAG_BYTES]
+def _beacon_tag(key, data):
+    return hmac.new(key, data, hashlib.sha256).digest()[:BEACON_TAG_BYTES]
+
+
+@functools.lru_cache(maxsize=64)
+def _cipher(key):
+    return AESSIV(HKDF(algorithm=hashes.SHA256(), length=32, salt=None, info=SIV_INFO).derive(key))
 
 
 def pack(m, key):
-    """Message dict -> signed bytes. Unknown fields or alert names fail loudly."""
+    """Message dict -> the bytes to send: encrypted, except a BEACON, which is only signed.
+    Unknown fields or alert names fail loudly."""
+    beacon = m["k"] == "BEACON"
+    if beacon != (m["n"] == "GATEWAY"):
+        raise ValueError("a BEACON is from GATEWAY, and GATEWAY sends nothing else")
     t = m["gt"] if m["k"] in GATEWAY_CLOCK else m["t"]
-    data = HEADER.pack(KINDS.index(m["k"]), NAMES.index(m["n"]), m["s"], round(t))
+    header = HEADER.pack(KINDS.index(m["k"]), NAMES.index(m["n"]), m["s"], round(t))
+    body = b""
     for name in FIELD_NAMES:
         if name in m:
             v = CODES[name].index(m[name]) if name in CODES else m[name]
-            data += bytes([FIELD_NAMES.index(name)]) + struct.pack(FIELDS[name], v)
+            body += bytes([FIELD_NAMES.index(name)]) + struct.pack(FIELDS[name], v)
     extra = set(m) - HEADER_KEYS - set(FIELDS)
     if extra:
         raise ValueError(f"no packet field for {sorted(extra)}")
-    return data + _tag(key, data)
+    if beacon:
+        if body:
+            raise ValueError("a BEACON is not encrypted, so it carries no fields")
+        return header + _beacon_tag(key, header)
+    return header + _cipher(bytes(key)).encrypt(FORMAT + body, [header])
 
 
 def peek(raw):
@@ -96,21 +133,39 @@ def peek(raw):
     return {"k": KINDS[kind], "n": NAMES[node], "s": counter, ("gt" if KINDS[kind] in GATEWAY_CLOCK else "t"): t}
 
 
+def _open(raw, kind, node, key):
+    """The fields' bytes if the packet is genuine and unchanged, else None."""
+    header, rest = raw[:HEADER.size], raw[HEADER.size:]
+    if (kind == "BEACON") != (node == "GATEWAY"):
+        return None
+    if kind == "BEACON":                    # exactly header and tag
+        return b"" if hmac.compare_digest(_beacon_tag(key, header), rest) else None
+    if len(rest) <= SIV_BYTES:
+        return None
+    try:
+        plain = _cipher(bytes(key)).decrypt(rest, [header])
+    except InvalidTag:
+        return None
+    return plain[len(FORMAT):] if plain.startswith(FORMAT) else None
+
+
 def unpack(raw, key_for):
-    """Signed bytes -> message dict, or None if the packet is broken or the tag is wrong.
+    """Received bytes -> message dict, or None if the packet is broken, changed, made with another
+    key, or in another format.
     key_for(name) gives the key for the node named in the header (None: not ours to read)."""
     try:
         m = peek(raw)
         key = key_for(m["n"])
-        if key is None or not hmac.compare_digest(_tag(key, raw[:-TAG_BYTES]), raw[-TAG_BYTES:]):
+        body = None if key is None else _open(bytes(raw), m["k"], m["n"], key)
+        if body is None:
             return None
-        pos, end = HEADER.size, len(raw) - TAG_BYTES
-        while pos < end:
-            name = FIELD_NAMES[raw[pos]]
-            (v,) = struct.unpack_from(FIELDS[name], raw, pos + 1)
+        pos = 0
+        while pos < len(body):
+            name = FIELD_NAMES[body[pos]]
+            (v,) = struct.unpack_from(FIELDS[name], body, pos + 1)
             pos += 1 + struct.calcsize(FIELDS[name])
             m[name] = CODES[name][v] if name in CODES else round(v, 4) if isinstance(v, float) else v
-        return m if pos == end else None
+        return m
     except (IndexError, struct.error):
         return None
 
@@ -136,14 +191,58 @@ if __name__ == "__main__":
     for m in msgs:
         raw = pack(m, keys(m["n"]))
         assert unpack(raw, keys) == m, (unpack(raw, keys), m)          # same message back
-        bad = bytearray(raw)
-        bad[5] ^= 1                                                      # one bit changed
-        assert unpack(bytes(bad), keys) is None
+        for i in range(len(raw) * 8):                                   # any one bit changed
+            bad = bytearray(raw)
+            bad[i // 8] ^= 1 << (i % 8)
+            assert unpack(bytes(bad), keys) is None, (m["k"], i)
+        for n in range(len(raw)):                                       # cut short anywhere
+            assert unpack(raw[:n], keys) is None, (m["k"], n)
+        assert unpack(raw + b"\0", keys) is None
         print(f"{m['k']:5} {len(raw):3} bytes (JSON {len(json.dumps(m, separators=(',', ':'))):3})")
     ack = pack(msgs[-1], k203)
     assert unpack(ack, lambda n: k101 if n == "B-203" else None) is None   # signed with the wrong key
     assert unpack(ack, lambda n: None) is None                           # not ours to read
-    assert unpack(ack[:7], keys) is None                                 # cut short
+    assert len(ack) == HEADER.size + SIV_BYTES + 1                       # nothing to say: only the format byte
+    assert unpack(pack(msgs[-1], k101), keys) is None
+
+    # the fields cannot be read off the air; the same message gives the same bytes, any change others
+    alert = msgs[1]
+    sent = pack(alert, k203)
+    assert struct.pack(">f", alert["flow"]) not in sent and sent == pack(alert, k203)
+    for other in ({**alert, "s": 99}, {**alert, "flow": 0.06}, {**alert, "k": "FLAG"}):
+        assert pack(other, k203)[HEADER.size:] != sent[HEADER.size:], other
+    assert sent[HEADER.size + SIV_BYTES:] != pack({**alert, "s": 99}, k203)[HEADER.size + SIV_BYTES:]
+
+    # the wire format, checked from the documented recipe and not through pack's own helpers
+    prk = hmac.new(bytes(32), k203, hashlib.sha256).digest()             # HKDF-SHA256, no salt
+    siv = AESSIV(hmac.new(prk, b"aqua-edge packet encryption v1\x01", hashlib.sha256).digest())
+    head = HEADER.pack(KINDS.index("ALERT"), NAMES.index("B-203"), alert["s"], alert["t"])
+    body = (bytes([FIELD_NAMES.index("a")]) + bytes([ALERTS.index("LEAK_NIGHT_FLOW")])
+            + bytes([FIELD_NAMES.index("flow")]) + struct.pack(">f", alert["flow"]))
+    assert sent == head + siv.encrypt(b"\x01" + body, [head])
+
+    # rejected: an unknown format version, an old signed-only packet, a format switched
+    assert unpack(head + siv.encrypt(b"\x02" + body, [head]), keys) is None
+    assert unpack(head + body + hmac.new(k203, head + body, hashlib.sha256).digest()[:4], keys) is None
+    assert unpack(head + hmac.new(k203, head, hashlib.sha256).digest()[:4], keys) is None
+    gk = sim_key("GATEWAY")
+    for kind, node, key in (("ACK", "GATEWAY", gk), ("BEACON", "B-203", k203)):
+        head = HEADER.pack(KINDS.index(kind), NAMES.index(node), 1, 1)
+        for forged in (head + _beacon_tag(key, head), head + _cipher(key).encrypt(FORMAT, [head])):
+            assert unpack(forged, keys) is None, (kind, node)
+    for wrong in ({"k": "BEACON", "n": "GATEWAY", "s": 1, "gt": 1, "flow": 1.0},
+                  {"k": "BEACON", "n": "B-203", "s": 1, "gt": 1}, {"k": "SUM", "n": "GATEWAY", "s": 1, "t": 1}):
+        try:
+            pack(wrong, gk)
+            raise AssertionError(f"packed {wrong}")
+        except ValueError:
+            pass
+    rng = __import__("random").Random(1)                                  # noise never crashes it
+    for _ in range(3000):
+        assert unpack(rng.randbytes(rng.randrange(0, 80)), keys) is None
+    everything = {"k": "SUM", "n": "B-203", "s": 1, "t": 1,
+                  **{f: ALERTS[0] if f == "a" else FLAGS[0] if f == "f" else 1 for f in FIELDS}}
+    assert unpack(pack(everything, k203), keys) == everything and len(pack(everything, k203)) <= 255
     import os
     import secrets
     import tempfile

@@ -1,7 +1,7 @@
 """Functions behind the uv scripts in pyproject.toml (list: top of README.md).
 
 Each one runs existing modules with `python -m` from the repository root. Extra command-line
-arguments are passed on to a single module, for example `uv run pi-node --check`.
+arguments are passed on to a single module, for example `uv run edge-based-node --help`.
 """
 import os
 import subprocess
@@ -9,8 +9,9 @@ import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-HAL = [("hal.packet",), ("hal.lora433",), ("hal.pi_hal", "--check")]
-EDGE = [("edge.aqua_edge",)]
+HAL = [("hal.packet",), ("hal.lora433",), ("hal.lora_pi", "--check"),
+       ("hal.esp8266_passthrough", "--check"), ("hal.link",), ("tests.test_hal",)]
+EDGE = [("edge.aqua_edge",), ("tests.test_pi_node",)]
 GATEWAY = [("gateway.topology",), ("gateway.core",), ("tests.test_gateway_analytics",)]
 QUALITY = [("tinyml.quality.quality_model",)]
 CONSUMPTION = [("tinyml.consumption.test_integration",)]
@@ -92,8 +93,12 @@ def cloud_based_gateway():
     _one("gateway.cloud_based")
 
 
-def pi_node():
-    _one("hal.pi_hal")
+def pi_radio_test():
+    sys.exit(_call("hal.lora_pi", "--radio-test"))
+
+
+def gate_radio_test():
+    sys.exit(_call("hal.esp8266_passthrough", "--radio-test", *sys.argv[1:]))
 
 
 # experiments

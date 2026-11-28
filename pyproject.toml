@@ -5,14 +5,25 @@ description = "Aqua Edge simulations, firmware, and edge water-quality prototype
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "matplotlib>=3.8",
-    "numpy>=2.0",
-    "pandas>=2.0",
-    "scikit-learn>=1.9.1",
-    "six>=1.17",          # wntr imports it without declaring it
-    "streamlit>=1.66.1",
-    "wntr>=1.5",
+  "cryptography>=38",    # packet encryption (hal/packet.py): needed by every node and the gateway
+  "matplotlib>=3.8",
+  "numpy>=2.0",
+  "pandas>=2.0",
+  "scikit-learn>=1.9.1",
+  "six>=1.17",           # wntr imports it without declaring it
+  "streamlit>=1.66.1",
+  "wntr>=1.5",
 ]
+
+[project.optional-dependencies]
+# Only on a Raspberry Pi with the LoRa module
+pi = [
+  "gpiozero>=2.0",
+  "lgpio>=0.2; sys_platform == 'linux'",
+  "spidev>=3.6; sys_platform == 'linux'",
+]
+# Only on the gateway computer with the ESP8266 LoRa modem
+gateway = ["pyserial>=3.5"]
 
 [project.scripts]
 test-all = "tasks:test_all"
@@ -28,7 +39,8 @@ edge-based-node = "tasks:edge_based_node"
 edge-based-gateway = "tasks:edge_based_gateway"
 cloud-based-node = "tasks:cloud_based_node"
 cloud-based-gateway = "tasks:cloud_based_gateway"
-pi-node = "tasks:pi_node"
+pi-radio-test = "tasks:pi_radio_test"
+gate-radio-test = "tasks:gate_radio_test"
 exp-compare-leaks = "tasks:exp_compare_leaks"
 exp-validate-campaign = "tasks:exp_validate_campaign"
 exp-validate-swifeed = "tasks:exp_validate_swifeed"

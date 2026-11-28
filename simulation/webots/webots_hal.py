@@ -41,7 +41,7 @@ class WebotsHAL:
 
     def send(self, msg, at_s=None, cad=False):      # timing ignored: Webots radio has no airtime
         if self.link_ok():
-            self.emitter.send(msg)                  # signed binary packet (hal/packet.py)
+            self.emitter.send(msg)                  # encrypted binary packet (hal/packet.py)
 
     def receive(self):
         msgs = []

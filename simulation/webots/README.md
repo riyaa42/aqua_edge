@@ -39,7 +39,7 @@ Valves were later removed from the project altogether (the response is now buzze
 
 ## Run it
 
-From this `webots/` folder (the node programs only use the Python standard library):
+From this `webots/` folder (the node programs need the `cryptography` package for radio packets, and otherwise only the Python standard library):
 
 ```
 python3 run_offline.py              # node program test, with the outage

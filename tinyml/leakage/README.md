@@ -223,7 +223,7 @@ This follows common practice for LoRa networks: track when each device was last 
 
 ## 7. How an alarm reaches the gateway
 
-1. **The node decides.** A check trips, and in the same step the node turns its light red and sounds the buzzer (driven on the Pi by `pi_hal.py`; not verified on hardware in these tests). No gateway is needed for this.
+1. **The node decides.** A check trips, and in the same step the node turns its light red and sounds the buzzer (driven on the Pi by `edge/board.py`; not verified on hardware in these tests). No gateway is needed for this.
 2. **It saves the alarm to the SD card first,** so nothing is lost if the power or radio fails.
 3. **It sends the alarm straight away.** Alarms skip the queue. They listen first to check the radio channel is free (listen before talk), then send.
 4. **The gateway replies "got it"** (an ACK). The reply also carries the gateway's time for setting node clocks. The firmware does not set any clock itself; only the live simulation's hardware layer uses it.
@@ -253,7 +253,7 @@ This follows common practice for LoRa networks: track when each device was last 
 | Building check (gateway) | every 15 min | 2 blocks (30 min) |
 | Silent node (gateway) | 1 min | 45 min with nothing heard |
 
-**Alarms** are sent as soon as they fire: listen before talk, then send. A 21-byte signed alert takes about 0.06 s on air at SF7. If it is lost, it is sent again within seconds (section 7, step 5). These delivery times have not been measured with real radios or with airtime and collisions simulated.
+**Alarms** are sent as soon as they fire: listen before talk, then send. A 34-byte encrypted alert takes about 0.08 s on air at SF7 (calculated). If it is lost, it is sent again within seconds (section 7, step 5). These delivery times have not been measured with real radios or with airtime and collisions simulated.
 
 **Summaries** cover 15-minute blocks. Each is made at :00, :15, :30 and :45 for the block just ended, and sent in that same minute at the node's own slot second:
 

@@ -26,3 +26,6 @@ tinyml/consumption/results/
 
 # Downloaded datasets (large, and licensed separately: see tinyml/quality/README.md)
 tinyml/quality/data/
+
+# Radio keys are secrets (see load_keys in hal/packet.py)
+*keys.json

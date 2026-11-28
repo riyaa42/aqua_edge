@@ -153,7 +153,7 @@ Self-checks: `python3 live/radio.py` and `python3 webots/run_offline.py`.
 - **Hearing assumption.** The radio model assumes every node can hear every other node (one building). Hidden nodes are not checked.
 - **Uplink channels.** Only one uplink channel is used, although IN865 offers 3.
 - **Frequency band in ns-3.** ns-3 uses the EU868 frequency, because the module has no Indian band. The physics is the same.
-- **Packet format.** Packets are signed binary (`hal/packet.py`), about a third of the JSON size. Keys are made from the node name for the simulation; real nodes need a key file on the SD card.
+- **Packet format.** Packets are encrypted binary (`hal/packet.py`, [details](../hal/README.md#encryption); beacons are signed only). The live results and packet sizes on this page were measured with the earlier signed-only format, whose packets were 13 bytes shorter; the live simulation has not been rerun since. Rebuild its image (`docker compose -f live/compose.yaml build`) before the next run, to install `cryptography`. Keys are made from the node name for the simulation; real nodes need a key file on the SD card.
 - **Leak modelling.** Leaks use internal WNTR settings (tested with wntr 1.5.0).
 - **Gateway repeat check.** The gateway cannot yet tell "the same leak flickering" from "a new leak". It only marks repeats.
 - **Retry storm.** During a 3.5-hour radio cut, nodes made about 13,000 re-send attempts.

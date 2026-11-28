@@ -4,7 +4,7 @@
     NODE_ID=GATEWAY python3 live/node.py
 
 Runs the real firmware (edge/, gateway/, hal/, tinyml/) through NetHAL, a hardware layer that gets this node's
-sensor readings and radio messages from the timekeeper, one minute at a time. Standard library only.
+sensor readings and radio messages from the timekeeper, one minute at a time. Standard library only, apart from the cryptography package that hal/packet.py needs.
 """
 import json
 import os

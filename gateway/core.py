@@ -36,9 +36,9 @@ Same hardware layer as the nodes (hal.now / send / receive). Jobs:
   7. Clock check: a message stamped more than 1 min in the future means that node's clock is
      wrong (CLOCK_SKEW), until a message stamped within 1 min of gateway time (CLOCK_OK). An
      old stamp is normal: the message waited on the SD card.
-  8. Packet check (hal/packet.py): a packet with a wrong signature is dropped (BAD_PACKET), and a
+  8. Packet check (hal/packet.py): a packet that fails authentication is dropped (BAD_PACKET), and a
      (node, counter) pair already seen is a duplicate or a replay: acknowledged, not used again.
-     ACKs are signed with the node's key, so a fake ACK cannot make a node delete its messages.
+     ACKs are made with the node's key, so a fake ACK cannot make a node delete its messages.
   9. Ranking of open problems for the dashboard: analytics.py.
  10. Beacon every 5 s (and at startup), so nodes know when to send what they stored.
  11. Dispatch: what only the gateway can know is sent back at once to the nodes concerned, as a
@@ -64,7 +64,8 @@ import random
 
 from edge.aqua_edge import SUMMARY_S, iso_utc, save_atomic
 from gateway.analytics import FLAT_LEAK_ALERTS, GatewayAnalytics, category_of
-from hal.lora433 import BEACON_S, AirtimeBudget, airtime_s, retry_wait
+from hal.link import MessageLink
+from hal.lora433 import BEACON_S, AirtimeBudget, retry_wait
 from hal.packet import pack, unpack
 from gateway.topology import Topology  # noqa: F401  (callers build one for Gateway)
 
@@ -89,6 +90,7 @@ BY_BLOCK = ("sums", "p_sums", "p_mean_sums", "verdicts")     # {block number: va
 class Gateway:
     def __init__(self, hal, topology, enable_commands=True):
         self.hal, self.tree = hal, topology
+        self.link = MessageLink(hal, hal.key)
         self.flats, self.tank = set(topology.flats), topology.tank
         self.enable_commands = enable_commands
         self.seen_floor = {}        # node -> highest contiguous seq received (1..floor)
@@ -223,12 +225,9 @@ class Gateway:
         if self.resumed:            # the gateway was down, not the nodes: restart their silence timers
             self.resumed = False
             self.last_seen.update({n: now for n in self.flats | {self.tank} if n not in self.silent})
-        bad, acks, events_before = 0, [], len(self.events)
-        for raw in self.hal.receive():
-            m = unpack(raw, self.hal.key)
-            if m is None:
-                bad += 1                                    # wrong signature or broken packet
-                continue
+        acks, events_before = [], len(self.events)
+        messages, bad = self.link.receive()                 # bad: failed authentication or broken packet
+        for m in messages:
             if m["k"] == "GOT":
                 self.confirmed(now, m)
                 continue
@@ -280,29 +279,25 @@ class Gateway:
             self.dirty = False
         for n, seq in acks:
             ack = {"k": "ACK", "n": n, "s": seq, "gt": now}     # gt: nodes sync their clock
-            self.transmit(now, pack(ack, self.hal.key(n)))
+            self.transmit(now, ack)
         self.send_commands(now)
         if self.beacon_at is None or now >= self.beacon_at or now < self.beacon_at - BEACON_S:
             beacon = {"k": "BEACON", "n": "GATEWAY", "s": self.boot, "gt": now}
-            self.transmit(now, pack(beacon, self.hal.key("GATEWAY")))
+            self.transmit(now, beacon)
             self.beacon_at = now + BEACON_S
         return min([self.beacon_at] + [self.send_at.get(num, now) for num in self.outbox])
 
     # --- radio and dispatch ---
-    def transmit(self, now, raw):
-        if not self.airtime.take(now, airtime_s(len(raw)), True):
-            return False
-        self.hal.send(raw, cad=True)
-        return True
+    def transmit(self, now, message):
+        return self.link.send(message, admit=lambda s: self.airtime.take(now, s, True))
 
     def send_commands(self, now):
         """Unconfirmed commands that are due; ongoing problems go before ones already over."""
         for num, c in sorted(self.outbox.items(), key=lambda kv: (kv[1]["over"], kv[1]["t"], int(kv[0]))):
             if now < self.send_at.get(num, now):
                 continue
-            raw = pack({"k": "CMD", "n": c["n"], "s": int(num), "t": c["t"], "a": c["a"], "over": c["over"]},
-                       self.hal.key(c["n"]))
-            if self.transmit(now, raw):
+            command = {"k": "CMD", "n": c["n"], "s": int(num), "t": c["t"], "a": c["a"], "over": c["over"]}
+            if self.transmit(now, command):
                 tries = self.tries.get(num, 0)
                 self.send_at[num] = now + retry_wait(tries, True, c["n"] not in self.silent, self.rng)
                 self.tries[num] = tries + 1

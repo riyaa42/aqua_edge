@@ -9,7 +9,7 @@ directly; everything goes through a small hardware layer `hal` with these method
     hal.read()                -> dict of sensor readings, e.g. {"flow_lps": 0.01, "pressure_m": 10.4}
     hal.send(packet: bytes, cad=False)
                               -> radio send now (SX1278 at 433 MHz on the real node, settings in
-                                 hal/lora433.py); may be lost silently. Packets are signed binary
+                                 hal/lora433.py); may be lost silently. Packets are encrypted binary
                                  (hal/packet.py). cad: listen before talk (channel activity detection)
     hal.slot                  -> optional (index, count): this node's time slot in each minute
     hal.buzzer(code)          -> optional: sound the local alarm for this alert
@@ -46,6 +46,7 @@ import random
 
 
 from tinyml.consumption.detectors import StatisticalZeroFlowDetector
+from hal.link import MessageLink
 from hal.lora433 import (BEACON_S, FLUSH_ROUTINE_AFTER_S, FLUSH_STEP_S, HEARD_S,  # noqa: F401
                      AirtimeBudget, airtime_s, retry_wait)
 from hal.packet import NAMES, pack, unpack, violation_mask
@@ -257,6 +258,8 @@ class Node:
         slot = getattr(hal, "slot", None)
         self.index = slot[0] if slot else NAMES.index(node_id) if node_id in NAMES else 0
         self.beacon_key = hal.key("GATEWAY")
+        # these two keys are all this node can read: packets to or from other nodes are rejected
+        self.link = MessageLink(hal, {node_id: self.key, "GATEWAY": self.beacon_key}.get)
         self.heard_at, self.gateway_boot, self.last_beacon_gt = None, None, -1
         self.airtime = AirtimeBudget()
         self.ok_minutes = {}           # recovery message -> minutes in a row its problem looked over
@@ -322,11 +325,8 @@ class Node:
             self.store.flush(now, self.index)
 
     def receive(self, now):
-        keys = {self.id: self.key, "GATEWAY": self.beacon_key}
-        for raw in self.hal.receive():
-            m = unpack(raw, keys.get)           # None: not ours, or forged
-            if not m:
-                continue
+        messages, _ = self.link.receive()       # not ours or forged: already left out
+        for m in messages:
             if m["n"] == "GATEWAY":
                 if m["k"] == "BEACON" and m["gt"] > self.last_beacon_gt:    # an old one: replayed
                     self.last_beacon_gt = m["gt"]
@@ -346,9 +346,8 @@ class Node:
             self.apply_command(m["a"], m["t"], m.get("over"))
             self.commands_done = (done + [m["s"]])[-REMEMBER_COMMANDS:]
             self.save_open()
-        got = pack({"k": "GOT", "n": self.id, "s": m["s"], "t": now}, self.key)
-        if self.airtime.take(now, airtime_s(len(got)), True):
-            self.hal.send(got, cad=True)
+        self.link.send({"k": "GOT", "n": self.id, "s": m["s"], "t": now},
+                       admit=lambda s: self.airtime.take(now, s, True))
 
     def apply_command(self, code, t, over):
         hook = getattr(self.hal, "on_gateway_alert", lambda code, active: None)
@@ -378,10 +377,9 @@ class Node:
         """Send what is due, set the light, and return when to call again (None: nothing waits)."""
         heard = self.heard_at is not None and now - self.heard_at <= HEARD_S
         for m in self.store.due(now, heard):
-            raw = pack({k: v for k, v in m.items() if k not in ("ts_utc", "ts_iso", "rtc_ok")}, self.key)
-            if self.airtime.take(now, airtime_s(len(raw)), self.store.urgent(m)):
-                self.hal.send(raw, cad=True)
-            else:                                       # transmit-time limit reached
+            wire = {k: v for k, v in m.items() if k not in ("ts_utc", "ts_iso", "rtc_ok")}
+            urgent = self.store.urgent(m)
+            if not self.link.send(wire, admit=lambda s: self.airtime.take(now, s, urgent)):     # transmit-time limit reached
                 self.store.next_try[m["s"]] = now + 60
         stuck = any(now - m["t"] > STUCK_S for m in self.store.queue)
         self.hal.led("red" if self.alerts or self.open or self.remote else "yellow" if stuck else "green")

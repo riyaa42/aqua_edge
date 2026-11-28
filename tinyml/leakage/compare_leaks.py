@@ -31,7 +31,7 @@ sys.path[:0] = [
 from water import Water, LEAK_SIZES_LPS  # noqa: E402
 from edge.aqua_edge import FlatNode, TankNode, DAY  # noqa: E402
 from gateway.core import Gateway, Topology  # noqa: E402
-from hal.offline_radio import exchange  # noqa: E402
+from tests.offline_radio import exchange  # noqa: E402
 from hal.packet import sim_key  # noqa: E402
 
 END_S = 2 * DAY + 6 * 3600
