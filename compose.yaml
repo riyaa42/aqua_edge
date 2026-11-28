@@ -5,16 +5,16 @@
 #   cp .env.example .env   # set the passwords, the dashboard token and the key file
 #   docker compose up -d --build
 # With the ESP8266 radio modem, add its file:  -f compose.yaml -f compose.esp8266.yaml
-# With virtual edge nodes too (edge/README.md, "Run virtual nodes"):
-#   --profile one-node       B-203                     GATEWAY_TREE=./gateway/virtual_1node.json
-#   --profile three-nodes    B-203, B-101 and B-TANK   GATEWAY_TREE=./gateway/virtual_3node.json
+# With the 4 virtual edge nodes too (edge/README.md, "Run virtual nodes"):
+#   GATEWAY_TREE=./gateway/virtual_4node.json docker compose --profile virtual-nodes up -d --build
+#   (4 nodes: B-TANK, B-101, B-203 and B-301)
 name: aqua-edge
 
 # a virtual node: replayed sensors, network radio, LEDs and valve only logged
 x-node: &node
   image: aqua-edge-node
   build: {context: ., dockerfile: Dockerfile.edge}
-  profiles: [three-nodes]
+  profiles: [virtual-nodes]
   environment:
     AQUA_PRIME_S: ${NODE_PRIME_S:-86400}      # learn from the first day of the data at once
     AQUA_STEP_S: ${NODE_STEP_S:-}             # empty: one reading a minute
@@ -94,24 +94,7 @@ services:
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
 
-  node-b203:                      # the flat with the planted night leak: closes its valve
-    <<: *node
-    profiles: [one-node, three-nodes]
-    command: ["python", "-m", "edge.cloud_based", "B-203", "--keys", "/run/keys/node_keys.json", "--sd", "/data",
-              "--radio", "udp", "--gateway", "gateway:1700", "--actuators", "sim"]
-    volumes:
-      - node-b203-data:/data
-      - ${NODE_B203_KEYS:-/dev/null}:/run/keys/node_keys.json:ro      # its own key and GATEWAY only
-
-  node-b101:                      # a flat with no planted leak (continuous flow still closes it)
-    <<: *node
-    command: ["python", "-m", "edge.cloud_based", "B-101", "--keys", "/run/keys/node_keys.json", "--sd", "/data",
-              "--radio", "udp", "--gateway", "gateway:1700", "--actuators", "sim"]
-    volumes:
-      - node-b101-data:/data
-      - ${NODE_B101_KEYS:-/dev/null}:/run/keys/node_keys.json:ro
-
-  node-tank:                      # closes the tank valve on a water-quality alert
+  node-tank:                      # water quality events: closes the tank valve
     <<: *node
     command: ["python", "-m", "edge.cloud_based", "B-TANK", "--keys", "/run/keys/node_keys.json", "--sd", "/data",
               "--radio", "udp", "--gateway", "gateway:1700", "--actuators", "sim"]
@@ -119,10 +102,35 @@ services:
       - node-tank-data:/data
       - ${NODE_TANK_KEYS:-/dev/null}:/run/keys/node_keys.json:ro
 
+  node-b101:                      # floor 1; each node gets only its own key and GATEWAY
+    <<: *node
+    command: ["python", "-m", "edge.cloud_based", "B-101", "--keys", "/run/keys/node_keys.json", "--sd", "/data",
+              "--radio", "udp", "--gateway", "gateway:1700", "--actuators", "sim"]
+    volumes:
+      - node-b101-data:/data
+      - ${NODE_B101_KEYS:-/dev/null}:/run/keys/node_keys.json:ro
+
+  node-b203:                      # floor 2: the planted night leak
+    <<: *node
+    command: ["python", "-m", "edge.cloud_based", "B-203", "--keys", "/run/keys/node_keys.json", "--sd", "/data",
+              "--radio", "udp", "--gateway", "gateway:1700", "--actuators", "sim"]
+    volumes:
+      - node-b203-data:/data
+      - ${NODE_B203_KEYS:-/dev/null}:/run/keys/node_keys.json:ro
+
+  node-b301:                      # floor 3
+    <<: *node
+    command: ["python", "-m", "edge.cloud_based", "B-301", "--keys", "/run/keys/node_keys.json", "--sd", "/data",
+              "--radio", "udp", "--gateway", "gateway:1700", "--actuators", "sim"]
+    volumes:
+      - node-b301-data:/data
+      - ${NODE_B301_KEYS:-/dev/null}:/run/keys/node_keys.json:ro
+
 volumes:
   mqtt-data:
-  node-b203-data:
-  node-b101-data:
   node-tank-data:
+  node-b101-data:
+  node-b203-data:
+  node-b301-data:
   cloud-gateway-data:
   cloud-dashboard-data:

@@ -24,6 +24,8 @@ The gateway computer reaches the nodes through an ESP8266 on USB. After flashing
 
 ### Tests
 
+Latest results: [Test results](#test-results).
+
 A group runs all its checks even if one fails, then lists the failures.
 
 | Script | What it runs |
@@ -59,6 +61,87 @@ Datasets are not in the repository: see the linked README for each area.
 
 The comparisons against the baselines planned in [`planning/experiments.md`](planning/experiments.md) are not written yet, so they have no script.
 
+## Test results
+
+Run on 28 November 2026 on a Linux development computer, with simulated or replayed sensor data. **The software works from end to end, from sensor replay to dashboard and back to the valve. The detectors also raise false alarms on this replay** ([below](#detection-on-the-replayed-day)).
+
+**Not verified on hardware.** The Raspberry Pi has GPIO problems that we could not resolve, so nothing that depends on its pins is verified: the SX1278 radio on the Pi, the LEDs, buzzer and relay/valve. Tests of the software above that layer use fake or network radios, and never move a real valve. The ESP8266 modem, a real radio link, real sensors (there are no drivers yet) and Docker itself were not tested either.
+
+### Automated tests
+
+| Run | Result |
+|---|---|
+| `uv run test-all` | **30 of 30 checks passed** |
+| `uv run python -m tests.test_comms_reliability` (not part of `test-all`) | Passed |
+
+`test-all` covers packets and encryption, the radio code with fake chips, node and gateway rules, saved state and restarts, radio outages, MQTT messages (fake broker), the dashboard server, the reopen button through to the node's valve, and the detectors. `test-parity` is not included ([see above](#tests)).
+
+### Four virtual nodes, one gateway and dashboard
+
+Podman 6.2.1 and `podman-compose`, `--profile virtual-nodes`, `NODE_STEP_S=0.4`, with new random keys. Times are from when `up` returned. The times include streaming day 1 to the server to learn from.
+
+| Node | Dashboard showed its valve closed | Cause on this data |
+|---|---|---|
+| `B-TANK` | Yes, after 242 s | `QUALITY_TEMPORAL_ANOMALY`, before any planted event |
+| `B-101` | Yes, after 252 s | `LEAK_CONTINUOUS_FLOW`, **false alarm** |
+| `B-203` | Yes, after 240 s | `LEAK_NIGHT_FLOW`, planted leak |
+| `B-301` | Yes, after 254 s | `LEAK_CONTINUOUS_FLOW`, **false alarm** |
+
+- The dashboard received all four nodes in frames marked `cloud`; the broker, gateway, dashboard and all four node containers stayed up.
+- Reopening `B-203` through the dashboard API was accepted (HTTP 202), and the node reported its valve open 5 s later.
+- The web page and health endpoint answered with HTTP 200 (the page's display was not checked in a browser).
+- The gateway logged no bad packets or crashes. At startup it logged refused connections until the dashboard was up.
+- The node image contains no detection code.
+
+The causes were not read from the container run. They come from replaying the same data through the same node and gateway code on a simulated clock, with a one-off script that is not in the repository.
+
+### Leak and consumption tests
+
+From `test-all`, on simulated water-network data:
+
+| Case | Result |
+|---|---|
+| Leak in flat B-203, small | Detected after 180 min (continuous flow) |
+| Leak in flat B-203, medium and large | Detected after 10 min (pressure drop) |
+| Other flats during those three leaks | No leak alerts |
+| 48 hours without a leak | No flat or pipe leak alerts |
+| Pipe leaks: 5 places, medium and large | All 10 detected after 30 min |
+| Finding the leaking floor | The test's score: first choice right in 6 of 10, in the first two in 7 of 10. It named a floor only for the 5 large leaks |
+| Regression scenarios, and offline and supply scenarios | 8 of 8 and 8 of 8 passed |
+| Abnormal-consumption integration tests | 5 of 5 passed |
+
+### Detection on the replayed day
+
+From the same kind of one-off replay: all 21 nodes of building B, on day 2 of `simulation/webots/data/sensors.csv` (a different data set from the table above). The replay cannot react to a closed valve.
+
+| Planted event | Result |
+|---|---|
+| 02:00 leak in flat B-203 | Detected at 02:29 |
+| 06:00 runoff in the tank | Detected at 06:02 |
+| 09:00 power cut to the pump | Low supply reported at 13:49, recovery at 17:14 |
+| 18:00 pipe burst | **No pipe-leak alert.** The tank valve had been shut since 00:17, so this replay does not show whether the burst would be found |
+| 20:00 chemical contamination | Detected at 20:03 |
+
+**All 21 valves closed.** The 19 flats without a planted leak all closed between 07:59 and 08:59 on `LEAK_CONTINUOUS_FLOW`, and the tank closed at 00:17 on `QUALITY_TEMPORAL_ANOMALY`, almost six hours before the first quality event. The no-leak result above does not carry over to this data. The alert rules or this data need work before the valves can be trusted.
+
+### Cloud-based compared with edge-based
+
+`tests/test_cloud_baseline.py` (15 checks, part of `test-all`) compares the two on a simulated clock for 5 nodes, including a made-up pipe leak, and tests link outages, lost packets, restarts, old and forged messages, valve failures and the real programs with the dashboard.
+
+A separate one-off run compared all 21 nodes over the replayed day, with no packet loss:
+
+| | Edge-based | Cloud-based |
+|---|---|---|
+| Node alerts and flags | 50 | The same 50 |
+| Gateway decisions / valve moves / light changes | 48 / 21 / all | The same |
+| 15-minute summaries | 1,995 | 1,974 identical. In the other 21, one per valve closing, cloud also counts the reading from the minute the valve closed |
+| Longest alert delay in the gateway's network figures | 0 s | 5 s (one simulation step) |
+| Data sent by the nodes / by the gateway | 83 kB / 297 kB | 1,368 kB / 1,060 kB |
+| Shared radio channel busy (estimate) | 1.3% | 6.6% |
+| Airtime per flat / gateway, seconds per hour (limit 360 each) | 0.33-0.35 / 39 | 5.6 / 118 |
+
+Matching results mean the false alarms above happen in both. Radio figures are estimates from packet sizes: collisions, range and loss are not simulated. A cloud-based node that cannot reach the gateway changes no valve.
+
 ## What Each Folder & File Contains
 
 | Folder / File | What is inside it (in simple terms) |
@@ -71,13 +154,13 @@ The comparisons against the baselines planned in [`planning/experiments.md`](pla
 | `gateway/` | The Python code for the laptop gateway (`core.py`, `analytics.py`). The gateway reads the building's pipes and valves as a tree of nodes from `gateway/building_B.json` (schema in `gateway/README.md`). `edge_based.py` is the edge-based gateway server; `cloud_based.py`, which Docker Compose (`compose.yaml`) runs on this branch, is the same server with every node's checks run on it (`cloud_host.py`) |
 | `hal/` | Radio packets and SX1278 433 MHz settings (`packet.py`, `lora433.py`) and the hardware adapters (`pi_hal.py`) so the same detection code runs unchanged in simulation and on the Pi; placeholder for the gateway's ESP8266 passthrough |
 | `compose.yaml`, `Dockerfile`, `.env.example` | Docker Compose setup for the building's computer: cloud-based gateway server, MQTT broker and dashboard server ([how to run](gateway/README.md#run-with-docker-compose)). `compose.esp8266.yaml` adds the radio modem |
-| `Dockerfile.edge` | Image of a virtual node: `compose.yaml` runs [one or three](edge/README.md#run-virtual-nodes) |
+| `Dockerfile.edge` | Image of a virtual node: `compose.yaml` runs [four](edge/README.md#run-virtual-nodes) |
 | `comms/` | How the Pi and gateway communicate: the specification (`comms/README.md`) and the code for its MQTT topics and publishing |
 | `detection/` | The three detection subsystems: `quality/` (IS 10500 + `int8` TinyML), `leakage/` (flow/pressure rules + mass balance) and `consumption/` (statistical + Lempel–Ziv) |
 | `detection/quality/` | Offline training, quantization, and testing code for the water-quality neural network (`train_quality.py`, `results.txt`). Holds `quality_model.py` and produces `quality_model.json` for `edge/` |
 | `detection/leakage/` | Standalone leak-rule comparison scripts (`compare_leaks.py`) and documentation comparing flow-based and pressure-based leak detection |
 | `detection/consumption/` | Abnormal water-consumption detection experiments (spikes, night bursts, prolonged zero flow, and Paper [3] Lempel–Ziv compression-rate analytics), scored separately from leaks |
-| `dashboard/` | Buffered gateway-to-dashboard shipper and the ingest and read API server ([how to run](dashboard/README.md#running-it)). The web page is not written yet |
+| `dashboard/` | Buffered gateway-to-dashboard shipper and the ingest and read API server ([how to run](dashboard/README.md#running-it)). The web page is in `dashboard/frontend/` |
 | `tests/` | Gateway analytics tests and the unified runtime replay and benchmark |
 | `tasks/` | The functions behind the `uv run` scripts above |
 | `simulation/` | Everything that models the physical world: EPANET/WNTR pipe network (`scripts/`), real-time 21-node + LoRa radio simulator (`live/`), ns-3 LoRaWAN check (`ns3/`), and parked 3D simulator (`webots/`) |
@@ -118,9 +201,7 @@ uv run --no-default-groups --extra pi prod-node-service B-203 --keys /home/pi/ke
 
 `prod-node-service` checks the node, key and data files, then **only prints** a systemd service and the commands that install it, which need `sudo`. `--csv` has no default, so the simulated data is never used by accident. Add `--tree` for another building and `--user` if the account is not `pi`.
 
-Without containers, `uv run prod-edge-gateway` and `uv run dashboard-server` run the two programs in the foreground; `uv run prod-edge-edge` does the same for a node. The two `prod-edge-*` scripts take their settings from `.env` (see `.env.example`): the gateway uses `GATEWAY_KEYS`, `GATEWAY_TREE` and `GATEWAY_SERIAL`; a node needs `NODE_NAME`, `NODE_KEYS` and `NODE_CSV`, and can set `NODE_SD` and `NODE_SLOT`. Options typed on the command line win; a node name goes first. The `edge-based-*` scripts do not read `.env`.
-
-For this branch's solution without containers, use `uv run prod-cloud-gateway` and `uv run prod-cloud-edge`. The cloud-based gateway keeps its state in its own folder (`cloud-gateway-data`) and Compose volumes, apart from an edge-based deployment's: deploying here neither reads nor deletes the edge-based data.
+**In the foreground**, without containers or a service, use `uv run prod-cloud-gateway`, `uv run dashboard-server` and, on a Pi, `uv run prod-cloud-edge`. They take the same options as `cloud-based-gateway` and `cloud-based-node` (`--help`). `uv run prod-edge-gateway` and `uv run prod-edge-edge` run the edge-based programs the same way. None of these reads `.env`. The cloud-based gateway keeps its state in its own folder (`cloud-gateway-data`) and Compose volumes, apart from an edge-based deployment's: deploying here neither reads nor deletes the edge-based data.
 
 ## Python setup
 

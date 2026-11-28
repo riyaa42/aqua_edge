@@ -855,11 +855,11 @@ def check_gpio_pins_and_failed_sensor():
 
 
 def check_part_of_a_building_is_no_pipe_leak():
-    """The three-node tree: the tank also feeds homes with no node, which is not a pipe leak. The same
+    """The four-node tree: the tank also feeds homes with no node, which is not a pipe leak. The same
     tree without saying so would report one."""
-    volumes = {"B-TANK": 100.0, "B-203": 5.0, "B-101": 5.0}
+    volumes = {"B-TANK": 100.0, "B-101": 5.0, "B-203": 5.0, "B-301": 5.0}
     for unmetered in (True, False):
-        data = json.load(open(os.path.join(ROOT, "gateway", "virtual_3node.json")))
+        data = json.load(open(os.path.join(ROOT, "gateway", "virtual_4node.json")))
         data["root"]["unmetered_homes"] = unmetered
         hal = Hal("GATEWAY", wall=UTC_MIDNIGHT_IST)
         gw = Gateway(hal, Topology(data))
@@ -869,7 +869,7 @@ def check_part_of_a_building_is_no_pipe_leak():
             hal.inbox += [pack({"k": "SUM", "n": n, "s": 10 * i + k + 1, "t": hal.now(), "i": first + i, "vol_l": v},
                                sim_key(n)) for k, (n, v) in enumerate(volumes.items())]
             gw.step()
-        assert len(gw.log) == 9, len(gw.log)
+        assert len(gw.log) == 12, len(gw.log)
         assert ("PIPE_LEAK" in [e["event"] for e in gw.events]) == (not unmetered), gw.events
 
 

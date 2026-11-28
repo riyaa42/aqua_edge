@@ -10,7 +10,7 @@
 | `readings.py` | Gateway | Leaves out [readings](#the-gateway-node) that cannot be true |
 | `flags.py` | Gateway | [Levels and expected lights](#the-gateway-node) for the dashboard, by the valve spec |
 | `order.py` | Gateway | Command that sends a node a [valve or alert-LED order](#orders-to-a-node) |
-| `virtual_1node.json`, `virtual_3node.json` | Gateway | Trees for the [virtual-node demos](../edge/README.md#run-virtual-nodes) |
+| `virtual_4node.json` | Gateway | Tree for the [four virtual nodes](../edge/README.md#run-virtual-nodes) |
 | `mosquitto/` | Gateway | The MQTT broker's settings and access rules, used by [Docker Compose](#run-with-docker-compose) |
 | `cloud_based.py` + `cloud_host.py` | Gateway | Server entry point, [cloud-based solution](#the-cloud-based-gateway) (the control case): nodes only stream readings, and every detector and decision runs here. `uv run prod-cloud-gateway` (same as `cloud-based-gateway`), and what [Docker Compose](#run-with-docker-compose) runs on this branch. Not tested on real hardware |
 

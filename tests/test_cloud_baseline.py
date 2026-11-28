@@ -414,8 +414,8 @@ def check_programs_end_to_end():
     root, port, udp = folder(), free_port(), free_udp_port()
     keys = os.path.join(root, "keys.json")
     with open(keys, "w") as f:
-        json.dump({n: sim_key(n).hex() for n in ("GATEWAY", LEAK)}, f)
-    tree = os.path.join(ROOT, "gateway", "virtual_1node.json")
+        json.dump({n: sim_key(n).hex() for n in ("GATEWAY", "B-TANK", "B-101", "B-203", "B-301")}, f)
+    tree = os.path.join(ROOT, "gateway", "virtual_4node.json")
     data, sd = os.path.join(root, "gateway"), os.path.join(root, "node")
     logs = {name: os.path.join(root, f"{name}.log") for name in ("gateway", "node")}
     env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1", "AQUA_DASHBOARD_TOKEN": GATEWAY_TOKEN}

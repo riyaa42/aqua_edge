@@ -1,0 +1,5 @@
+{"schema_version": 1, "building": "virtual-4",
+ "root": {"id": "B-TANK", "type": "tank", "valve": true, "unmetered_homes": true, "children": [
+   {"id": "B-101", "type": "flat", "valve": true},
+   {"id": "B-203", "type": "flat", "valve": true},
+   {"id": "B-301", "type": "flat", "valve": true}]}}

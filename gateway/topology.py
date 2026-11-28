@@ -156,9 +156,10 @@ if __name__ == "__main__":
         assert feeds == {n: b.parent[n] for n in b.flats}, "tree differs from the water model's pipes"
 
     assert not b.unmetered_homes
-    one, three = (Topology.load(os.path.join(_GW_DIR, f"virtual_{n}.json")) for n in ("1node", "3node"))
+    one = Topology({"schema_version": 1, "building": "one", "root": {"id": "B-203", "type": "flat", "valve": True}})
     assert one.tank is None and one.devices == {"B-203"} and not one.unmetered_homes
-    assert three.devices == {"B-TANK", "B-203", "B-101"} and three.unmetered_homes
+    four = Topology.load(os.path.join(_GW_DIR, "virtual_4node.json"))
+    assert four.devices == {"B-TANK", "B-101", "B-203", "B-301"} and four.unmetered_homes
 
     some = b.only(["B-401", "B-101"])
     assert some.flats == {"B-401", "B-101"} and list(some.labels) == ["4", "3", "2", "1"]
