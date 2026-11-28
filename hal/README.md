@@ -241,7 +241,7 @@ Real nodes need a key file with this node's key and the `GATEWAY` key: see [Sett
 | With uv | With system Python | What it does |
 |---|---|---|
 | `uv run pi-radio-test` | `python3 -m hal.lora_pi --radio-test` | Checks the module is found, sends one test packet, listens 10 s |
-| `uv run prod-edge-edge B-203 --keys <file> --sd <folder> --slot 5 20` | `python3 -m edge.edge_based B-203 ...` | Runs a node in real time. Add `--step-s 1` for a fast demo |
+| `uv run --no-default-groups --extra pi prod-edge-edge` | `python3 -m edge.edge_based B-203 --keys <file> ...` | Runs this Pi's node in real time ([settings](../README.md#deploy)). Add `--step-s 1` for a fast demo |
 | `uv run python -m hal.lora_pi --check` | `python3 -m hal.lora_pi --check` | Self-check with a fake radio chip, on any computer |
 
 To check that two modules hear each other, start the radio test on one, then on the other within 10 s. The one started first prints the other's packet as hex. Swap the order to test the other direction.

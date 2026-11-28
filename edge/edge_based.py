@@ -5,7 +5,8 @@ The radio is the Pi's SX1278 (hal/pi_hal.py) or, without radio hardware, the net
 Setup: hal/README.md, "Running on the Pi", or edge/README.md, "Run virtual nodes". Not tested on
 real hardware.
 
-    uv run prod-edge-edge B-203 --keys aqua_keys.json --sd /home/pi/aqua --slot 5 20       # on a Pi
+    uv run prod-edge-edge                                          # on a Pi, set up from ~/*keys.json
+    uv run edge-based-node B-203 --keys aqua_keys.json --sd /home/pi/aqua --slot 5 20      # all given
     python3 -m edge.edge_based B-203 --keys aqua_keys.json --sd /home/pi/aqua --slot 5 20   # without uv
     python3 -m edge.edge_based B-203 --keys aqua_keys.json --sd ./b203 \\
         --radio udp --gateway 127.0.0.1:1700 --actuators sim --prime-s 86400               # no hardware
@@ -91,13 +92,14 @@ def make_node(name, board, topology=None):
     return TankNode(name, board) if name == topology.tank else FlatNode(name, board)
 
 
-def parse_args(argv=None):
+def parse_args(argv=None, complete=None):
+    """complete(args), if given, may fill in a missing name or key file (tasks/prod.py)."""
     env = os.environ.get
     ap = argparse.ArgumentParser(description="Run an Aqua Edge node (edge-based solution).")
-    ap.add_argument("name", help="node name, e.g. B-203 or B-TANK")
+    ap.add_argument("name", nargs="?", help="node name, e.g. B-203 or B-TANK")
     ap.add_argument("--tree", default=env("AQUA_TOPOLOGY_PATH") or BUILDING_B,
                     help="the building tree the gateway uses: the node's type and any custom radio number")
-    ap.add_argument("--keys", required=True, help="key file (see load_keys in hal/packet.py)")
+    ap.add_argument("--keys", help="key file (see load_keys in hal/packet.py)")
     ap.add_argument("--csv", default=DATASET, help="sensor dataset, one row per minute (sensors/)")
     ap.add_argument("--sd", default=os.path.join(HERE, "sd"), help="folder for the queue and saved state")
     ap.add_argument("--slot", nargs=2, type=int, metavar=("INDEX", "COUNT"), help="time slot, e.g. 5 20")
@@ -119,11 +121,17 @@ def parse_args(argv=None):
                     help="flats: after hours shut by their own alert, reopen to see whether the water "
                          "stops, and shut again if not. Water may run through a leak meanwhile")
     ap.add_argument("--exit-at-end", action="store_true", help="stop when the data ends")
-    return ap.parse_args(argv), ap
+    a = ap.parse_args(argv)
+    if complete:
+        complete(a)
+    missing = [option for option, value in (("name", a.name), ("--keys", a.keys)) if not value]
+    if missing:
+        ap.error(f"the following arguments are required: {', '.join(missing)}")
+    return a, ap
 
 
-def main(argv=None):
-    a, ap = parse_args(argv)
+def main(argv=None, complete=None):
+    a, ap = parse_args(argv, complete)
     try:
         topology = Topology.load(a.tree)
         add_names(topology.radio_ids)           # before load_keys, which refuses unknown names
@@ -149,8 +157,9 @@ def main(argv=None):
         ap.error(str(e))
     try:
         radio = UdpRadio(*address) if address else open_radio()
-    except OSError as e:
-        ap.error(f"radio: {e}")
+    except Exception as e:      # gpiozero's errors (no usable GPIO) are not OSError
+        ap.error(f"radio: {e} (on a Pi: is SPI on, and may this account use GPIO and SPI? "
+                 "hal/README.md. Without a radio: --radio udp --actuators sim)")
     board = NodeBoard(a.name, radio, get_readings, storage, keys,
                       slot=tuple(a.slot) if a.slot else None, step_s=a.step_s, gpio=a.actuators == "gpio")
     node = make_node(a.name, board, topology)

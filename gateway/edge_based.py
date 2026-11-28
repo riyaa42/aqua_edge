@@ -5,7 +5,7 @@ both. It publishes what it hears and decides over MQTT (comms/), sends snapshots
 (dashboard_link.py), and passes on an operator's orders to nodes (order.py, and the dashboard's
 reopen button). It has no sensors: it works from what the nodes send.
 
-    uv run prod-edge-gateway --keys gateway_keys.json --data gateway-data --port /dev/ttyUSB0
+    uv run prod-edge-gateway                      # settings from .env (tasks/prod.py)
     python3 -m gateway.edge_based --keys gateway_keys.json --data gateway-data --port /dev/ttyUSB0
     python3 -m gateway.edge_based ... --mqtt-host 127.0.0.1 --mqtt-user gateway    # password: MQTT_PASSWORD
 

@@ -420,8 +420,50 @@ def check_button_to_valve_end_to_end():
         shutil.rmtree(folder, ignore_errors=True)
 
 
+def check_prod_runner_setup():
+    """prod-edge-edge and prod-edge-gateway fill in what they are not told."""
+    from edge.edge_based import parse_args
+    with tempfile.TemporaryDirectory() as home:
+        def write(name, *nodes):
+            path = os.path.join(home, name)
+            with open(path, "w") as f:
+                json.dump({n: "00" * 16 for n in nodes}, f)
+            return path
+
+        def refused(*args):
+            try:
+                prod.find_node_keys(*args)
+            except ValueError as e:
+                return str(e)
+            raise AssertionError(f"accepted {args}")
+
+        write("gateway_keys.json", "GATEWAY", "B-101", "B-203")
+        assert "no node key file" in refused(None, home)
+        own = write("B-203_keys.json", "GATEWAY", "B-203")
+        assert prod.find_node_keys(None, home) == ("B-203", own)
+        write("B-101_keys.json", "GATEWAY", "B-101")
+        assert "several" in refused(None, home)
+        assert prod.find_node_keys("B-203", home) == ("B-203", own)
+        # a name left out is read from the key file; one given is kept
+        old = dict(os.environ)
+        try:
+            os.environ.pop("AQUA_NODE", None)
+            os.environ["AQUA_KEYS"] = own
+            fill = lambda a: prod.complete_node(a)
+            assert parse_args(["--radio", "udp", "--actuators", "sim"], fill)[0].name == "B-203"
+            assert parse_args(["B-101", "--radio", "udp", "--actuators", "sim"], fill)[0].name == "B-101"
+            os.environ.update(GATEWAY_KEYS="/k/gateway_keys.json", GATEWAY_TREE="./gateway/building_B.json")
+            os.environ.pop("AQUA_TOPOLOGY_PATH", None)
+            argv = prod.gateway_defaults()
+            assert argv[argv.index("--keys") + 1] == "/k/gateway_keys.json"
+            assert os.path.isfile(argv[argv.index("--tree") + 1])      # relative to the repository
+        finally:
+            os.environ.clear()
+            os.environ.update(old)
+
+
 if __name__ == "__main__":
-    for check in (check_deploy_guards, check_bad_readings_are_left_out, check_levels_and_lights, check_old_reopen_orders,
+    for check in (check_prod_runner_setup, check_deploy_guards, check_bad_readings_are_left_out, check_levels_and_lights, check_old_reopen_orders,
                   check_reopen_api, check_gateway_collects_requests, check_requests_through_the_threads,
                   check_button_to_valve_end_to_end):
         check()

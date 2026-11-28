@@ -1,5 +1,8 @@
 """The production scripts (README.md, "Deploy"):
 
+    uv run prod-edge-edge          a Pi: its node, in the foreground
+    uv run prod-edge-gateway       the building computer: the gateway alone, without containers
+
     uv run prod-up [--no-modem]     the building computer: gateway, MQTT broker and dashboard, in containers
     uv run prod-status / prod-logs / prod-down
     uv run prod-node-service ...    a Pi: prints a systemd service that keeps its node running
@@ -9,6 +12,8 @@ nodes), and waits until the dashboard has heard from the gateway. No script prin
 none deletes data. Standard library and the project's own modules only.
 """
 import argparse
+import glob
+import importlib.util
 import json
 import os
 import posixpath
@@ -138,6 +143,124 @@ def status():
 
 def logs():
     sys.exit(compose("logs", *(sys.argv[1:] or ["-f"])))
+
+
+# --- the two programs in the foreground ---
+# Both take the same options as the developer scripts. What is not given comes from the
+# environment or .env, then from the defaults here.
+def load_env():
+    """Put .env into the environment. What is already there wins; empty values count as unset."""
+    for name, value in settings().items():
+        if value:
+            os.environ.setdefault(name, value)
+
+
+def configured_path(value):
+    """A path from the environment or .env: relative ones start at the repository, as for Compose."""
+    return os.path.join(ROOT, os.path.expanduser(value))
+
+
+def need(script, extra, modules):
+    """Start `script` again with the optional libraries of `extra`, if any are missing."""
+    missing = [m for m in modules if importlib.util.find_spec(m) is None]
+    if not missing:
+        return
+    uv = os.environ.get("UV") or shutil.which("uv")
+    if not uv or os.environ.get("AQUA_PROD_RESTARTED"):
+        sys.exit(f"{script}: not installed: {', '.join(missing)}. Run: uv sync --no-default-groups --extra {extra}")
+    print(f"{script}: installing the '{extra}' libraries ({', '.join(missing)} missing)", flush=True)
+    os.environ["AQUA_PROD_RESTARTED"] = "1"
+    os.execv(uv, [uv, "run", "--project", ROOT, "--no-default-groups", "--extra", extra, script, *sys.argv[1:]])
+
+
+def key_names(path):
+    """The names in a key file, or an empty set if it cannot be read as one."""
+    try:
+        with open(path) as f:
+            return set(json.load(f))
+    except (OSError, ValueError, TypeError):
+        return set()
+
+
+def find_node_keys(name=None, home="~"):
+    """This Pi's node and key file, from the key files in the home folder: a node's own file holds
+    its key and GATEWAY's only (hal/README.md). ValueError unless exactly one fits."""
+    home = os.path.expanduser(home)
+    found = []
+    for path in sorted(glob.glob(os.path.join(glob.escape(home), "*keys.json"))):
+        names = key_names(path)
+        nodes = names - {"GATEWAY"}
+        if "GATEWAY" in names and len(nodes) == 1 and (name is None or name in nodes):
+            found.append((nodes.pop(), path))
+    if len(found) == 1:
+        return found[0]
+    what = f"for {name} " if name else ""
+    if not found:
+        raise ValueError(f"no node key file {what}in {home} (a file ending in keys.json with this node's key "
+                         "and GATEWAY: hal/README.md, \"Setting up keys\"). Or set AQUA_NODE and AQUA_KEYS in .env")
+    raise ValueError(f"several node key files {what}in {home}: {', '.join(p for _, p in found)}. "
+                     "Set AQUA_NODE and AQUA_KEYS in .env")
+
+
+def complete_node(a):
+    """Fill in what prod-edge-edge was not told: the node's name and its key file."""
+    a.name = a.name or os.environ.get("AQUA_NODE")
+    if not a.keys and os.environ.get("AQUA_KEYS"):
+        a.keys = configured_path(os.environ["AQUA_KEYS"])
+    try:
+        if not a.keys:
+            name, a.keys = find_node_keys(a.name)
+            a.name = a.name or name
+        elif not a.name:
+            nodes = key_names(a.keys) - {"GATEWAY"}
+            if len(nodes) != 1:
+                raise ValueError(f"cannot tell which node this is from {a.keys}: give its name, or set AQUA_NODE")
+            a.name = nodes.pop()
+    except ValueError as e:
+        sys.exit(f"prod-edge-edge: {e}")
+    modules = ["spidev"] if a.radio == "lora" else []
+    if a.radio == "lora" or a.actuators == "gpio":     # the radio's reset pin is GPIO too
+        modules += ["gpiozero"] + (["lgpio"] if sys.platform == "linux" else [])
+    need("prod-edge-edge", "pi", modules)
+    from edge.sensors import DATASET
+    if a.actuators == "gpio" and os.path.abspath(a.csv) == os.path.abspath(DATASET):
+        print("WARNING: no sensor drivers yet. This REPLAYS the simulated data and moves the real valve "
+              "by it: do not connect a water supply", flush=True)
+    print(f"node {a.name}, keys {a.keys}, saved state in {a.sd}", flush=True)
+
+
+def edge_node():
+    from edge import edge_based
+    load_env()
+    defaults = ["--sd", configured_path(os.environ.get("AQUA_SD") or os.path.join("~", "aqua"))]
+    if os.environ.get("AQUA_CSV"):
+        defaults += ["--csv", configured_path(os.environ["AQUA_CSV"])]
+    if os.environ.get("AQUA_SLOT"):
+        defaults += ["--slot", *os.environ["AQUA_SLOT"].split()]
+    edge_based.main(defaults + sys.argv[1:], complete=complete_node)   # given options come last, so win
+
+
+def gateway_defaults():
+    """The gateway's options from the same settings prod-up uses (.env.example)."""
+    env = os.environ.get
+    keys = env("GATEWAY_KEYS") or os.path.join("~", "gateway_keys.json")
+    defaults = ["--keys", configured_path(keys), "--data", configured_path(env("GATEWAY_DATA") or "gateway-data"),
+                "--port", env("AQUA_RADIO_PORT") or env("GATEWAY_SERIAL") or "/dev/ttyUSB0"]
+    tree = env("AQUA_TOPOLOGY_PATH") or env("GATEWAY_TREE")
+    return defaults + (["--tree", configured_path(tree)] if tree else [])
+
+
+def edge_gateway():
+    from gateway import edge_based
+    load_env()
+    argv = gateway_defaults() + sys.argv[1:]
+    a = edge_based.parse_args(argv)
+    if not os.path.isfile(a.keys):
+        sys.exit(f"prod-edge-gateway: no key file at {a.keys}: set GATEWAY_KEYS in .env or give --keys "
+                 "(hal/README.md, \"Setting up keys\")")
+    modules = (["serial"] if a.port != "none" else []) + (["paho"] if a.mqtt_host else [])
+    need("prod-edge-gateway", "gateway", modules)
+    edge_based.main(argv)
 
 
 # --- a Pi ---

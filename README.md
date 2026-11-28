@@ -115,7 +115,17 @@ uv run --no-default-groups --extra pi prod-node-service B-203 --keys /home/pi/ke
 
 `prod-node-service` checks the node, key and data files, then **only prints** a systemd service and the commands that install it, which need `sudo`. `--csv` has no default, so the simulated data is never used by accident. Add `--tree` for another building and `--user` if the account is not `pi`.
 
-Without containers, `uv run prod-edge-gateway` and `uv run dashboard-server` run the two programs in the foreground; `uv run prod-edge-edge` does the same for a node.
+**In the foreground**, without containers or a service:
+
+```sh
+uv run --no-default-groups --extra pi prod-edge-edge              # on a Pi
+uv run --no-default-groups --extra gateway prod-edge-gateway      # the building computer
+```
+
+Both install their hardware libraries if they are missing (this needs a network, and on a Pi `sudo apt install build-essential python3-dev` first). `--no-default-groups` stops uv installing the research libraries. They take the same options as `edge-based-node` and `edge-based-gateway`; what is not given comes from the environment or `.env`:
+
+- **Node:** with only this Pi's key file in the home folder (any name ending in `keys.json`, holding the node's key and `GATEWAY`), nothing else is needed: the node's name is read from it. Otherwise set `AQUA_NODE` and `AQUA_KEYS`. Saved state goes to `AQUA_SD` (default `~/aqua`). `AQUA_CSV` and `AQUA_SLOT` (`"5 20"`) are optional. **Without `AQUA_CSV` or `--csv` it replays the simulated data and moves the real valve by it**, and warns you.
+- **Gateway:** see [Running the server](gateway/README.md#running-the-server). `uv run dashboard-server` runs the dashboard.
 
 ## Python setup
 

@@ -124,9 +124,10 @@ The server needs a key file holding `GATEWAY` and every node in the building tre
 Without Docker, from the repository root:
 
 ```sh
-uv sync --extra gateway
-uv run prod-edge-gateway --keys /full/path/gateway_keys.json --data gateway-data --port /dev/ttyUSB0
+uv run --no-default-groups --extra gateway prod-edge-gateway
 ```
+
+It takes `GATEWAY_KEYS` (default `~/gateway_keys.json`), `GATEWAY_TREE` and `GATEWAY_SERIAL` from the environment or `.env`, keeps its state in `GATEWAY_DATA` (default `gateway-data/` in the repository) and installs the `gateway` libraries if they are missing. Options given on the command line win: `--keys`, `--data`, `--port` and the rest, as for `edge-based-gateway`.
 
 `--udp-listen 127.0.0.1:1700` also takes nodes over the network (`../hal/udp.py`), and `--port none` runs without the ESP8266.
 
