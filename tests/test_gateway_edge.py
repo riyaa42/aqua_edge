@@ -80,7 +80,7 @@ def check_deploy_guards():
     assert prod.problems(good, modem=False) == []
     assert any("ESP8266" in x for x in prod.problems({**good, "GATEWAY_SERIAL": "/no/such/port"}))
     for wrong in ({"AQUA_DASHBOARD_TOKEN": "dev-token"}, {"AQUA_DASHBOARD_TOKEN": ""}, {"AQUA_OPERATOR_TOKEN": "gw"},
-                  {"AQUA_ENABLE_OUTAGE_SIM": "1"}, {"COMPOSE_PROFILES": "three-nodes"}, {"GATEWAY_KEYS": "keys.json"},
+                  {"AQUA_ENABLE_OUTAGE_SIM": "1"}, {"COMPOSE_PROFILES": "virtual-nodes"}, {"GATEWAY_KEYS": "keys.json"},
                   {"GATEWAY_KEYS": ""}, {"GATEWAY_TREE": "./no-such-tree.json"}):
         found = prod.problems({**good, **wrong}, modem=False)
         assert len(found) == 1 and "gw" not in found[0].split(), (wrong, found)
@@ -373,8 +373,8 @@ def check_button_to_valve_end_to_end():
     folder, port, udp = tempfile.mkdtemp(), free_port(), free_udp_port()
     keys = os.path.join(folder, "keys.json")
     with open(keys, "w") as f:
-        json.dump({n: sim_key(n).hex() for n in ("GATEWAY", "B-203")}, f)
-    tree = os.path.join(ROOT, "gateway", "virtual_1node.json")
+        json.dump({n: sim_key(n).hex() for n in ("GATEWAY", "B-TANK", "B-101", "B-203", "B-301")}, f)
+    tree = os.path.join(ROOT, "gateway", "virtual_4node.json")
     data, sd = os.path.join(folder, "gateway"), os.path.join(folder, "node")
     logs = {name: os.path.join(folder, f"{name}.log") for name in ("gateway", "node")}
     env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1", "AQUA_DASHBOARD_TOKEN": GATEWAY_TOKEN}

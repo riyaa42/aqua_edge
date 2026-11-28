@@ -164,13 +164,13 @@ def check_compose_files():
     assert ignored.index("!simulation/webots/data/sensors.csv") > ignored.index("**/data")
     nodes = compose[compose.index("x-node:"):]
     assert "devices:" not in nodes and '"gpio"' not in nodes and '"lora"' not in nodes
-    # one node or three, and a tree for each with exactly those nodes
+    # the four virtual nodes, one profile, and a tree with exactly those nodes
     services = dict(re.findall(r"^  (node-[a-z0-9]+):.*?\n(.*?)(?=^  \S|^\S)", compose, re.M | re.S))
-    for profile, tree in (("one-node", "virtual_1node.json"), ("three-nodes", "virtual_3node.json")):
-        started = {re.search(r'"edge\.edge_based", "([^"]+)"', body).group(1) for body in services.values()
-                   if profile in (re.search(r"profiles: \[(.+)\]", body) or
-                                  re.search(r"x-node:.*?profiles: \[(.+?)\]", compose, re.S)).group(1)}
-        assert started == Topology.load(os.path.join(ROOT, "gateway", tree)).devices, (profile, started)
+    assert re.findall(r"profiles: \[(.+?)\]", compose) == ["virtual-nodes"], "one profile, set on every node"
+    assert len(services) == 4 and all("<<: *node" in body for body in services.values()), sorted(services)
+    started = {re.search(r'"edge\.edge_based", "([^"]+)"', body).group(1) for body in services.values()}
+    tree = Topology.load(os.path.join(ROOT, "gateway", "virtual_4node.json"))
+    assert len(started) == 4 and started == tree.devices, started
     assert "allow_anonymous false" in read("gateway", "mosquitto", "mosquitto.conf")
     start = read("gateway", "mosquitto", "start.sh")        # or the broker cannot start a second time
     assert start.index('rm -rf "$dir"') < start.index("mosquitto_passwd -c")

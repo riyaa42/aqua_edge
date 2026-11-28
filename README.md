@@ -24,6 +24,8 @@ The gateway computer reaches the nodes through an ESP8266 on USB. After flashing
 
 ### Tests
 
+Latest results: [Test results](#test-results).
+
 A group runs all its checks even if one fails, then lists the failures.
 
 | Script | What it runs |
@@ -58,6 +60,70 @@ Datasets are not in the repository: see the linked README for each area.
 
 The comparisons against the baselines planned in [`planning/experiments.md`](planning/experiments.md) are not written yet, so they have no script.
 
+## Test results
+
+Run on 28 November 2026 on a Linux development computer, with simulated or replayed sensor data. **The software works from end to end, from sensor replay to dashboard and back to the valve. The detectors also raise false alarms on this replay** ([below](#detection-on-the-replayed-day)).
+
+**Not verified on hardware.** The Raspberry Pi has GPIO problems that we could not resolve, so nothing that depends on its pins is verified: the SX1278 radio on the Pi, the LEDs, buzzer and relay/valve. Tests of the software above that layer use fake or network radios, and never move a real valve. The ESP8266 modem, a real radio link, real sensors (there are no drivers yet) and Docker itself were not tested either.
+
+### Automated tests
+
+| Run | Result |
+|---|---|
+| `uv run test-all` | **29 of 29 checks passed** |
+| `uv run python -m tests.test_comms_reliability` (not part of `test-all`) | Passed |
+
+`test-all` covers packets and encryption, the radio code with fake chips, node and gateway rules, saved state and restarts, radio outages, MQTT messages (fake broker), the dashboard server, the reopen button through to the node's valve, and the detectors. `test-parity` is not included ([see above](#tests)).
+
+### Four virtual nodes, one gateway and dashboard
+
+Podman 6.2.1 and `podman-compose`, `--profile virtual-nodes`, `NODE_STEP_S=0.4`, with new random keys. Times are from when `up` returned. Each node learns day 1 by itself at once.
+
+| Node | Dashboard showed its valve closed | Cause on this data |
+|---|---|---|
+| `B-TANK` | Yes, after 8 s | `QUALITY_TEMPORAL_ANOMALY`, before any planted event |
+| `B-101` | Yes, after 193 s | `LEAK_CONTINUOUS_FLOW`, **false alarm** |
+| `B-203` | Yes, after 60 s | `LEAK_NIGHT_FLOW`, planted leak |
+| `B-301` | Yes, after 193 s | `LEAK_CONTINUOUS_FLOW`, **false alarm** |
+
+- The dashboard received all four nodes in frames marked `edge`; the broker, gateway, dashboard and all four node containers stayed up.
+- Reopening `B-203` through the dashboard API was accepted (HTTP 202), and the node reported its valve open 2 s later.
+- The web page and health endpoint answered with HTTP 200 (the page's display was not checked in a browser).
+- The gateway logged no bad packets or crashes. At startup it logged refused connections until the dashboard was up.
+
+The causes were not read from the container run. They come from replaying the same data through the same node and gateway code on a simulated clock, with a one-off script that is not in the repository.
+
+### Leak and consumption tests
+
+From `test-all`, on simulated water-network data:
+
+| Case | Result |
+|---|---|
+| Leak in flat B-203, small | Detected after 180 min (continuous flow) |
+| Leak in flat B-203, medium and large | Detected after 10 min (pressure drop) |
+| Other flats during those three leaks | No leak alerts |
+| 48 hours without a leak | No flat or pipe leak alerts |
+| Pipe leaks: 5 places, medium and large | All 10 detected after 30 min |
+| Finding the leaking floor | The test's score: first choice right in 6 of 10, in the first two in 7 of 10. It named a floor only for the 5 large leaks |
+| Regression scenarios, and offline and supply scenarios | 8 of 8 and 8 of 8 passed |
+| Abnormal-consumption integration tests | 5 of 5 passed |
+
+### Detection on the replayed day
+
+From the same kind of one-off replay: all 21 nodes of building B, on day 2 of `simulation/webots/data/sensors.csv` (a different data set from the table above). The replay cannot react to a closed valve.
+
+| Planted event | Result |
+|---|---|
+| 02:00 leak in flat B-203 | Detected at 02:29 |
+| 06:00 runoff in the tank | Detected at 06:02 |
+| 09:00 power cut to the pump | Low supply reported at 13:49, recovery at 17:14 |
+| 18:00 pipe burst | **No pipe-leak alert.** The tank valve had been shut since 00:17, so this replay does not show whether the burst would be found |
+| 20:00 chemical contamination | Detected at 20:03 |
+
+**All 21 valves closed.** The 19 flats without a planted leak all closed between 07:59 and 08:59 on `LEAK_CONTINUOUS_FLOW`, and the tank closed at 00:17 on `QUALITY_TEMPORAL_ANOMALY`, almost six hours before the first quality event. The no-leak result above does not carry over to this data. The alert rules or this data need work before the valves can be trusted.
+
+**Known issue:** trial reopening (`--trial-reopen`, off by default and in the runs above) does not work where the node has a separate monotonic clock, as the real node programs do: the first radio poll fails the trial with "the readings stopped". `radio_poll()` in `edge/aqua_edge.py` passes the wall time to `check_trial_watched()`, which expects the monotonic time. This is fixed on the `cloud-baseline` branch.
+
 ## What Each Folder & File Contains
 
 | Folder / File | What is inside it (in simple terms) |
@@ -70,13 +136,13 @@ The comparisons against the baselines planned in [`planning/experiments.md`](pla
 | `gateway/` | The Python code for the laptop gateway (`core.py`, `analytics.py`). The gateway reads the building's pipes and valves as a tree of nodes from `gateway/building_B.json` (schema in `gateway/README.md`). `edge_based.py` is the edge-based gateway server, also run with Docker Compose (`compose.yaml`); `cloud_based.py` is a placeholder |
 | `hal/` | Radio packets and SX1278 433 MHz settings (`packet.py`, `lora433.py`) and the hardware adapters (`pi_hal.py`) so the same detection code runs unchanged in simulation and on the Pi; placeholder for the gateway's ESP8266 passthrough |
 | `compose.yaml`, `Dockerfile`, `.env.example` | Docker Compose setup for the building's computer: gateway server, MQTT broker and dashboard server ([how to run](gateway/README.md#run-with-docker-compose)). `compose.esp8266.yaml` adds the radio modem |
-| `Dockerfile.edge` | Image of a virtual node: `compose.yaml` runs [one or three](edge/README.md#run-virtual-nodes) |
+| `Dockerfile.edge` | Image of a virtual node: `compose.yaml` runs [four](edge/README.md#run-virtual-nodes) |
 | `comms/` | How the Pi and gateway communicate: the specification (`comms/README.md`) and the code for its MQTT topics and publishing |
 | `detection/` | The three detection subsystems: `quality/` (IS 10500 + `int8` TinyML), `leakage/` (flow/pressure rules + mass balance) and `consumption/` (statistical + Lempel–Ziv) |
 | `detection/quality/` | Offline training, quantization, and testing code for the water-quality neural network (`train_quality.py`, `results.txt`). Holds `quality_model.py` and produces `quality_model.json` for `edge/` |
 | `detection/leakage/` | Standalone leak-rule comparison scripts (`compare_leaks.py`) and documentation comparing flow-based and pressure-based leak detection |
 | `detection/consumption/` | Abnormal water-consumption detection experiments (spikes, night bursts, prolonged zero flow, and Paper [3] Lempel–Ziv compression-rate analytics), scored separately from leaks |
-| `dashboard/` | Buffered gateway-to-dashboard shipper and the ingest and read API server ([how to run](dashboard/README.md#running-it)). The web page is not written yet |
+| `dashboard/` | Buffered gateway-to-dashboard shipper and the ingest and read API server ([how to run](dashboard/README.md#running-it)). The web page is in `dashboard/frontend/` |
 | `tests/` | Gateway analytics tests and the unified runtime replay and benchmark |
 | `tasks/` | The functions behind the `uv run` scripts above |
 | `simulation/` | Everything that models the physical world: EPANET/WNTR pipe network (`scripts/`), real-time 21-node + LoRa radio simulator (`live/`), ns-3 LoRaWAN check (`ns3/`), and parked 3D simulator (`webots/`) |

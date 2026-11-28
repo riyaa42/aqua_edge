@@ -10,7 +10,7 @@
 | `readings.py` | Gateway | Leaves out [readings](#the-gateway-node) that cannot be true |
 | `flags.py` | Gateway | [Levels and expected lights](#the-gateway-node) for the dashboard, by the valve spec |
 | `order.py` | Gateway | Command that sends a node a [valve or alert-LED order](#orders-to-a-node) |
-| `virtual_1node.json`, `virtual_3node.json` | Gateway | Trees for the [virtual-node demos](../edge/README.md#run-virtual-nodes) |
+| `virtual_4node.json` | Gateway | Tree for the [four virtual nodes](../edge/README.md#run-virtual-nodes) |
 | `mosquitto/` | Gateway | The MQTT broker's settings and access rules, used by [Docker Compose](#run-with-docker-compose) |
 | `cloud_based.py` | Gateway | Server entry point, cloud-based solution: nodes only buffer and stream sensor data, and all ML and every decision happen on this side. Will reach the LoRa antenna through an ESP8266. `uv run cloud-based-gateway`. **Placeholder, not implemented yet** |
 

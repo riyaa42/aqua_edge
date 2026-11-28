@@ -103,33 +103,37 @@ The light stays red until the alert clears by its usual recovery rule, even whil
 
 ## Run virtual nodes
 
-`Dockerfile.edge` and the root `compose.yaml` run one or three virtual nodes next to the [gateway, broker and dashboard](../gateway/README.md#run-with-docker-compose). They replay the dataset, send the same encrypted packets over the Compose network (`../hal/udp.py`, port not published), and **only log** what their LEDs and valve would do. This image is not for a Raspberry Pi: [run the node directly there](../hal/README.md#running-on-the-pi).
+`Dockerfile.edge` and the root `compose.yaml` run four virtual nodes next to the [gateway, broker and dashboard](../gateway/README.md#run-with-docker-compose). They replay the dataset, send the same encrypted packets over the Compose network (`../hal/udp.py`, port not published), and **only log** what their LEDs and valve would do. This image is not for a Raspberry Pi: [run the node directly there](../hal/README.md#running-on-the-pi).
 
-| Profile | Nodes | `GATEWAY_TREE` |
+There is one setup: the `virtual-nodes` profile starts all four against one gateway and dashboard, with the tree `gateway/virtual_4node.json`.
+
+| Node | Planted in the data | What its valve does on day 2 (data time) |
 |---|---|---|
-| `one-node` | `B-203` (the flat with the planted night leak) | `./gateway/virtual_1node.json` |
-| `three-nodes` | `B-203`, `B-101` (no planted leak; closes on a continuous-flow alert) and `B-TANK` | `./gateway/virtual_3node.json` |
+| `B-TANK` | Water-quality events from 06:00 | Closes at 00:17 on `QUALITY_TEMPORAL_ANOMALY`, **before any planted event** |
+| `B-101` | No flat leak | Closes at 07:59 on `LEAK_CONTINUOUS_FLOW`, **a false alarm** |
+| `B-203` | A leak from 02:00 | Closes at 02:29 on `LEAK_NIGHT_FLOW` |
+| `B-301` | No flat leak | Closes at 07:59 on `LEAK_CONTINUOUS_FLOW`, **a false alarm** |
 
 1. [Make the gateway's key file](../hal/README.md#setting-up-keys), then one file per node:
    ```sh
-   for n in B-203 B-101 B-TANK; do (umask 077; uv run python -c 'import json, sys; k = json.load(open(sys.argv[1])); print(json.dumps({n: k[n] for n in (sys.argv[2], "GATEWAY")}))' ~/gateway_keys.json $n > ~/${n}_keys.json); done
+   for n in B-TANK B-101 B-203 B-301; do (umask 077; uv run python -c 'import json, sys; k = json.load(open(sys.argv[1])); print(json.dumps({n: k[n] for n in (sys.argv[2], "GATEWAY")}))' ~/gateway_keys.json $n > ~/${n}_keys.json); done
    ```
-2. In `.env`, set the [gateway's settings](../gateway/README.md#run-with-docker-compose), `GATEWAY_TREE` as above, and `NODE_B203_KEYS`, `NODE_B101_KEYS` and `NODE_TANK_KEYS` (full paths; one node needs only the first).
+2. In `.env`, set the [gateway's settings](../gateway/README.md#run-with-docker-compose), `GATEWAY_TREE=./gateway/virtual_4node.json`, and `NODE_TANK_KEYS`, `NODE_B101_KEYS`, `NODE_B203_KEYS` and `NODE_B301_KEYS` (full paths).
 3. Start, watch, order and stop:
    ```sh
-   docker compose --profile three-nodes up -d --build
+   docker compose --profile virtual-nodes up -d --build
    docker compose logs -f node-b203
    docker compose exec gateway python -m gateway.order B-203 valve-open --data /data
    docker compose exec node-b203 python -m edge.valve open --sd /data
-   docker compose --profile three-nodes down
+   docker compose --profile virtual-nodes down
    ```
 
-- A first start learns day 1 at once (`NODE_PRIME_S`, default 86400), then plays day 2 at one row a minute: the tank closes its valve after about 20 minutes, `B-203` after about 2.5 hours and `B-101` after about 8. For a quick demo set `NODE_STEP_S`, for example `0.4` (about 10 seconds, 1 minute and 3 minutes).
+- A first start learns day 1 at once (`NODE_PRIME_S`, default 86400), then plays day 2 at one row a minute: the tank closes its valve after about 20 minutes, `B-203` after about 2.5 hours, and `B-101` and `B-301` after about 8. For a quick demo set `NODE_STEP_S`, for example `0.4` (about 10 seconds, 1 minute and 3 minutes).
 - After the last row a node keeps running: it sends what is left and takes orders. Each node's volume keeps its place, valve and learning across restarts. `down -v` deletes them and starts over.
-- **Use separate volumes for each tree**, with `docker compose -p <name> ...` or `down -v` first: the gateway and dashboard keep saved state. In the commands above, add the same `-p` and `--profile` each time.
-- The three-node tree says its tank also feeds homes that have no node, so the gateway does not compare tank and flats: **no pipe-leak detection** in these demos.
+- **After changing the tree, use new volumes**, with `docker compose -p <name> ...` or `down -v` first: the gateway and dashboard keep saved state. In the commands above, add the same `-p` and `--profile` each time.
+- The four-node tree says its tank also feeds homes that have no node, so the gateway does not compare tank and flats: **no pipe-leak detection** in these demos.
 - Replayed data cannot react to a valve, so a shut node reads zero flow. Radio airtime, range, collisions and packet loss are not simulated.
-- Tested with Podman and `podman-compose`; not with Docker itself.
+- Tested with Podman and `podman-compose` ([results](../README.md#test-results)); not with Docker itself.
 
 
 ## Sensor readings
