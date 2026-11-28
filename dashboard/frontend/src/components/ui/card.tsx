@@ -5,7 +5,7 @@ export function Card({ className, ...props }: React.HTMLAttributes<HTMLDivElemen
   return (
     <div
       className={cn(
-        "border border-black bg-[var(--panel-bg)] text-[var(--ink)]",
+        "border-2 border-black bg-[var(--panel-bg)] text-[var(--ink)]",
         className
       )}
       {...props}
@@ -17,7 +17,7 @@ export function CardHeader({ className, ...props }: React.HTMLAttributes<HTMLDiv
   return (
     <div
       className={cn(
-        "flex items-center justify-between border-b border-black px-4 py-2.5",
+        "flex items-center justify-between border-b border-black bg-[var(--panel-header)] px-4 py-2.5",
         className
       )}
       {...props}

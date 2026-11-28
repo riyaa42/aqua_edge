@@ -65,6 +65,12 @@ class AirtimeBudget:
         self.total += seconds
         return True
 
+    def refund_last(self):
+        """Undo the most recent take(), e.g. when the radio failed to send."""
+        if self.sent:
+            _, seconds = self.sent.pop()
+            self.total = max(0.0, self.total - seconds)
+
 
 if __name__ == "__main__":
     import random

@@ -31,6 +31,10 @@ def _drain(sock):
             data, address = sock.recvfrom(MAX_PAYLOAD + 1)
         except BlockingIOError:
             break
+        except ConnectionResetError:
+            # Windows raises WSAECONNRESET on unconnected UDP sockets after ICMP Port Unreachable;
+            # skip it so queued datagrams from other peers are still drained.
+            continue
         except OSError:
             break
         got.append((time.time(), data, address))
@@ -54,7 +58,9 @@ class UdpRadio:
         try:                    # looked up again each time: a restarted gateway may have moved
             self.address = (socket.gethostbyname(self.target[0]), self.target[1])
         except OSError as e:
+            self.address = None
             self._failed(e)
+            return
         self._send(b"")
 
     def _send(self, data):

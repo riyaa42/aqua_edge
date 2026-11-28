@@ -41,7 +41,8 @@ class Dashboard:
         self.base = f"http://127.0.0.1:{port}/api/v1"
 
     def get(self, path):
-        with urllib.request.urlopen(self.base + path, timeout=5) as r:
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        with opener.open(self.base + path, timeout=5) as r:
             return json.load(r)
 
     def latest(self):

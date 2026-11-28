@@ -1,3 +1,5 @@
+import type { MaintenanceItem, NodeSnapshotState } from "@/types";
+
 const CATEGORY_NAMES: Record<string, string> = {
   QUALITY_CHEMICAL: "Chemical in water",
   QUALITY_LIMIT_VIOLATION: "Unsafe water reading",
@@ -13,7 +15,41 @@ const CATEGORY_NAMES: Record<string, string> = {
   PROLONGED_ZERO_FLOW: "No water used for 24h",
   NODE_SILENT: "Sensor stopped talking",
   CLOCK_SKEW: "Sensor clock off",
+  VALVE_FAULT: "Valve fault",
 };
+
+const CATEGORY_ACTIONS: Record<string, string> = {
+  VALVE_FAULT: "The node could not move its water valve: check it by hand and close it if needed.",
+  QUALITY_CHEMICAL: "Isolate tank distribution and flush/test water immediately (chemical hazard).",
+  QUALITY_LIMIT_VIOLATION: "Inspect tank water quality against IS 10500 limits immediately.",
+  QUALITY_RUNOFF: "Inspect rooftop tank cover/inlet for contamination or turbidity ingress.",
+  QUALITY_TEMPORAL_ANOMALY: "Inspect tank water quality sensors for sudden drift or early contamination.",
+  PIPE_LEAK: "Inspect vertical riser/downtake section and shut down affected branch.",
+  FLAT_LEAK: "Inspect flat plumbing/fixtures for internal leak.",
+  LEAK_TANK_DRAIN: "Locate active leak draining rooftop tank and verify pump capacity.",
+  SUPPLY_EVENT: "Check building pump, power supply, and municipal inlet.",
+  SUPPLY_UNCERTAIN: "Inspect tank inflow/level sensor and verify pump operation.",
+  ABNORMAL_CONSUMPTION: "Notify resident of unusual water consumption.",
+  PROLONGED_ZERO_FLOW: "Verify occupancy or check flat meter/shutoff valve.",
+  NODE_SILENT: "Check node power, SD card, and SX1278 LoRa link.",
+  CLOCK_SKEW: "Verify node RTC sync and ACK reception.",
+};
+
+export function recommendedActionFor(category: string, explicit?: string | null): string | null {
+  return explicit ?? CATEGORY_ACTIONS[category] ?? null;
+}
+
+export function getReopenValveNodes(
+  nodes?: Record<string, NodeSnapshotState> | null,
+  queue?: MaintenanceItem[] | null,
+): string[] {
+  if (!nodes) return [];
+  const activeTargets = new Set((queue ?? []).map((item) => item.target));
+  return Object.entries(nodes)
+    .filter(([nodeId, state]) => state?.valve === "closed" && !activeTargets.has(nodeId))
+    .map(([nodeId]) => nodeId)
+    .sort();
+}
 
 const QUALITY_CLASS_NAMES: Record<string, string> = {
   NORMAL: "Clean",
@@ -53,6 +89,15 @@ export function plainSupplyState(code?: string | null): string {
 export function plainBuildingStatus(code?: string | null): string {
   if (!code) return "Waiting for data";
   return STATUS_NAMES[code] ?? code;
+}
+
+export function severityTone(code?: string | null): "plain" | "red" | "yellow" | "green" {
+  if (!code) return "plain";
+  const upper = code.toUpperCase();
+  if (upper === "CRITICAL" || upper === "HIGH") return "red";
+  if (upper === "MEDIUM" || upper === "LOW" || upper === "NOTICE") return "yellow";
+  if (upper === "NORMAL" || upper === "OK") return "green";
+  return "plain";
 }
 
 export function formatUtcTime(unixSec?: number | null): string {

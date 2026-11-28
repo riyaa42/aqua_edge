@@ -3,20 +3,32 @@
 :root {
   --radius: 0px;
   --page-bg: #3e2c59;
-  --panel-bg: #eae2f8;
-  --panel-alt: #dfd4f4;
+  --frame-bg: #d9cdf0;
+  --panel-bg: #efe8fb;
+  --panel-header: #cbb9ec;
+  --panel-alt: #e3d8f7;
+  --panel-deep: #d4c4f2;
   --ink: #111111;
   --accent-line: #3e2c59;
   --border-ink: #111111;
+  --status-red: #f2b8b5;
+  --status-yellow: #f5df9d;
+  --status-green: #b9e3c6;
 }
 
 [data-theme="cloud"] {
   --page-bg: #2f5241;
-  --panel-bg: #dff2e8;
-  --panel-alt: #cee8da;
+  --frame-bg: #c6e2d3;
+  --panel-bg: #e7f6ee;
+  --panel-header: #b7dcc9;
+  --panel-alt: #d5ede0;
+  --panel-deep: #c3e2d1;
   --ink: #111111;
   --accent-line: #264738;
   --border-ink: #111111;
+  --status-red: #f2b8b5;
+  --status-yellow: #f5df9d;
+  --status-green: #b9e3c6;
 }
 
 * {

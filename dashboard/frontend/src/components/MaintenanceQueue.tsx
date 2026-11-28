@@ -2,15 +2,20 @@ import { useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { formatEvidence, plainCategory } from "@/lib/labels";
-import type { GatewaySnapshot, MaintenanceItem } from "@/types";
+import { formatEvidence, getReopenValveNodes, plainCategory, recommendedActionFor, severityTone } from "@/lib/labels";
+import type { GatewaySnapshot, IncidentItem, MaintenanceItem, NodeSnapshotState } from "@/types";
 
 type PipeLeakInfo = NonNullable<NonNullable<GatewaySnapshot["leakage"]>["pipe_leak"]> | null;
 
 interface Props {
   queue?: MaintenanceItem[];
   pipeLeak?: PipeLeakInfo;
+  nodes?: Record<string, NodeSnapshotState>;
   loading: boolean;
+}
+
+interface AllProblemsProps extends Props {
+  activeIncidents?: IncidentItem[];
 }
 
 function QueueCard({
@@ -42,7 +47,7 @@ function QueueCard({
   const symptoms = item.symptoms ?? [];
 
   return (
-    <div className="border border-black bg-[var(--panel-alt)] p-3 space-y-2">
+    <div className="border border-black bg-[var(--panel-alt)] p-2.5 space-y-1.5">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2">
           <Badge tone="dark">#{item.rank ?? index + 1}</Badge>
@@ -51,7 +56,7 @@ function QueueCard({
         </div>
         <div className="flex items-center gap-2">
           {item.risk_score != null && <Badge>Score {item.risk_score}</Badge>}
-          <Badge tone={item.severity === "CRITICAL" || item.severity === "HIGH" ? "dark" : "plain"}>
+          <Badge tone={severityTone(item.severity)}>
             {item.severity ?? "UNKNOWN"}
           </Badge>
         </div>
@@ -98,7 +103,7 @@ function QueueCard({
       </div>
 
       {expanded && (
-        <div className="border border-black bg-[var(--panel-bg)] p-2.5 text-xs space-y-1.5">
+        <div className="border border-black bg-[var(--panel-deep)] p-2.5 text-xs space-y-1.5">
           <div>
             <span className="font-bold">Correlated symptoms: </span>
             <span>{symptoms.length > 0 ? symptoms.join(", ") : "None"}</span>
@@ -121,21 +126,93 @@ function QueueCard({
   );
 }
 
-export function MaintenanceQueue({ queue, pipeLeak, loading }: Props) {
-  const items = queue ?? [];
+function ReopenValveBanner({ reopenNodes }: { reopenNodes: string[] }) {
+  if (reopenNodes.length === 0) return null;
+  return (
+    <div className="border border-black bg-[var(--panel-alt)] p-2.5 text-xs space-y-1">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="font-bold uppercase">Reopen valve</span>
+        <Badge tone="yellow">{reopenNodes.length} ready</Badge>
+      </div>
+      <p>
+        Readings are normal at <span className="font-bold">{reopenNodes.join(", ")}</span>. Reopen valve at the
+        node or via gateway order.
+      </p>
+    </div>
+  );
+}
+
+export function MaintenanceQueue({ queue, pipeLeak, nodes, loading }: Props) {
+  const allItems = queue ?? [];
+  const items = allItems.filter((it) => it.severity !== "LOW");
+  const lowCount = allItems.length - items.length;
+  const reopenNodes = getReopenValveNodes(nodes, allItems);
 
   return (
-    <Card className="flex flex-col">
+    <Card className="flex max-h-[360px] flex-col lg:h-0 lg:max-h-none lg:min-h-full">
       <CardHeader>
         <CardTitle>Fix First</CardTitle>
-        <Badge>{items.length} open</Badge>
+        <Badge>{items.length} priority</Badge>
       </CardHeader>
-      <CardContent className="flex-1 space-y-3">
+      <CardContent className="flex-1 space-y-2 overflow-y-auto">
+        <ReopenValveBanner reopenNodes={reopenNodes} />
         {loading ? (
           <p className="text-sm">Loading priority list...</p>
         ) : items.length === 0 ? (
+          <div className="border border-black bg-[var(--panel-alt)] p-4 text-sm space-y-1">
+            <p>No high-priority problems need attention right now.</p>
+            {lowCount > 0 && (
+              <p className="text-xs">
+                {lowCount} lower-priority {lowCount === 1 ? "notice is" : "notices are"} listed in All Problems.
+              </p>
+            )}
+          </div>
+        ) : (
+          items.map((item, idx) => (
+            <QueueCard
+              key={`${item.target}-${item.category}-${idx}`}
+              item={item}
+              index={idx}
+              pipeLeak={pipeLeak}
+            />
+          ))
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+export function AllProblems({ queue, activeIncidents, pipeLeak, nodes, loading }: AllProblemsProps) {
+  const queued = queue ?? [];
+  const seen = new Set(queued.map((it) => `${it.target}|${it.category}`));
+  const extras: MaintenanceItem[] = (activeIncidents ?? [])
+    .filter((inc) => !seen.has(`${inc.target}|${inc.category}`))
+    .map((inc) => ({
+      target: inc.target,
+      category: inc.category,
+      risk_score: inc.risk_score ?? undefined,
+      severity: inc.severity ?? "LOW",
+      affected_flats: inc.affected_flats,
+      symptoms: inc.symptoms,
+      evidence: inc.evidence,
+      recommended_action: recommendedActionFor(inc.category, inc.recommended_action) ?? undefined,
+    }));
+  const items = [...queued, ...extras];
+  const reopenNodes = getReopenValveNodes(nodes, items);
+
+  return (
+    <Card className="flex h-[320px] flex-col">
+      <CardHeader>
+        <CardTitle>All Problems</CardTitle>
+        <Badge>{items.length} active</Badge>
+      </CardHeader>
+      <CardContent className="flex-1 space-y-2 overflow-y-auto">
+        <ReopenValveBanner reopenNodes={reopenNodes} />
+        {loading ? (
+          <p className="text-sm">Loading active problems...</p>
+        ) : items.length === 0 ? (
           <div className="border border-black bg-[var(--panel-alt)] p-4 text-sm">
-            No problems need attention right now.
+            No active problems or notices right now.
           </div>
         ) : (
           items.map((item, idx) => (

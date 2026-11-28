@@ -61,15 +61,17 @@ open problems and pipe check, and does not reopen the door to replays. Not saved
 message log and event list. The gateway clock must carry on across a restart.
 How the leak checks fit together: detection/leakage/README.md.
 """
+from collections import deque
 import json
 import os
 import random
+import time
 
 
 from edge.aqua_edge import SUMMARY_S, iso_utc, save_atomic
 from gateway.analytics import FLAT_LEAK_ALERTS, GatewayAnalytics, category_of
 from hal.link import MessageLink
-from hal.lora433 import BEACON_S, AirtimeBudget, retry_wait
+from hal.lora433 import BEACON_S, AirtimeBudget, airtime_s, retry_wait
 from hal.packet import add_names, pack, unpack
 from gateway.topology import Topology  # noqa: F401  (callers build one for Gateway)
 
@@ -84,6 +86,10 @@ VALVE_REPORTS = ("VALVE_CLOSED", "VALVE_OPENED", "VALVE_FAULT")    # what a node
 ORDER_GROUPS = (("VALVE_CLOSE", "VALVE_OPEN"), ("ALERT_LED_ON", "ALERT_LED_OFF"))   # an operator's
 MAX_GAPS = 2000     # message numbers remembered above a gap, per node
 KEEP_BLOCKS = 7 * 86400 // SUMMARY_S    # per-block data kept: 7 days, for late summaries
+MAX_LOG = 2000
+MAX_EVENTS = 2000
+STEP_TX_BUDGET_S = 0.02
+TX_POLL_S = 0.01
 STATE_VERSION = 1
 # saved to disk as they are; the others need converting for JSON (save_state / load_state)
 SAVED = ("seen_floor", "alert_history_list", "tank_low_t", "tank_low_recv_t", "supply_active_until",
@@ -105,6 +111,12 @@ class Gateway:
         self.seen_above = {}        # node -> set of out-of-order seq > floor
         self.log = []               # every unique message received, with receive time
         self.events = []            # gateway's own decisions
+        self.log_offset = 0
+        self.events_offset = 0
+        self._log_cursors = {}
+        self._event_cursors = {}
+        self._tx_queue = deque()
+        self._tx_inflight = None
         self.alert_history = {}     # (node, alert) -> (time of latest, how many so far)
         self.tank_low_t, self.tank_low_recv_t, self.supply_active_until = -1e9, -1e9, -1
         self.tank_drain_reported = False
@@ -228,7 +240,47 @@ class Gateway:
         self.seen_floor[node] = fl
         return False
 
+    def events_since(self, cursor, consumer=None):
+        """Return (new_events, next_cursor) without losing events when history is trimmed."""
+        if consumer is not None:
+            self._event_cursors[consumer] = max(cursor, self._event_cursors.get(consumer, 0))
+        start = max(0, cursor - self.events_offset)
+        new = self.events[start:]
+        next_cursor = self.events_offset + len(self.events)
+        if consumer is not None:
+            self._event_cursors[consumer] = next_cursor
+        return new, next_cursor
+
+    def log_since(self, cursor, consumer=None):
+        """Return (new_log_entries, next_cursor) without losing entries when history is trimmed."""
+        if consumer is not None:
+            self._log_cursors[consumer] = max(cursor, self._log_cursors.get(consumer, 0))
+        start = max(0, cursor - self.log_offset)
+        new = self.log[start:]
+        next_cursor = self.log_offset + len(self.log)
+        if consumer is not None:
+            self._log_cursors[consumer] = next_cursor
+        return new, next_cursor
+
+    @staticmethod
+    def _trim_list(items, offset, cursors, max_len):
+        if len(items) <= max_len:
+            return offset
+        drop = len(items) - max_len
+        if cursors and len(items) <= max_len * 2:
+            safe = min(c - offset for c in cursors.values())
+            drop = max(0, min(drop, safe))
+        if drop > 0:
+            del items[:drop]
+            offset += drop
+        return offset
+
+    def _trim_history(self):
+        self.events_offset = self._trim_list(self.events, self.events_offset, self._event_cursors, MAX_EVENTS)
+        self.log_offset = self._trim_list(self.log, self.log_offset, self._log_cursors, MAX_LOG)
+
     def step(self):
+        self._trim_history()
         now = self.hal.now()
         utc_fn = getattr(self.hal, "utc_now", None)
         utc_s = utc_fn()[0] if utc_fn else now
@@ -295,17 +347,95 @@ class Gateway:
             self.dirty = False
         for n, seq in acks:
             ack = {"k": "ACK", "n": n, "s": seq, "gt": now}     # gt: nodes sync their clock
-            self.transmit(now, ack)
+            self._enqueue_tx("ACK", ack, None)
         self.send_commands(now)
         if self.beacon_at is None or now >= self.beacon_at or now < self.beacon_at - BEACON_S:
             beacon = {"k": "BEACON", "n": "GATEWAY", "s": self.boot, "gt": now}
-            self.transmit(now, beacon)
+            self._enqueue_tx("BEACON", beacon, None)
             self.beacon_at = now + BEACON_S
-        return min([self.beacon_at] + [self.send_at.get(num, now) for num in self.outbox])
+        self._drain_tx(now)
+        waits = [self.beacon_at] + [self.send_at.get(num, now) for num in self.outbox]
+        if self._tx_inflight is not None:
+            waits.append(now + TX_POLL_S)
+        elif self._tx_queue:
+            waits.append(now)
+        return min(waits)
 
     # --- radio and dispatch ---
     def transmit(self, now, message):
-        return self.link.send(message, admit=lambda s: self.airtime.take(now, s, True))
+        charged = []
+
+        def admit(seconds):
+            if self.airtime.take(now, seconds, True):
+                charged.append(seconds)
+                return True
+            return False
+
+        try:
+            ok = self.link.send(message, admit=admit)
+        except Exception:
+            if charged:
+                self.airtime.refund_last()
+            raise
+        if not ok and charged:
+            self.airtime.refund_last()
+        return ok
+
+    def _enqueue_tx(self, kind, message, meta):
+        if kind == "BEACON":
+            if any(k == "BEACON" for k, _, _ in self._tx_queue):
+                return
+            self._tx_queue.append((kind, message, meta))
+        elif kind == "CMD":
+            if (self._tx_inflight and self._tx_inflight[0] == "CMD" and self._tx_inflight[2] == meta) or any(
+                k == "CMD" and m == meta for k, _, m in self._tx_queue
+            ):
+                return
+            self._tx_queue.append((kind, message, meta))
+        else:
+            self._tx_queue.append((kind, message, meta))
+
+    def _on_tx_done(self, now, kind, num, ok):
+        if kind != "CMD" or num not in self.outbox:
+            return
+        if ok:
+            tries = self.tries.get(num, 0)
+            self.send_at[num] = now + retry_wait(tries, True, self.outbox[num]["n"] not in self.silent, self.rng)
+            self.tries[num] = tries + 1
+        else:
+            self.send_at[num] = now + 60
+
+    def _drain_tx(self, now):
+        has_async = hasattr(self.hal, "start_send") and hasattr(self.hal, "poll_send")
+        if self._tx_inflight is not None and has_async:
+            res = self.hal.poll_send()
+            if res is None:
+                return
+            kind, _, meta, charged = self._tx_inflight
+            self._tx_inflight = None
+            if not res and charged:
+                self.airtime.refund_last()
+            self._on_tx_done(now, kind, meta, res)
+        tx_start = time.monotonic()
+        while self._tx_queue and self._tx_inflight is None:
+            kind, msg, meta = self._tx_queue.popleft()
+            if kind == "CMD" and meta not in self.outbox:
+                continue
+            if has_async:
+                raw = pack(msg, self.hal.key(msg["n"]))
+                if not self.airtime.take(now, airtime_s(len(raw)), True):
+                    self._on_tx_done(now, kind, meta, False)
+                    continue
+                if self.hal.start_send(raw, cad=True):
+                    self._tx_inflight = (kind, msg, meta, True)
+                    break
+                self.airtime.refund_last()
+                self._on_tx_done(now, kind, meta, False)
+            else:
+                ok = self.transmit(now, msg)
+                self._on_tx_done(now, kind, meta, ok)
+                if self._tx_queue and (time.monotonic() - tx_start >= STEP_TX_BUDGET_S):
+                    break
 
     def send_commands(self, now):
         """Unconfirmed commands that are due; ongoing problems go before ones already over."""
@@ -313,12 +443,7 @@ class Gateway:
             if now < self.send_at.get(num, now):
                 continue
             command = {"k": "CMD", "n": c["n"], "s": int(num), "t": c["t"], "a": c["a"], "over": c["over"]}
-            if self.transmit(now, command):
-                tries = self.tries.get(num, 0)
-                self.send_at[num] = now + retry_wait(tries, True, c["n"] not in self.silent, self.rng)
-                self.tries[num] = tries + 1
-            else:
-                self.send_at[num] = now + 60
+            self._enqueue_tx("CMD", command, num)
 
     def hurry(self, now, node):
         """A node just spoke, so it can hear: send what is waiting for it now."""

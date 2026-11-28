@@ -4,11 +4,11 @@ import { IncidentHistory } from "@/components/IncidentHistory";
 import { MaintenanceQueue } from "@/components/MaintenanceQueue";
 import { TelemetryCharts } from "@/components/TelemetryCharts";
 import { TopologyTree } from "@/components/TopologyTree";
-import { UsageAndNetwork } from "@/components/UsageAndNetwork";
+import { SensorNetwork, UsageAndNetwork } from "@/components/UsageAndNetwork";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { formatUtcTime, plainBuildingStatus } from "@/lib/labels";
+import { formatUtcTime, plainBuildingStatus, severityTone } from "@/lib/labels";
 import type {
   FrameRecord,
   GatewaySummary,
@@ -157,7 +157,18 @@ export function App() {
         });
         const hist = fr.snapshot.incident_history;
         if (Array.isArray(hist) && hist.length > 0) {
-          setHistory(hist);
+          setHistory((prev) => {
+            const byKey = new Map<string, IncidentItem>();
+            for (const item of prev) {
+              byKey.set(`${item.target}|${item.category}|${item.t_onset}`, item);
+            }
+            for (const item of hist) {
+              byKey.set(`${item.target}|${item.category}|${item.t_onset}`, item);
+            }
+            return Array.from(byKey.values()).sort(
+              (a, b) => (b.t_resolved ?? b.t_last ?? b.t_onset) - (a.t_resolved ?? a.t_last ?? a.t_onset),
+            );
+          });
         }
       } catch {
         // Ignore malformed SSE payload
@@ -179,9 +190,9 @@ export function App() {
 
   return (
     <div className="min-h-screen bg-[var(--page-bg)] p-[clamp(12px,4vw,64px)] text-[var(--ink)]">
-      <div className="mx-auto w-full max-w-[1600px] border border-black bg-[var(--panel-bg)] p-4 md:p-6 lg:p-8">
+      <div className="mx-auto w-full max-w-[1600px] border-2 border-black bg-[var(--frame-bg)] p-4 md:p-6 lg:p-8">
         <div className="space-y-4">
-          <header className="flex flex-wrap items-center justify-between gap-3 border border-black bg-[var(--panel-alt)] px-4 py-3">
+          <header className="flex flex-wrap items-center justify-between gap-3 border-2 border-black bg-[var(--panel-header)] px-4 py-3">
             <div className="space-y-0.5">
               <h1 className="text-lg font-bold tracking-tight">
                 Aqua Edge {topology ? `(${topology.building})` : ""}
@@ -207,12 +218,12 @@ export function App() {
                   ))}
                 </select>
               )}
-              <Badge tone={snap?.building_status === "CRITICAL" || snap?.building_status === "HIGH" ? "dark" : "plain"}>
+              <Badge tone={severityTone(snap?.building_status)}>
                 {plainBuildingStatus(snap?.building_status)}
               </Badge>
-              {latestFrame?.buffered && <Badge>Buffered recovery</Badge>}
-              {stale && <Badge tone="dark">Stale data</Badge>}
-              <Badge tone={connState === "disconnected" ? "dark" : "plain"}>
+              {latestFrame?.buffered && <Badge tone="yellow">Buffered recovery</Badge>}
+              {stale && <Badge tone="red">Stale data</Badge>}
+              <Badge tone={connState === "live" ? "green" : connState === "connecting" ? "yellow" : "red"}>
                 {connState === "live"
                   ? "Live"
                   : connState === "connecting"
@@ -234,6 +245,7 @@ export function App() {
             <MaintenanceQueue
               queue={snap?.maintenance_queue}
               pipeLeak={snap?.leakage?.pipe_leak ?? null}
+              nodes={snap?.nodes}
               loading={loading}
             />
             <TopologyTree
@@ -252,9 +264,15 @@ export function App() {
             lineColor={chartLineColor}
           />
 
-          <UsageAndNetwork snapshot={snap} />
+          <UsageAndNetwork snapshot={snap} loading={loading} />
 
-          <IncidentHistory history={history} />
+          <SensorNetwork snapshot={snap} />
+
+          <IncidentHistory
+            history={history}
+            nodes={snap?.nodes}
+            queue={snap?.maintenance_queue}
+          />
         </div>
       </div>
 

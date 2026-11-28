@@ -88,8 +88,8 @@ export function TelemetryCharts({ snapshot, points, rangeHours, onRangeChange, l
           <CardHeader>
             <CardTitle>Water Check</CardTitle>
             <div className="flex flex-wrap items-center gap-1.5">
-              {wq?.temporal_anomaly && <Badge tone="dark">SUDDEN CHANGE</Badge>}
-              <Badge tone={wq?.compliant === false ? "dark" : "plain"}>
+              {wq?.temporal_anomaly && <Badge tone="yellow">SUDDEN CHANGE</Badge>}
+              <Badge tone={wq?.compliant === false ? "red" : wq?.compliant === true ? "green" : "plain"}>
                 {wq?.compliant === false ? "UNSAFE" : wq?.compliant === true ? "SAFE" : "NO DATA"}
               </Badge>
             </div>
@@ -192,7 +192,7 @@ export function TelemetryCharts({ snapshot, points, rangeHours, onRangeChange, l
         <Card>
           <CardHeader>
             <CardTitle>Water Distribution and Tank</CardTitle>
-            <Badge tone={lk?.pipe_leak_active ? "dark" : "plain"}>
+            <Badge tone={lk?.pipe_leak_active ? "red" : lk?.pipe_leak_active === false ? "green" : "plain"}>
               {lk?.pipe_leak_active
                 ? "PIPE_LEAK ACTIVE"
                 : lk?.pipe_leak_active === false

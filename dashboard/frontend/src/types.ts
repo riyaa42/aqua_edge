@@ -48,6 +48,7 @@ export interface NodeSnapshotState {
   status?: string;
   last_seen?: number | null;
   last_sum?: Record<string, unknown> | null;
+  valve?: "closed" | "open" | "fault" | null;
 }
 
 export interface GatewaySnapshot {

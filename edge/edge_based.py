@@ -40,28 +40,30 @@ def _requests(node, folder):
 
 def _wait_with_radio(node, board, until_t, stop=None, folder=None, poll_s=RX_POLL_S):
     """Sleep until `until_t` (None: until stopped), polling Node.radio_poll() for beacons, ACKs,
-    orders and urgent retries, and watching for requests."""
+    orders and urgent retries, and watching for requests. Uses monotonic time for deadlines."""
+    mono = getattr(board, "monotonic", board.now)
     while not (stop and stop.is_set()):
-        now = board.now()
-        if until_t is not None and now >= until_t:
+        if until_t is not None and mono() >= until_t:
             break
         _requests(node, folder)
         wake = node.radio_poll()
-        dt = poll_s if until_t is None else until_t - board.now()
+        dt = poll_s if until_t is None else until_t - mono()
         if wake is not None:
-            dt = min(dt, max(0.0, wake - board.now()))
+            dt = min(dt, max(0.0, wake - mono()))
         board.sleep(min(dt, poll_s) if dt > 0 else 0.0)
 
 
 def run(node, board, step_s=None, stop=None, folder=None, poll_s=RX_POLL_S, first_taken=False):
     """One firmware step per sensor row: on each new minute (real time), or every step_s seconds.
     Returns at the end of the data, or when stopped. first_taken: board already holds the first row."""
+    mono = getattr(board, "monotonic", board.now)
+
     def pause():
         if step_s is None:
             now = board.now()
-            _wait_with_radio(node, board, now + (SAMPLE_S - now % SAMPLE_S), stop, folder, poll_s)
+            _wait_with_radio(node, board, mono() + (SAMPLE_S - now % SAMPLE_S), stop, folder, poll_s)
         elif step_s:
-            _wait_with_radio(node, board, board.now() + step_s, stop, folder, poll_s)
+            _wait_with_radio(node, board, mono() + step_s, stop, folder, poll_s)
 
     if step_s is None and not first_taken:
         pause()

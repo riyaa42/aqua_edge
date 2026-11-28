@@ -135,6 +135,7 @@ class ESPLink(RadioLink):
         self.info = self.reply = None           # last (sequence, data) of an INFO and of a SENT
         self.restarted = False
         self.signal = None                      # (RSSI dBm, SNR dB) of the last packet received
+        self._inflight = None                   # (seq, deadline) for non-blocking start_send/poll_send
         self._connect()
         if listen:
             self.start_listening()
@@ -173,6 +174,60 @@ class ESPLink(RadioLink):
                                                      else "bad packet length"))
                 return False
             return True
+
+    def start_send(self, raw, cad=True):
+        """Start sending one packet without blocking for the ESP's CAD/TX reply.
+        Returns True if handed to the serial port (poll_send() will report True/False),
+        False if the link is broken, busy, or writing failed."""
+        check_payload(raw)
+        if self._inflight is not None:
+            return False
+        if self.broken and self.thread:
+            return False
+        if not self.io.acquire(blocking=False):
+            return False
+        try:
+            if self.broken and not self._recover():
+                return False
+            self._check_restart()
+            if self.broken:
+                return False
+            try:
+                seq = self._next_seq()
+                self.reply = None
+                self.port.write(frame(SEND, seq, bytes((bool(cad),)) + bytes(raw)))
+                self._inflight = (seq, self.clock() + SEND_TIMEOUT_S)
+                return True
+            except OSError as e:
+                self._failed(e)
+                return False
+        finally:
+            self.io.release()
+
+    def poll_send(self):
+        """Check an in-flight start_send(). Returns None while waiting, True on SENT_OK, False on failure."""
+        if self._inflight is None:
+            return False
+        seq, deadline = self._inflight
+        if not self.thread:
+            self.service()
+        if self.restarted:
+            self._inflight = None
+            return False
+        if self.reply and self.reply[0] == seq:
+            self._inflight = None
+            result = self.reply[1][:1]
+            if result != bytes((SENT_OK,)):
+                self.log("modem could not send: " + ("radio fault" if result == bytes((SENT_RADIO_FAULT,))
+                                                     else "bad packet length"))
+                return False
+            return True
+        if self.clock() > deadline:
+            self._inflight = None
+            with self.io:
+                self._failed(ModemError("the modem did not answer a send"))
+            return False
+        return None
 
     def receive(self):
         """[(arrival time in time.time() seconds, packet bytes)] received since the last call.
