@@ -1,6 +1,6 @@
 # Abnormal Consumption Detection — Validation Results
 
-> **Scope:** Independent evaluation of four abnormal-consumption detectors in `tinyml/consumption/detectors.py` across Building B (EPANET/WNTR bursty demand) and Cache County (real 4-second household water-use data), plus firmware integration tests (`tinyml/consumption/test_integration.py`).
+> **Scope:** Independent evaluation of four abnormal-consumption detectors in `detection/consumption/detectors.py` across Building B (EPANET/WNTR bursty demand) and Cache County (real 4-second household water-use data), plus firmware integration tests (`detection/consumption/test_integration.py`).
 
 ---
 
@@ -54,8 +54,8 @@ An earlier version of this section was wrong: the script filled recording gaps w
 
 ## 4. Firmware Integration & Leakage Regression (`test_integration.py` + `test_regression.py`)
 
-- **Integration (`tinyml/consumption/test_integration.py`):** Passed all 5 suites (normal bursty `0` alerts, `NaN`/missing readings handled cleanly, multi-household simultaneous anomalies across a `3.5 h` LoRa outage with `queue == 0` after reconnect, `PROLONGED_ZERO_FLOW` during a `25 h` shutoff, and `0` leak-score contamination).
-- **Leakage regression (`tinyml/leakage/test_regression.py`):** **`ALL 8 REGRESSION SCENARIOS PASSED`** (unchanged).
+- **Integration (`detection/consumption/test_integration.py`):** Passed all 5 suites (normal bursty `0` alerts, `NaN`/missing readings handled cleanly, multi-household simultaneous anomalies across a `3.5 h` LoRa outage with `queue == 0` after reconnect, `PROLONGED_ZERO_FLOW` during a `25 h` shutoff, and `0` leak-score contamination).
+- **Leakage regression (`detection/leakage/test_regression.py`):** **`ALL 8 REGRESSION SCENARIOS PASSED`** (unchanged).
 
 ---
 

@@ -55,7 +55,7 @@ Same hardware layer as the nodes (hal.now / send / receive). Jobs:
 What the checks need is saved to one state file before any ACK is sent, so a restart keeps the
 open problems and pipe check, and does not reopen the door to replays. Not saved: the in-memory
 message log and event list. The gateway clock must carry on across a restart.
-How the leak checks fit together: tinyml/leakage/README.md.
+How the leak checks fit together: detection/leakage/README.md.
 """
 import json
 import os

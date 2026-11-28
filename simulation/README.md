@@ -1,6 +1,6 @@
 # Aqua Edge: Simulation and Network Design
 
-Everything used to test the system before the hardware exists: the building B water network, the live simulation, the LoRa radio model and ns-3, and the Webots 3D test bench. The node and gateway code they run lives in `../edge/`, `../gateway/`, `../hal/` and `../tinyml/`.
+Everything used to test the system before the hardware exists: the building B water network, the live simulation, the LoRa radio model and ns-3, and the Webots 3D test bench. The node and gateway code they run lives in `../edge/`, `../gateway/`, `../hal/` and `../detection/`.
 
 Full write-up of mechanisms, results and next steps: [`LIVE_SIMULATION.md`](LIVE_SIMULATION.md).
 
@@ -17,7 +17,7 @@ Uses [uv](https://docs.astral.sh/uv/) (configured at the repository root). From 
 
 ```
 sh live/run_local.sh --scenario live/scenarios/standard.jsonl     # no Docker: one process per node, 48 h in ~1 min
-sh live/run_local.sh --scenario live/scenarios/flow_leaks.jsonl   # three flow leaks (see ../tinyml/leakage/)
+sh live/run_local.sh --scenario live/scenarios/flow_leaks.jsonl   # three flow leaks (see ../detection/leakage/)
 docker compose -f live/compose.yaml up                            # one container per node; panel at localhost:8501
 uv run streamlit run live/control_panel.py                        # control panel for the no-Docker run
 python3 live/check_comms.py                                       # PASS/FAIL report for the last run

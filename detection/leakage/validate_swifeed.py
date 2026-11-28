@@ -8,7 +8,7 @@
    plus 2 normal (no-leak) runs, feeding causal 1-minute readings into Aqua Edge's
    unmodified FlatNode + Gateway firmware.
 
-Outputs JSON summary to tinyml/leakage/results/validation_swifeed.json.
+Outputs JSON summary to detection/leakage/results/validation_swifeed.json.
 """
 import json
 import os

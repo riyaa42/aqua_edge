@@ -1,9 +1,9 @@
 """Train, quantize, cross-validate, and externally evaluate the 4-feature TinyML water-quality model.
 
-    uv run python -m tinyml.quality.train_quality
+    uv run python -m detection.quality.train_quality
 
-Writes tinyml/quality/quality_model.json and tinyml/quality/results.txt.
-Method and sources: tinyml/quality/README.md.
+Writes detection/quality/quality_model.json and detection/quality/results.txt.
+Method and sources: detection/quality/README.md.
 
 Design:
   - 4 inputs matching Sharma et al. [1]: [Temperature_C, pH, log1p(TDS_ppm), log1p(Turbidity_NTU)]
@@ -27,7 +27,7 @@ from datetime import datetime
 import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-from tinyml.quality.quality_model import QualityModel, QualityMonitor  # noqa: E402
+from detection.quality.quality_model import QualityModel, QualityMonitor  # noqa: E402
 
 CLASSES = ["NORMAL", "RUNOFF", "CHEMICAL"]
 PH_LO, PH_HI, TDS_MAX, TURB_MAX = 6.5, 8.5, 500.0, 5.0  # IS 10500:2012

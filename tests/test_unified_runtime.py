@@ -32,7 +32,7 @@ from edge.aqua_edge import EdgeRuntime, FlatNode, TankNode, DAY  # noqa: E402
 from gateway.core import Gateway, Topology  # noqa: E402
 from tests.offline_radio import exchange  # noqa: E402
 from hal.packet import pack, sim_key  # noqa: E402
-from tinyml.leakage import compare_leaks as CL  # noqa: E402
+from detection.leakage import compare_leaks as CL  # noqa: E402
 import make_scenario as M  # noqa: E402
 import build_society as S  # noqa: E402
 
@@ -210,10 +210,10 @@ def measure_resources(stream, td_sample):
         "gateway/core.py",
         "gateway/analytics.py",
         "hal/packet.py",
-        "tinyml/quality/quality_model.py",
-        "tinyml/quality/quality_model.json",
-        "tinyml/quality/temporal_model.json",
-        "tinyml/consumption/detectors.py",
+        "detection/quality/quality_model.py",
+        "detection/quality/quality_model.json",
+        "detection/quality/temporal_model.json",
+        "detection/consumption/detectors.py",
     ]
     artifact_bytes = {p: os.path.getsize(os.path.join(ROOT, p)) for p in artifacts}
     disk = shutil.disk_usage(ROOT)

@@ -16,7 +16,7 @@ Evaluates the downloaded HydroShare dataset (0b72cddfc51c45b188e0e6cd8927227e):
     if the 24 h after its start are at least 99% recorded, and only alerts that the same data
     without the leak does not raise count as detections.
 
-Outputs JSON summary to tinyml/leakage/results/validation_cache_county.json.
+Outputs JSON summary to detection/leakage/results/validation_cache_county.json.
 """
 import json
 import os

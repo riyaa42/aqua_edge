@@ -21,11 +21,12 @@ temp.*
 # Live simulation output (rebuilt every run)
 simulation/live/run/
 simulation/ns3/replay_result.csv
-tinyml/leakage/results/
-tinyml/consumption/results/
+detection/leakage/results/
+detection/consumption/results/
 
-# Downloaded datasets (large, and licensed separately: see tinyml/quality/README.md)
-tinyml/quality/data/
+# Downloaded datasets (large, and licensed separately: see detection/quality/README.md)
+detection/quality/data/
 
-# Radio keys are secrets (see load_keys in hal/packet.py)
+# Secret radio keys and runtime dashboard state
 *keys.json
+dashboard/run/

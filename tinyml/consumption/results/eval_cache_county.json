@@ -1,0 +1,501 @@
+{
+  "natural_fp": {
+    "statistical_baseline": [
+      {
+        "site_id": 3,
+        "irrigation": "Hose",
+        "val_alerts": 3,
+        "test_alerts": 8,
+        "test_alerts_by_type": {
+          "SUDDEN_CONSUMPTION_CHANGE": 7,
+          "UNUSUAL_HIGH_CONSUMPTION": 1
+        },
+        "test_days_with_data": 16.0,
+        "test_fp_per_day": 0.5
+      },
+      {
+        "site_id": 6,
+        "irrigation": "Hose",
+        "val_alerts": 1,
+        "test_alerts": 2,
+        "test_alerts_by_type": {
+          "SUDDEN_CONSUMPTION_CHANGE": 2
+        },
+        "test_days_with_data": 3.9,
+        "test_fp_per_day": 0.5125
+      },
+      {
+        "site_id": 10,
+        "irrigation": "Hose",
+        "val_alerts": 2,
+        "test_alerts": 0,
+        "test_alerts_by_type": {},
+        "test_days_with_data": 0.0,
+        "test_fp_per_day": null
+      },
+      {
+        "site_id": 20,
+        "irrigation": "SprinklerSystem",
+        "val_alerts": 2,
+        "test_alerts": 4,
+        "test_alerts_by_type": {
+          "SUDDEN_CONSUMPTION_CHANGE": 2,
+          "UNUSUAL_NIGHT_CONSUMPTION": 2
+        },
+        "test_days_with_data": 8.66,
+        "test_fp_per_day": 0.4619
+      },
+      {
+        "site_id": 31,
+        "irrigation": "SprinklerSystem",
+        "val_alerts": 9,
+        "test_alerts": 0,
+        "test_alerts_by_type": {},
+        "test_days_with_data": 1.39,
+        "test_fp_per_day": 0.0
+      }
+    ],
+    "statistical_zero_flow": [
+      {
+        "site_id": 3,
+        "irrigation": "Hose",
+        "val_alerts": 3,
+        "test_alerts": 8,
+        "test_alerts_by_type": {
+          "SUDDEN_CONSUMPTION_CHANGE": 7,
+          "UNUSUAL_HIGH_CONSUMPTION": 1
+        },
+        "test_days_with_data": 16.0,
+        "test_fp_per_day": 0.5
+      },
+      {
+        "site_id": 6,
+        "irrigation": "Hose",
+        "val_alerts": 1,
+        "test_alerts": 2,
+        "test_alerts_by_type": {
+          "SUDDEN_CONSUMPTION_CHANGE": 2
+        },
+        "test_days_with_data": 3.9,
+        "test_fp_per_day": 0.5125
+      },
+      {
+        "site_id": 10,
+        "irrigation": "Hose",
+        "val_alerts": 2,
+        "test_alerts": 0,
+        "test_alerts_by_type": {},
+        "test_days_with_data": 0.0,
+        "test_fp_per_day": null
+      },
+      {
+        "site_id": 20,
+        "irrigation": "SprinklerSystem",
+        "val_alerts": 2,
+        "test_alerts": 4,
+        "test_alerts_by_type": {
+          "SUDDEN_CONSUMPTION_CHANGE": 2,
+          "UNUSUAL_NIGHT_CONSUMPTION": 2
+        },
+        "test_days_with_data": 8.66,
+        "test_fp_per_day": 0.4619
+      },
+      {
+        "site_id": 31,
+        "irrigation": "SprinklerSystem",
+        "val_alerts": 9,
+        "test_alerts": 0,
+        "test_alerts_by_type": {},
+        "test_days_with_data": 1.39,
+        "test_fp_per_day": 0.0
+      }
+    ],
+    "lz_compression": [
+      {
+        "site_id": 3,
+        "irrigation": "Hose",
+        "val_alerts": 2,
+        "test_alerts": 32,
+        "test_alerts_by_type": {
+          "IRREGULAR_BURST_PATTERN": 32
+        },
+        "test_days_with_data": 16.0,
+        "test_fp_per_day": 2.0001
+      },
+      {
+        "site_id": 6,
+        "irrigation": "Hose",
+        "val_alerts": 3,
+        "test_alerts": 4,
+        "test_alerts_by_type": {
+          "IRREGULAR_BURST_PATTERN": 4
+        },
+        "test_days_with_data": 3.9,
+        "test_fp_per_day": 1.0251
+      },
+      {
+        "site_id": 10,
+        "irrigation": "Hose",
+        "val_alerts": 1,
+        "test_alerts": 0,
+        "test_alerts_by_type": {},
+        "test_days_with_data": 0.0,
+        "test_fp_per_day": null
+      },
+      {
+        "site_id": 20,
+        "irrigation": "SprinklerSystem",
+        "val_alerts": 7,
+        "test_alerts": 20,
+        "test_alerts_by_type": {
+          "IRREGULAR_BURST_PATTERN": 20
+        },
+        "test_days_with_data": 8.66,
+        "test_fp_per_day": 2.3095
+      },
+      {
+        "site_id": 31,
+        "irrigation": "SprinklerSystem",
+        "val_alerts": 6,
+        "test_alerts": 0,
+        "test_alerts_by_type": {},
+        "test_days_with_data": 1.39,
+        "test_fp_per_day": 0.0
+      }
+    ],
+    "combined": [
+      {
+        "site_id": 3,
+        "irrigation": "Hose",
+        "val_alerts": 5,
+        "test_alerts": 41,
+        "test_alerts_by_type": {
+          "IRREGULAR_BURST_PATTERN": 32,
+          "SUDDEN_CONSUMPTION_CHANGE": 8,
+          "UNUSUAL_HIGH_CONSUMPTION": 1
+        },
+        "test_days_with_data": 16.0,
+        "test_fp_per_day": 2.5626
+      },
+      {
+        "site_id": 6,
+        "irrigation": "Hose",
+        "val_alerts": 4,
+        "test_alerts": 6,
+        "test_alerts_by_type": {
+          "IRREGULAR_BURST_PATTERN": 4,
+          "SUDDEN_CONSUMPTION_CHANGE": 2
+        },
+        "test_days_with_data": 3.9,
+        "test_fp_per_day": 1.5376
+      },
+      {
+        "site_id": 10,
+        "irrigation": "Hose",
+        "val_alerts": 3,
+        "test_alerts": 0,
+        "test_alerts_by_type": {},
+        "test_days_with_data": 0.0,
+        "test_fp_per_day": null
+      },
+      {
+        "site_id": 20,
+        "irrigation": "SprinklerSystem",
+        "val_alerts": 9,
+        "test_alerts": 24,
+        "test_alerts_by_type": {
+          "IRREGULAR_BURST_PATTERN": 20,
+          "SUDDEN_CONSUMPTION_CHANGE": 2,
+          "UNUSUAL_NIGHT_CONSUMPTION": 2
+        },
+        "test_days_with_data": 8.66,
+        "test_fp_per_day": 2.7715
+      },
+      {
+        "site_id": 31,
+        "irrigation": "SprinklerSystem",
+        "val_alerts": 15,
+        "test_alerts": 0,
+        "test_alerts_by_type": {},
+        "test_days_with_data": 1.39,
+        "test_fp_per_day": 0.0
+      }
+    ]
+  },
+  "injected_heldout": {
+    "statistical_baseline": {
+      "UNUSUAL_HIGH_CONSUMPTION": {
+        "tp": 1,
+        "fn": 0,
+        "latencies": [
+          59
+        ],
+        "sites": [
+          20
+        ],
+        "skipped_no_data": [
+          6,
+          10
+        ]
+      },
+      "UNUSUAL_NIGHT_CONSUMPTION": {
+        "tp": 1,
+        "fn": 0,
+        "latencies": [
+          14
+        ],
+        "sites": [
+          20
+        ],
+        "skipped_no_data": [
+          6,
+          10
+        ]
+      },
+      "PROLONGED_ZERO_FLOW": {
+        "tp": 0,
+        "fn": 1,
+        "latencies": [],
+        "sites": [
+          20
+        ],
+        "skipped_no_data": [
+          6,
+          10
+        ]
+      },
+      "SUDDEN_CONSUMPTION_CHANGE": {
+        "tp": 1,
+        "fn": 0,
+        "latencies": [
+          164
+        ],
+        "sites": [
+          20
+        ],
+        "skipped_no_data": [
+          6,
+          10
+        ]
+      },
+      "IRREGULAR_BURST_PATTERN": {
+        "tp": 0,
+        "fn": 1,
+        "latencies": [],
+        "sites": [
+          20
+        ],
+        "skipped_no_data": [
+          6,
+          10
+        ]
+      }
+    },
+    "statistical_zero_flow": {
+      "UNUSUAL_HIGH_CONSUMPTION": {
+        "tp": 1,
+        "fn": 0,
+        "latencies": [
+          59
+        ],
+        "sites": [
+          20
+        ],
+        "skipped_no_data": [
+          6,
+          10
+        ]
+      },
+      "UNUSUAL_NIGHT_CONSUMPTION": {
+        "tp": 1,
+        "fn": 0,
+        "latencies": [
+          14
+        ],
+        "sites": [
+          20
+        ],
+        "skipped_no_data": [
+          6,
+          10
+        ]
+      },
+      "PROLONGED_ZERO_FLOW": {
+        "tp": 1,
+        "fn": 0,
+        "latencies": [
+          1383
+        ],
+        "sites": [
+          20
+        ],
+        "skipped_no_data": [
+          6,
+          10
+        ]
+      },
+      "SUDDEN_CONSUMPTION_CHANGE": {
+        "tp": 1,
+        "fn": 0,
+        "latencies": [
+          164
+        ],
+        "sites": [
+          20
+        ],
+        "skipped_no_data": [
+          6,
+          10
+        ]
+      },
+      "IRREGULAR_BURST_PATTERN": {
+        "tp": 0,
+        "fn": 1,
+        "latencies": [],
+        "sites": [
+          20
+        ],
+        "skipped_no_data": [
+          6,
+          10
+        ]
+      }
+    },
+    "lz_compression": {
+      "UNUSUAL_HIGH_CONSUMPTION": {
+        "tp": 0,
+        "fn": 1,
+        "latencies": [],
+        "sites": [
+          20
+        ],
+        "skipped_no_data": [
+          6,
+          10
+        ]
+      },
+      "UNUSUAL_NIGHT_CONSUMPTION": {
+        "tp": 0,
+        "fn": 1,
+        "latencies": [],
+        "sites": [
+          20
+        ],
+        "skipped_no_data": [
+          6,
+          10
+        ]
+      },
+      "PROLONGED_ZERO_FLOW": {
+        "tp": 0,
+        "fn": 1,
+        "latencies": [],
+        "sites": [
+          20
+        ],
+        "skipped_no_data": [
+          6,
+          10
+        ]
+      },
+      "SUDDEN_CONSUMPTION_CHANGE": {
+        "tp": 0,
+        "fn": 1,
+        "latencies": [],
+        "sites": [
+          20
+        ],
+        "skipped_no_data": [
+          6,
+          10
+        ]
+      },
+      "IRREGULAR_BURST_PATTERN": {
+        "tp": 1,
+        "fn": 0,
+        "latencies": [
+          44
+        ],
+        "sites": [
+          20
+        ],
+        "skipped_no_data": [
+          6,
+          10
+        ]
+      }
+    },
+    "combined": {
+      "UNUSUAL_HIGH_CONSUMPTION": {
+        "tp": 1,
+        "fn": 0,
+        "latencies": [
+          59
+        ],
+        "sites": [
+          20
+        ],
+        "skipped_no_data": [
+          6,
+          10
+        ]
+      },
+      "UNUSUAL_NIGHT_CONSUMPTION": {
+        "tp": 1,
+        "fn": 0,
+        "latencies": [
+          14
+        ],
+        "sites": [
+          20
+        ],
+        "skipped_no_data": [
+          6,
+          10
+        ]
+      },
+      "PROLONGED_ZERO_FLOW": {
+        "tp": 1,
+        "fn": 0,
+        "latencies": [
+          1383
+        ],
+        "sites": [
+          20
+        ],
+        "skipped_no_data": [
+          6,
+          10
+        ]
+      },
+      "SUDDEN_CONSUMPTION_CHANGE": {
+        "tp": 1,
+        "fn": 0,
+        "latencies": [
+          164
+        ],
+        "sites": [
+          20
+        ],
+        "skipped_no_data": [
+          6,
+          10
+        ]
+      },
+      "IRREGULAR_BURST_PATTERN": {
+        "tp": 1,
+        "fn": 0,
+        "latencies": [
+          44
+        ],
+        "sites": [
+          20
+        ],
+        "skipped_no_data": [
+          6,
+          10
+        ]
+      }
+    }
+  }
+}

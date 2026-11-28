@@ -1,0 +1,256 @@
+{
+  "test_seeds": [
+    303,
+    404,
+    505
+  ],
+  "flats": [
+    "B-401",
+    "B-203",
+    "B-G01"
+  ],
+  "summary": {
+    "statistical_baseline": {
+      "normal_fp": 0,
+      "normal_fp_per_flat_day": 0.0,
+      "categories": {
+        "UNUSUAL_HIGH_CONSUMPTION": {
+          "tp": 9,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "median_latency_min": 59,
+          "repeats": 0
+        },
+        "UNUSUAL_NIGHT_CONSUMPTION": {
+          "tp": 9,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "median_latency_min": 14,
+          "repeats": 0
+        },
+        "PROLONGED_ZERO_FLOW": {
+          "tp": 0,
+          "fp": 0,
+          "fn": 9,
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "median_latency_min": null,
+          "repeats": 0
+        },
+        "SUDDEN_CONSUMPTION_CHANGE": {
+          "tp": 9,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "median_latency_min": 156,
+          "repeats": 9
+        },
+        "IRREGULAR_BURST_PATTERN": {
+          "tp": 0,
+          "fp": 0,
+          "fn": 9,
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "median_latency_min": null,
+          "repeats": 0
+        }
+      }
+    },
+    "statistical_zero_flow": {
+      "normal_fp": 0,
+      "normal_fp_per_flat_day": 0.0,
+      "categories": {
+        "UNUSUAL_HIGH_CONSUMPTION": {
+          "tp": 9,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "median_latency_min": 59,
+          "repeats": 0
+        },
+        "UNUSUAL_NIGHT_CONSUMPTION": {
+          "tp": 9,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "median_latency_min": 14,
+          "repeats": 0
+        },
+        "PROLONGED_ZERO_FLOW": {
+          "tp": 9,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "median_latency_min": 1439,
+          "repeats": 0
+        },
+        "SUDDEN_CONSUMPTION_CHANGE": {
+          "tp": 9,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "median_latency_min": 156,
+          "repeats": 9
+        },
+        "IRREGULAR_BURST_PATTERN": {
+          "tp": 0,
+          "fp": 0,
+          "fn": 9,
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "median_latency_min": null,
+          "repeats": 0
+        }
+      }
+    },
+    "lz_compression": {
+      "normal_fp": 52,
+      "normal_fp_per_flat_day": 2.8889,
+      "categories": {
+        "UNUSUAL_HIGH_CONSUMPTION": {
+          "tp": 0,
+          "fp": 12,
+          "fn": 9,
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "median_latency_min": null,
+          "repeats": 0
+        },
+        "UNUSUAL_NIGHT_CONSUMPTION": {
+          "tp": 0,
+          "fp": 10,
+          "fn": 9,
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "median_latency_min": null,
+          "repeats": 0
+        },
+        "PROLONGED_ZERO_FLOW": {
+          "tp": 0,
+          "fp": 0,
+          "fn": 9,
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "median_latency_min": null,
+          "repeats": 0
+        },
+        "SUDDEN_CONSUMPTION_CHANGE": {
+          "tp": 0,
+          "fp": 12,
+          "fn": 9,
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "median_latency_min": null,
+          "repeats": 0
+        },
+        "IRREGULAR_BURST_PATTERN": {
+          "tp": 9,
+          "fp": 68,
+          "fn": 0,
+          "precision": 0.117,
+          "recall": 1.0,
+          "f1": 0.209,
+          "median_latency_min": 23,
+          "repeats": 27
+        }
+      }
+    },
+    "combined": {
+      "normal_fp": 52,
+      "normal_fp_per_flat_day": 2.8889,
+      "categories": {
+        "UNUSUAL_HIGH_CONSUMPTION": {
+          "tp": 9,
+          "fp": 12,
+          "fn": 0,
+          "precision": 0.429,
+          "recall": 1.0,
+          "f1": 0.6,
+          "median_latency_min": 59,
+          "repeats": 0
+        },
+        "UNUSUAL_NIGHT_CONSUMPTION": {
+          "tp": 9,
+          "fp": 10,
+          "fn": 0,
+          "precision": 0.474,
+          "recall": 1.0,
+          "f1": 0.643,
+          "median_latency_min": 14,
+          "repeats": 0
+        },
+        "PROLONGED_ZERO_FLOW": {
+          "tp": 9,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "median_latency_min": 1439,
+          "repeats": 0
+        },
+        "SUDDEN_CONSUMPTION_CHANGE": {
+          "tp": 9,
+          "fp": 12,
+          "fn": 0,
+          "precision": 0.429,
+          "recall": 1.0,
+          "f1": 0.6,
+          "median_latency_min": 156,
+          "repeats": 9
+        },
+        "IRREGULAR_BURST_PATTERN": {
+          "tp": 9,
+          "fp": 68,
+          "fn": 0,
+          "precision": 0.117,
+          "recall": 1.0,
+          "f1": 0.209,
+          "median_latency_min": 23,
+          "repeats": 27
+        }
+      }
+    }
+  },
+  "resources": {
+    "statistical_baseline": {
+      "us_per_step": 7.79,
+      "peak_ram_kb": 13.9
+    },
+    "statistical_zero_flow": {
+      "us_per_step": 7.28,
+      "peak_ram_kb": 13.71
+    },
+    "lz_compression": {
+      "us_per_step": 14.69,
+      "peak_ram_kb": 9.75
+    },
+    "combined": {
+      "us_per_step": 19.24,
+      "peak_ram_kb": 19.28
+    }
+  }
+}

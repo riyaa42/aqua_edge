@@ -7,7 +7,7 @@ Uses build_society.py independent bursty demand patterns:
 
 Evaluates all 5 anomaly categories + normal operation across all 4 approaches,
 plus per-step CPU latency and RAM footprint.
-Outputs JSON to tinyml/consumption/results/eval_building_b.json.
+Outputs JSON to detection/consumption/results/eval_building_b.json.
 """
 import json
 import os
@@ -23,7 +23,7 @@ ROOT = os.path.dirname(os.path.dirname(HERE))
 sys.path[:0] = [os.path.join(ROOT, "simulation", "scripts")]
 
 import build_society as S  # noqa: E402
-from tinyml.consumption.detectors import (  # noqa: E402
+from detection.consumption.detectors import (  # noqa: E402
     StatisticalBaselineDetector,
     StatisticalZeroFlowDetector,
     LZCompressionDetector,

@@ -46,7 +46,7 @@ The timekeeper waits for every node before moving on (this is called *lockstep*)
 
 ## 4. Detection and alerts (firmware)
 
-- Flat nodes detect leaks with flow only: continuous night flow and abnormal consumption (the pressure rule was removed; see `../tinyml/leakage/README.md` section 6).
+- Flat nodes detect leaks with flow only: continuous night flow and abnormal consumption (the pressure rule was removed; see `../detection/leakage/README.md` section 6).
 - The tank node detects abnormal supply and water-quality events.
 - The gateway runs a mass balance (supply flow against the sum of flat flows) to spot pipe leaks [Ali et al. [6], for comparing the tank supply against the flats to find pipe leaks].
 - **Alerts re-arm.** Once a problem has been quiet for 10 minutes (`ALERT_CLEAR_S`), the alert can fire again if the problem comes back.
@@ -168,6 +168,6 @@ Self-checks: `python3 live/radio.py` and `python3 webots/run_offline.py`.
 5. **Hidden nodes.** Use ns-3 node-to-node links to check whether nodes can hear each other.
 6. **Retry storm.** Back off re-sends during long radio cuts to save energy.
 7. **New or ongoing leak.** Decide on the laptop whether a repeat alert is a new problem or the same one.
-8. **TinyML model.** Done: the tank node runs the 8-bit model (`../tinyml/quality/README.md`).
+8. **TinyML model.** Done: the tank node runs the 8-bit model (`../detection/quality/README.md`).
 9. **Monitoring dashboard.** Build a Grafana dashboard for the real output.
 10. **Pass marks.** Agree final pass marks as a team.

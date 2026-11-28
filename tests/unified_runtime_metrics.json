@@ -8,50 +8,50 @@
   "modes": {
     "flat": {
       "steps": 3240,
-      "wall_ms_total": 2016.08,
-      "us_per_step": 622.25,
-      "cpu_pct_of_1min_budget": 0.00083,
-      "throughput_steps_per_s": 1607.1,
-      "peak_ram_kb": 162.85
+      "wall_ms_total": 488.84,
+      "us_per_step": 150.88,
+      "cpu_pct_of_1min_budget": 0.00023,
+      "throughput_steps_per_s": 6627.9,
+      "peak_ram_kb": 175.91
     },
     "tank": {
       "steps": 3240,
-      "wall_ms_total": 6206.28,
-      "us_per_step": 1915.52,
-      "cpu_pct_of_1min_budget": 0.0023,
-      "throughput_steps_per_s": 522.1,
-      "peak_ram_kb": 164.81
+      "wall_ms_total": 1617.88,
+      "us_per_step": 499.35,
+      "cpu_pct_of_1min_budget": 0.00081,
+      "throughput_steps_per_s": 2002.6,
+      "peak_ram_kb": 169.9
     },
     "combined": {
       "steps": 3240,
-      "wall_ms_total": 6621.96,
-      "us_per_step": 2043.81,
-      "cpu_pct_of_1min_budget": 0.00254,
-      "throughput_steps_per_s": 489.3,
-      "peak_ram_kb": 185.92
+      "wall_ms_total": 1965.78,
+      "us_per_step": 606.72,
+      "cpu_pct_of_1min_budget": 0.00096,
+      "throughput_steps_per_s": 1648.2,
+      "peak_ram_kb": 215.7
     }
   },
   "incremental_ram_kb": {
-    "combined_minus_flat": 23.07,
-    "combined_minus_tank": 21.11
+    "combined_minus_flat": 39.79,
+    "combined_minus_tank": 45.8
   },
-  "packet_pack_us": 20.67,
+  "packet_pack_us": 4.87,
   "packet_sum_bytes": 34,
   "storage_bytes": {
     "artifacts": {
-      "firmware/edge_node/aqua_edge.py": 28781,
-      "firmware/gateway/gateway.py": 23337,
-      "firmware/gateway/gateway_analytics.py": 17041,
-      "firmware/communication/packet.py": 6349,
-      "firmware/edge_node/quality_model.py": 13320,
-      "firmware/edge_node/quality_model.json": 1450,
-      "firmware/edge_node/temporal_model.json": 3029,
-      "abnormal_consumption/detectors.py": 12576
+      "edge/aqua_edge.py": 46099,
+      "gateway/core.py": 47512,
+      "gateway/analytics.py": 22626,
+      "hal/packet.py": 8848,
+      "detection/quality/quality_model.py": 13320,
+      "detection/quality/quality_model.json": 1450,
+      "detection/quality/temporal_model.json": 3029,
+      "detection/consumption/detectors.py": 13189
     },
-    "total_code_and_models_kb": 103.4,
-    "baseline_json_bytes": 4445,
+    "total_code_and_models_kb": 152.42,
+    "baseline_json_bytes": 4469,
     "store_24h_est_bytes": 11590,
     "store_7d_est_bytes": 81130,
-    "host_disk_free_gb": 506.75
+    "host_disk_free_gb": 506.06
   }
 }

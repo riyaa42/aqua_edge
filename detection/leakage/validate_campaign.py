@@ -14,7 +14,7 @@ Uses single-pass WNTRSimulator(wn).run_sim() with scheduled WNTR Controls (same
 mechanism as make_scenario.py) and streams 1-minute readings causally to the
 unmodified firmware (FlatNode, TankNode, Gateway).
 
-Outputs JSON summary to tinyml/leakage/results/validation_campaign.json.
+Outputs JSON summary to detection/leakage/results/validation_campaign.json.
 """
 import json
 import os

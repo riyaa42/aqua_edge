@@ -26,10 +26,10 @@ directly; everything goes through a small hardware layer `hal` with these method
 Detection rules (all thresholds are calibration knobs at the top):
     Flat node: night flow, continuous flow and high use (flow only), a pressure-assisted leak
       check that needs a pressure drop AND high flow on the same flat (pressure alone raises
-      nothing; see tinyml/leakage/README.md), and the consumption detector in
-      tinyml/consumption/detectors.py. On-node anomaly detection follows Babazadeh [3].
+      nothing; see detection/leakage/README.md), and the consumption detector in
+      detection/consumption/detectors.py. On-node anomaly detection follows Babazadeh [3].
     Tank node: water-quality standards check, 8-bit neural network (Sharma et al. [1]) and
-      temporal autoencoder (tinyml/quality/quality_model.py), abnormal supply flow, and low tank level.
+      temporal autoencoder (detection/quality/quality_model.py), abnormal supply flow, and low tank level.
     A missing reading restarts the "minutes in a row" count of every check that uses it.
 Two entry points: step() once a minute (sensors and checks), and radio_poll(), which the HAL
 calls as soon as a packet arrives and again at the time radio_poll() returns.
@@ -45,12 +45,11 @@ import os
 import random
 
 
-from tinyml.consumption.detectors import StatisticalZeroFlowDetector
-from hal.link import MessageLink
+from detection.consumption.detectors import StatisticalZeroFlowDetector
 from hal.lora433 import (BEACON_S, FLUSH_ROUTINE_AFTER_S, FLUSH_STEP_S, HEARD_S,  # noqa: F401
                      AirtimeBudget, airtime_s, retry_wait)
 from hal.packet import NAMES, pack, unpack, violation_mask
-from tinyml.quality.quality_model import QualityModel, QualityMonitor, TemporalModel
+from detection.quality.quality_model import QualityModel, QualityMonitor, TemporalModel
 
 DAY, HOUR = 86400, 3600
 LEARN_S = DAY                 # first day: learn this node's normal pattern
@@ -76,7 +75,7 @@ CONT_FLOW_LPS = 0.005         # below this the flat's water counts as "off"
 CONT_FLOW_MIN = 180           # water never off for 3 h in a row: leak alert, day or night
 # Retuned from 480 min. Longest run in bursty simulated Building B: 15 min. Cache County Sites
 # 006/010/020: 91 min (121.5 recorded days), but Sites 003 and 031 exceed 3 h (630 and 406 min),
-# so false alerts are possible: tinyml/leakage/validation_results.md section 5.
+# so false alerts are possible: detection/leakage/validation_results.md section 5.
 PRESSURE_SIGMAS, PRESSURE_MARGIN_M, PRESSURE_MIN = 4.0, 0.3, 10   # tank level check
 PRESSURE_DROP_SIGMAS, PRESSURE_DROP_MIN_M, PRESSURE_LEAK_MIN = 3.0, 0.35, 10  # pressure+flow flat leak check
 ALERT_CLEAR_S = 600           # an alert re-arms after its condition has been normal this long;
@@ -258,8 +257,6 @@ class Node:
         slot = getattr(hal, "slot", None)
         self.index = slot[0] if slot else NAMES.index(node_id) if node_id in NAMES else 0
         self.beacon_key = hal.key("GATEWAY")
-        # these two keys are all this node can read: packets to or from other nodes are rejected
-        self.link = MessageLink(hal, {node_id: self.key, "GATEWAY": self.beacon_key}.get)
         self.heard_at, self.gateway_boot, self.last_beacon_gt = None, None, -1
         self.airtime = AirtimeBudget()
         self.ok_minutes = {}           # recovery message -> minutes in a row its problem looked over

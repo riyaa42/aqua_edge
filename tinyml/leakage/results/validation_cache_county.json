@@ -1,0 +1,208 @@
+{
+  "audit": [
+    {
+      "site_id": 3,
+      "irrigation": "Hose",
+      "span_days_incl_gaps": 201.1,
+      "days_with_data": 156.6,
+      "max_continuous_flow_min": 630,
+      "runs_reaching_limit": 11,
+      "dt_mode_s": 4.0,
+      "gaps_gt_4s": 16,
+      "nan_pulses": 0,
+      "has_leak_label": false,
+      "event_labels": {
+        "faucet": 384736,
+        "toilet": 2492,
+        "irrigation": 542,
+        "shower": 403,
+        "clotheswasher": 351,
+        "bathtub": 21
+      }
+    },
+    {
+      "site_id": 6,
+      "irrigation": "Hose",
+      "span_days_incl_gaps": 160.0,
+      "days_with_data": 43.0,
+      "max_continuous_flow_min": 85,
+      "runs_reaching_limit": 0,
+      "dt_mode_s": 4.0,
+      "gaps_gt_4s": 9,
+      "nan_pulses": 0,
+      "has_leak_label": false,
+      "event_labels": {
+        "faucet": 2079,
+        "toilet": 330,
+        "shower": 86,
+        "clotheswasher": 48,
+        "irrigation": 33
+      }
+    },
+    {
+      "site_id": 10,
+      "irrigation": "Hose",
+      "span_days_incl_gaps": 316.9,
+      "days_with_data": 42.8,
+      "max_continuous_flow_min": 83,
+      "runs_reaching_limit": 0,
+      "dt_mode_s": 4.0,
+      "gaps_gt_4s": 2,
+      "nan_pulses": 0,
+      "has_leak_label": false,
+      "event_labels": {
+        "faucet": 11447,
+        "toilet": 730,
+        "shower": 86,
+        "clotheswasher": 20,
+        "irrigation": 8
+      }
+    },
+    {
+      "site_id": 20,
+      "irrigation": "SprinklerSystem",
+      "span_days_incl_gaps": 261.9,
+      "days_with_data": 35.7,
+      "max_continuous_flow_min": 91,
+      "runs_reaching_limit": 0,
+      "dt_mode_s": 4.0,
+      "gaps_gt_4s": 2,
+      "nan_pulses": 0,
+      "has_leak_label": false,
+      "event_labels": {
+        "faucet": 4967,
+        "toilet": 635,
+        "shower": 101,
+        "clotheswasher": 83,
+        "irrigation": 51,
+        "bathtub": 15
+      }
+    },
+    {
+      "site_id": 31,
+      "irrigation": "SprinklerSystem",
+      "span_days_incl_gaps": 113.3,
+      "days_with_data": 31.6,
+      "max_continuous_flow_min": 406,
+      "runs_reaching_limit": 5,
+      "dt_mode_s": 4.0,
+      "gaps_gt_4s": 1,
+      "nan_pulses": 0,
+      "has_leak_label": false,
+      "event_labels": {
+        "faucet": 2560,
+        "toilet": 1364,
+        "unclassified": 852,
+        "shower": 252,
+        "clotheswasher": 81,
+        "bathtub": 28,
+        "irrigation": 8,
+        "unknown": 1
+      }
+    }
+  ],
+  "false_positive_eval": [
+    {
+      "site_id": 3,
+      "irrigation": "Hose",
+      "eval_days": 29.0,
+      "leak_alerts": 0,
+      "leak_fp_per_day": 0.0,
+      "by_type": {},
+      "consumption_alerts": 1
+    },
+    {
+      "site_id": 6,
+      "irrigation": "Hose",
+      "eval_days": 11.7,
+      "leak_alerts": 0,
+      "leak_fp_per_day": 0.0,
+      "by_type": {},
+      "consumption_alerts": 0
+    },
+    {
+      "site_id": 10,
+      "irrigation": "Hose",
+      "eval_days": 8.5,
+      "leak_alerts": 0,
+      "leak_fp_per_day": 0.0,
+      "by_type": {},
+      "consumption_alerts": 0
+    },
+    {
+      "site_id": 20,
+      "irrigation": "SprinklerSystem",
+      "eval_days": 21.7,
+      "leak_alerts": 0,
+      "leak_fp_per_day": 0.0,
+      "by_type": {},
+      "consumption_alerts": 0
+    },
+    {
+      "site_id": 31,
+      "irrigation": "SprinklerSystem",
+      "eval_days": 14.4,
+      "leak_alerts": 10,
+      "leak_fp_per_day": 0.6948,
+      "by_type": {
+        "LEAK_NIGHT_FLOW": 6,
+        "LEAK_CONTINUOUS_FLOW": 4
+      },
+      "consumption_alerts": 6
+    }
+  ],
+  "injected_leak_eval": [
+    {
+      "site_id": 6,
+      "inject_lps": 0.05,
+      "scored": false,
+      "coverage_24h": 0.17
+    },
+    {
+      "site_id": 6,
+      "inject_lps": 0.5,
+      "scored": false,
+      "coverage_24h": 0.17
+    },
+    {
+      "site_id": 10,
+      "inject_lps": 0.05,
+      "scored": true,
+      "coverage_24h": 1.0,
+      "detected": true,
+      "mechanism": "LEAK_CONTINUOUS_FLOW",
+      "latency_min": 179.0,
+      "pre_leak_fp": 0
+    },
+    {
+      "site_id": 10,
+      "inject_lps": 0.5,
+      "scored": true,
+      "coverage_24h": 1.0,
+      "detected": true,
+      "mechanism": "LEAK_CONTINUOUS_FLOW",
+      "latency_min": 179.0,
+      "pre_leak_fp": 0
+    },
+    {
+      "site_id": 20,
+      "inject_lps": 0.05,
+      "scored": true,
+      "coverage_24h": 1.0,
+      "detected": true,
+      "mechanism": "LEAK_CONTINUOUS_FLOW",
+      "latency_min": 179.0,
+      "pre_leak_fp": 0
+    },
+    {
+      "site_id": 20,
+      "inject_lps": 0.5,
+      "scored": true,
+      "coverage_24h": 1.0,
+      "detected": true,
+      "mechanism": "LEAK_CONTINUOUS_FLOW",
+      "latency_min": 179.0,
+      "pre_leak_fp": 0
+    }
+  ]
+}

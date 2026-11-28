@@ -35,6 +35,7 @@ test-consumption = "tasks:test_consumption"
 test-leakage = "tasks:test_leakage"
 test-runtime = "tasks:test_runtime"
 test-parity = "tasks:test_parity"
+test-dashboard = "tasks:test_dashboard"
 edge-based-node = "tasks:edge_based_node"
 edge-based-gateway = "tasks:edge_based_gateway"
 cloud-based-node = "tasks:cloud_based_node"
@@ -60,4 +61,4 @@ package = true
 
 [tool.uv.build-backend]
 module-root = ""
-module-name = ["tinyml", "gateway", "hal", "edge", "bogo", "tests", "tasks"]
+module-name = ["detection", "gateway", "hal", "edge", "bogo", "dashboard", "tests", "tasks"]
