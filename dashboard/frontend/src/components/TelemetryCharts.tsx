@@ -60,7 +60,7 @@ export function TelemetryCharts({ snapshot, points, rangeHours, onRangeChange, l
   const wqLabel = wqMetric === "ph" ? "pH" : wqMetric === "tds" ? "TDS (ppm)" : "Turbidity (NTU)";
   const lkLabel =
     lkMetric === "balance_pct"
-      ? "Pipe loss %"
+      ? "Water Balance Difference (%)"
       : lkMetric === "tank_level_m"
         ? "Tank level (m)"
         : "Tank inflow (L/s)";
@@ -191,13 +191,17 @@ export function TelemetryCharts({ snapshot, points, rangeHours, onRangeChange, l
 
         <Card>
           <CardHeader>
-            <CardTitle>Leak Check and Tank</CardTitle>
+            <CardTitle>Water Distribution and Tank</CardTitle>
             <Badge tone={lk?.pipe_leak_active ? "dark" : "plain"}>
-              {lk?.pipe_leak_active ? "PIPE LEAK" : lk?.pipe_leak_active === false ? "CLEAR" : "NO DATA"}
+              {lk?.pipe_leak_active
+                ? "PIPE_LEAK ACTIVE"
+                : lk?.pipe_leak_active === false
+                  ? "No active leak alert"
+                  : "NO DATA"}
             </Badge>
           </CardHeader>
           <CardContent className="space-y-3">
-            <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
+            <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-5">
               <div className="border border-black bg-[var(--panel-alt)] p-2">
                 <div className="text-[10px] uppercase">Supply</div>
                 <div className="font-bold">{plainSupplyState(sup?.state)}</div>
@@ -211,9 +215,19 @@ export function TelemetryCharts({ snapshot, points, rangeHours, onRangeChange, l
                 <div className="font-bold">{formatNumber(sup?.inflow_lps, "L/s", 2)}</div>
               </div>
               <div className="border border-black bg-[var(--panel-alt)] p-2">
-                <div className="text-[10px] uppercase">Pipe Loss</div>
+                <div className="text-[10px] uppercase">Unaccounted Water</div>
                 <div className="font-bold">
                   {balanceNow == null ? "Waiting for more nodes" : `${balanceNow.toFixed(1)}%`}
+                </div>
+              </div>
+              <div className="border border-black bg-[var(--panel-alt)] p-2">
+                <div className="text-[10px] uppercase">PIPE_LEAK Alert</div>
+                <div className="font-bold">
+                  {lk?.pipe_leak_active == null
+                    ? "Not available"
+                    : lk.pipe_leak_active
+                      ? "Active"
+                      : "No active leak alert"}
                 </div>
               </div>
             </div>
@@ -229,7 +243,7 @@ export function TelemetryCharts({ snapshot, points, rangeHours, onRangeChange, l
                   <div className="font-bold">{pipeLeak.localization_confidence ?? "Not available"}</div>
                 </div>
                 <div>
-                  <div className="text-[10px] uppercase">Pipe Error</div>
+                  <div className="text-[10px] uppercase">Unaccounted Water (%)</div>
                   <div className="font-bold">
                     {pipeLeak.error_pct != null ? `${pipeLeak.error_pct.toFixed(1)}%` : "Not available"}
                   </div>
@@ -243,7 +257,7 @@ export function TelemetryCharts({ snapshot, points, rangeHours, onRangeChange, l
 
             <div className="flex flex-wrap gap-1.5">
               {([
-                ["balance_pct", "Pipe Loss %"],
+                ["balance_pct", "Water Balance Difference"],
                 ["tank_level_m", "Tank Level"],
                 ["tank_inflow_lps", "Tank Inflow"],
               ] as const).map(([key, label]) => (

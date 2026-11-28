@@ -68,7 +68,7 @@ function QueueCard({
             <span className="font-bold">{confidence ?? "Not available"}</span>
           </div>
           <div>
-            <span className="uppercase">Pipe loss: </span>
+            <span className="uppercase">Unaccounted water: </span>
             <span className="font-bold">{errorPct != null ? `${errorPct.toFixed(1)}%` : "Not available"}</span>
           </div>
           <div>

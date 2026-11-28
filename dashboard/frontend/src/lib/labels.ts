@@ -86,7 +86,7 @@ const EVIDENCE_LABELS: Record<string, string> = {
   flow: "Flow (L/s)",
   p_min: "Min pressure (m)",
   p_mean: "Mean pressure (m)",
-  error_pct: "Pipe loss (%)",
+  error_pct: "Unaccounted water (%)",
   inflow_lps: "Tank inflow (L/s)",
   last_heard_min: "Silent for (min)",
   ahead_s: "Clock ahead (s)",
