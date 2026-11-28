@@ -1,6 +1,6 @@
 """The Pi node's way into the HAL: its SX1278 on the GPIO pins (lora_pi.py), plus the shared
 message link (link.py). Radio communication only: the node's clock, storage, LEDs and buzzer are
-in edge/board.py, its sensor readings come from bogo/, and edge/edge_based.py runs it.
+in edge/board.py, its sensor readings come from edge/sensors/, and edge/edge_based.py runs it.
 Wiring and setup: hal/README.md, "Running on the Pi".
 """
 import time

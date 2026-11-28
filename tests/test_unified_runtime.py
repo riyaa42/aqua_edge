@@ -136,7 +136,7 @@ def test_combined_replay_and_isolation(stream):
     assert "LEAK_PRESSURE_DROP" in alert_names, alert_names   # flat leak at 34h
     assert "ABNORMAL_CONSUMPTION" in alert_names, alert_names # high flow at 34h
     assert len(rt.store.queue) == 0, f"Queue did not drain: {len(rt.store.queue)}"
-    assert os.path.exists(rt.base_path), "Baseline not persisted"
+    assert os.path.exists(rt.state_path), "learned state not persisted"
 
     # Verify leak scoring excludes consumption & quality alerts
     for non_leak in ("ABNORMAL_CONSUMPTION", "QUALITY_RUNOFF", "QUALITY_CHEMICAL", "PROLONGED_ZERO_FLOW"):
@@ -220,7 +220,7 @@ def measure_resources(stream, td_sample):
     # 24h & 7d Store retention estimate (~96 SUM/day * ~110 bytes JSONL + ~5 alerts)
     store_24h_bytes = 96 * 115 + 5 * 110
     store_7d_bytes = store_24h_bytes * 7
-    base_bytes = os.path.getsize(os.path.join(td_sample, "B-203_q_baseline.json")) if os.path.exists(os.path.join(td_sample, "B-203_q_baseline.json")) else 0
+    base_bytes = os.path.getsize(os.path.join(td_sample, "B-203_q_state.json")) if os.path.exists(os.path.join(td_sample, "B-203_q_state.json")) else 0
 
     return {
         "host": {

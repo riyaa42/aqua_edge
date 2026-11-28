@@ -7,6 +7,8 @@
 | `analytics.py` | Gateway | Open incidents, closed by explicit recovery messages, cross-node root-cause correlation (tank contamination & main riser leak groups), composite risk scoring (0–100) & ranked maintenance queue, online vs. offline delivery-latency accounting, and `Gateway.snapshot()` JSON export |
 | `edge_based.py` | Gateway | Server entry point, edge-based solution: nodes decide their own alerts, and the gateway decides what needs several nodes' data. It reaches the LoRa antenna through an ESP8266 (`../hal/gate_hal.py`), runs `core.py` and publishes over MQTT (`../comms/`). `uv run edge-based-gateway`, or [with Docker Compose](#run-with-docker-compose). Not tested on real hardware |
 | `dashboard_link.py` | Gateway | Sends snapshots to the [dashboard](../dashboard/README.md) on its own thread, through `dashboard/shipper.py` |
+| `order.py` | Gateway | Command that sends a node a [valve or alert-LED order](#orders-to-a-node) |
+| `virtual_1node.json`, `virtual_3node.json` | Gateway | Trees for the [virtual-node demos](../edge/README.md#run-virtual-nodes) |
 | `mosquitto/` | Gateway | The MQTT broker's settings and access rules, used by [Docker Compose](#run-with-docker-compose) |
 | `cloud_based.py` | Gateway | Server entry point, cloud-based solution: nodes only buffer and stream sensor data, and all ML and every decision happen on this side. Will reach the LoRa antenna through an ESP8266. `uv run cloud-based-gateway`. **Placeholder, not implemented yet** |
 
@@ -51,11 +53,12 @@ B-TANK (tank, valve)
 | `type` | Yes | `tank` (only as the root; none in a lone-flat tree), `junction` (a point in the pipes with no device) or `flat` |
 | `valve` | Yes | `true` if a valve sits on the pipe **just before** this entry. It controls the water to this entry and everything under it |
 | `children` | Junctions | The entries fed through this one. Optional for the tank (a tank alone is a one-node building); not allowed on a flat, whose meter would then count their water twice |
+| `unmetered_homes` | No, tank only | `true` if the tank also feeds homes that are not in the tree. The gateway then **skips the building check and pipe-leak detection**: that water would look like a leak |
 | `label` | No, junctions only | Short unique name used in gateway events (`"4"` .. `"G"`); defaults to the `id` |
 
 Other keys are rejected, and so is a junction that uses a radio name. The loader stops with a message naming the problem.
 
-**Valve flags in `building_B.json` are an assumption:** `true` for the tank and every flat, `false` for every junction, because no junction valve is documented (the water model has no valves). Set a junction to `true` where one is really fitted. Valve flags are only used to record `isolation_valve` on a pipe leak: the nearest valve at or above the suspected junction. Nothing opens or closes.
+**Valve flags in `building_B.json` are an assumption:** `true` for the tank and every flat, `false` for every junction, because no junction valve is documented (the water model has no valves). Set a junction to `true` where one is really fitted. On the gateway, valve flags are only used to record `isolation_valve` on a pipe leak: the nearest valve at or above the suspected junction. They do not decide which valves close: each node told of a [gateway problem](#gateway-alerts-sent-to-nodes) closes its own.
 
 **What the gateway takes from the tree:** the list of nodes; which junction feeds each flat (the old "floor", no longer read from the flat's name); what is upstream of what, for locating pipe leaks; who is fed through a suspected junction; and the affected-flat count in the maintenance ranking. Pipe lengths, diameters and heights are not in it.
 
@@ -112,6 +115,8 @@ uv sync --extra gateway
 uv run edge-based-gateway --keys /full/path/gateway_keys.json --data gateway-data --port /dev/ttyUSB0
 ```
 
+`--udp-listen 127.0.0.1:1700` also takes nodes over the network (`../hal/udp.py`), and `--port none` runs without the ESP8266.
+
 This runs without MQTT. To publish to a broker you run yourself, add `--mqtt-host 127.0.0.1 --mqtt-user gateway` and set `MQTT_PASSWORD`. It prints each gateway decision.
 
 ### Run with Docker Compose
@@ -120,9 +125,11 @@ This starts the gateway server, a Mosquitto broker and the [dashboard server](..
 
 ```sh
 cp .env.example .env      # set both passwords, the dashboard token and the full path of the key file
-docker compose up -d --build
+docker compose -f compose.yaml -f compose.esp8266.yaml up -d --build     # with the ESP8266
 docker compose logs -f gateway
 ```
+
+**`compose.yaml` alone uses no radio hardware.** For real nodes you must add `compose.esp8266.yaml` as above, every time (or set `COMPOSE_FILE=compose.yaml:compose.esp8266.yaml` in `.env`; not tried with Podman). To run with virtual nodes instead, leave it out and [pick a profile](../edge/README.md#run-virtual-nodes).
 
 | In `.env` | Meaning |
 |---|---|
@@ -135,13 +142,13 @@ docker compose logs -f gateway
 | `AQUA_ENABLE_OUTAGE_SIM` | `1` allows the simulated Internet outage, off by default |
 | `GATEWAY_KEYS` | Full path of the key file. Mounted read-only, never copied into the image |
 | `GATEWAY_TREE` | The [building tree](#building-tree), default `./gateway/building_B.json`. Start a relative path with `./` |
-| `GATEWAY_SERIAL` | The ESP8266's port, default `/dev/ttyUSB0` |
+| `GATEWAY_SERIAL` | With `compose.esp8266.yaml`: the ESP8266's port, default `/dev/ttyUSB0` |
 | `MQTT_PORT` | Port on this computer, default 1883 |
 
 - **Subscribe** from this computer at `127.0.0.1:1883` as `viewer`, or: `docker compose exec mqtt mosquitto_sub -V 5 -u viewer -P <password> -t 'aqua/v1/#' -v`. Topics and payloads: [`../comms/README.md`](../comms/README.md). The broker is not reachable from other computers.
-- **Dashboard:** read it from this computer at `http://127.0.0.1:8000/api/v1/health` ([all addresses](../dashboard/README.md#running-it)). There is no web page yet. It is not reachable from other computers.
+- **Dashboard:** read it from this computer at `http://127.0.0.1:8000/api/v1/health` ([all addresses](../dashboard/README.md#running-it)). The image also builds the web page, served at `http://127.0.0.1:8000/`. It is not reachable from other computers.
 - **State** is in the `gateway-data` and `dashboard-data` volumes. `docker compose down` keeps them; **`down -v` deletes them**, including the record of which packets were already seen, the commands not yet confirmed and the dashboard's history. Do not delete `gateway-data` alone: [the dashboard would ignore new data](../dashboard/README.md#how-the-gateway-sends). If you do, also set a new `DASHBOARD_GATEWAY_ID`.
-- **No ESP8266:** the gateway container cannot start if the serial port does not exist.
+- **With `compose.esp8266.yaml`**, the gateway container cannot start if the serial port does not exist.
 - **After unplugging the ESP8266**, the container may not see the device again, or it may return as another port: check the port, then run `docker compose up -d --force-recreate gateway`.
 - If the broker or dashboard stops, the gateway keeps working over the radio. It reconnects to the broker, and sends the dashboard what it kept.
 
@@ -149,7 +156,7 @@ docker compose logs -f gateway
 
 ## Gateway alerts sent to nodes
 
-Nodes act by themselves on local anomalies (triggering their own buzzer/LED immediately without LoRa or Internet) and buffer messages for the gateway. What needs several nodes' data, the gateway also sends back to the affected nodes, as a signed command (`CMD`) repeated until the node confirms it (`GOT`) and kept across gateway restarts. The same results stay available to the dashboard through `Gateway.snapshot()`. Sending is on by default; `Gateway(..., enable_commands=False)` keeps results on the gateway only.
+Nodes act by themselves on local anomalies (their own valve, buzzer and LED at once, without LoRa or Internet) and buffer messages for the gateway. What needs several nodes' data, the gateway also sends back to the affected nodes, as a signed command (`CMD`) repeated until the node confirms it (`GOT`) and kept across gateway restarts. The same results stay available to the dashboard through `Gateway.snapshot()`. Sending is on by default; `Gateway(..., enable_commands=False)` keeps results on the gateway only.
 
 | Gateway result | Sent to |
 |---|---|
@@ -159,9 +166,29 @@ Nodes act by themselves on local anomalies (triggering their own buzzer/LED imme
 
 The spot is decided once, when the pipe leak is first raised. It is an estimate: if the real leak is just above the suspected junction, the floor above is not alerted, and isolating it may need the next valve up. When the spot is unknown, which in tests includes medium (0.5 L/s) pipe leaks, no flat gets the pipe leak alert; a flat with its own pressure alert is still told the likely cause (last row).
 
-Silent nodes, clock errors and new/repeat labels are only recorded. A node acts on each command once, even after a reboot. A new problem sounds the buzzer, turns the LED red and calls `hal.on_gateway_alert(code, active)`. **Nothing closes a valve**; that hook is where it would go. A problem that started and ended before it could be delivered still arrives, marked over, and raises no continuing alarm. A node that is off cannot be reached until it returns.
+Silent nodes, clock errors and new/repeat labels are only recorded. A node acts on each command once, even after a reboot. **These cross-node problems are red:** the node blinks R2, sounds the buzzer, **closes its valve** and calls `hal.on_gateway_alert(code, active)` ([rules](../edge/README.md#notification-levels-and-the-valve)). When the gateway ends a problem the light and buzzer follow, but **the valve stays shut** until it is [reopened by hand](#orders-to-a-node). A pipe leak that cannot be placed therefore shuts the tank valve, and so the whole building's water. A problem that started and ended before it could be delivered still arrives, marked over, and raises no continuing alarm. A node that is off cannot be reached until it returns.
 
 The beacon is signed with a building-wide key (`hal.key("GATEWAY")`). It only makes nodes send and never deletes data.
+
+## Orders to a node
+
+An operator can close or open a node's valve, or switch its alert LED, through the running gateway:
+
+```sh
+python -m gateway.order B-203 valve-close --data gateway-data
+docker compose exec gateway python -m gateway.order B-203 valve-open --data /data
+```
+
+| Order | The node |
+|---|---|
+| `valve-close` | Closes its valve, red LED, buzzer |
+| `valve-open` | The reopen signal: opens its valve. Apart from a command at the node, the only way a closed valve reopens |
+| `led-on` / `led-off` | Turns the ordered red LED and buzzer on or off. Red closes the valve, so **`led-on` closes it too**, and `led-off` does not reopen it. `led-off` does not hide any other red condition |
+
+- The command only leaves a request in the gateway's data folder, so only someone who can write there can order anything. No port takes orders, and MQTT stays read-only. **The gateway sends these orders only when an operator asks**, and never reopens a valve itself. The problems it finds are [sent separately](#gateway-alerts-sent-to-nodes) and do close valves.
+- Orders are signed with the node's key, repeated until confirmed and kept across restarts. A newer order replaces an undelivered opposite one. A node ignores an order older than its last valve or LED change, including a reopening at the node.
+- Confirmation only means the node received it. What the valve did comes back as `VALVE_CLOSED`, `VALVE_OPENED` or `VALVE_FAULT` (an incident). `Gateway.snapshot()` shows each node's `valve`; the web page does not display it yet.
+- **Update the gateway before the nodes:** an older gateway rejects the new packet names.
 
 ## Recovery and restarts
 

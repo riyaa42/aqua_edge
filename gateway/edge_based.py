@@ -1,10 +1,13 @@
 """Gateway server entry point, edge-based solution: nodes decide their own alerts, and the gateway
 decides what needs several nodes' data (core.py). It reaches the nodes through the ESP8266 LoRa
-modem (hal/gate_hal.py), publishes what it hears and decides over MQTT (comms/), and sends
-snapshots to the dashboard (dashboard_link.py).
+modem (hal/gate_hal.py), or over the network to nodes without radio hardware (hal/udp.py), or
+both. It publishes what it hears and decides over MQTT (comms/), sends snapshots to the dashboard
+(dashboard_link.py), and passes on an operator's orders to nodes (order.py).
 
     python3 -m gateway.edge_based --keys gateway_keys.json --data gateway-data --port /dev/ttyUSB0
     python3 -m gateway.edge_based ... --mqtt-host 127.0.0.1 --mqtt-user gateway    # password: MQTT_PASSWORD
+
+    python3 -m gateway.edge_based ... --port none --udp-listen 127.0.0.1:1700   # network nodes only
 
     python3 -m gateway.edge_based ... --dashboard-url http://127.0.0.1:8000/api/v1/ingest  # token: AQUA_DASHBOARD_TOKEN
 
@@ -19,14 +22,17 @@ import threading
 import time
 
 from dashboard.shipper import DashboardShipper
+from gateway import order
 from gateway.core import Gateway
 from gateway.dashboard_link import DashboardFeed
 from gateway.topology import BUILDING_B, Topology
 from hal.gate_hal import open_radio
 from hal.packet import add_names, load_keys
+from hal.udp import Radios, UdpHub, parse_address
 
 POLL_S = 0.02           # a packet that has arrived is handled within this long
 MIN_WAIT_S = 0.005
+ORDERS_S = 0.5          # how often waiting orders are picked up
 
 
 class GatewayBoard:
@@ -48,11 +54,14 @@ class GatewayBoard:
         return [raw for _, raw in self.radio.receive()]     # the radio also gives arrival times
 
 
-def run(gateway, stop, log=print):
+def run(gateway, stop, log=print, data=None):
     """Step the gateway until `stop` is set: when it asks, and soon after any packet arrives.
-    New decisions are logged."""
-    logged = 0
+    New decisions are logged. data: the folder where orders are left (order.py)."""
+    logged, look_at = 0, 0.0
     while not stop.is_set():
+        if data and time.monotonic() >= look_at:
+            look_at = time.monotonic() + ORDERS_S
+            order.take(gateway, data, log)
         wake = gateway.step()
         for event in gateway.events[logged:]:
             log(f"gateway: {event}")
@@ -64,7 +73,10 @@ def parse_args(argv=None):
     ap = argparse.ArgumentParser(description="Run the Aqua Edge gateway (edge-based solution).")
     ap.add_argument("--keys", required=True, help="key file with GATEWAY and every node (load_keys, hal/packet.py)")
     ap.add_argument("--data", default="gateway-data", help="folder for the gateway's saved state")
-    ap.add_argument("--port", default="/dev/ttyUSB0", help="the ESP8266's serial port")
+    ap.add_argument("--port", default=os.environ.get("AQUA_RADIO_PORT") or "/dev/ttyUSB0",
+                    help="the ESP8266's serial port, or none; also AQUA_RADIO_PORT")
+    ap.add_argument("--udp-listen", default=os.environ.get("UDP_LISTEN"),
+                    help="host:port for nodes that use the network instead of a radio (hal/udp.py)")
     ap.add_argument("--tree", default=os.environ.get("AQUA_TOPOLOGY_PATH") or BUILDING_B,
                     help="the building's pipe tree (JSON); also AQUA_TOPOLOGY_PATH")
     ap.add_argument("--building", help="building name in MQTT topics (default: the tree's)")
@@ -87,6 +99,29 @@ def load_gateway_keys(path, topology):
     return keys
 
 
+def open_radios(port, udp_listen):
+    """The modem on `port` (unless "none"), the network port, or both, as one radio."""
+    radios = []
+    try:
+        if port != "none":
+            try:
+                radios.append(open_radio(port))
+            except OSError as e:
+                raise SystemExit(f"{port}: {e}")
+        if udp_listen:
+            try:
+                radios.append(UdpHub(*parse_address(udp_listen)))
+            except (OSError, ValueError) as e:
+                raise SystemExit(f"{udp_listen}: {e}")
+    except SystemExit:
+        for r in radios:
+            r.close()
+        raise
+    if not radios:
+        raise SystemExit("no way to hear the nodes: give --port, --udp-listen or both")
+    return radios[0] if len(radios) == 1 else Radios(radios)
+
+
 def main(argv=None):
     a = parse_args(argv)
     try:
@@ -96,10 +131,7 @@ def main(argv=None):
         raise SystemExit(str(e))
     building = a.building or topology.data["building"]
     os.makedirs(a.data, exist_ok=True)
-    try:
-        radio = open_radio(a.port)
-    except OSError as e:
-        raise SystemExit(f"{a.port}: {e}")
+    radio = open_radios(a.port, a.udp_listen)
     gateway = Gateway(GatewayBoard(radio, keys, os.path.join(a.data, "gateway.jsonl")), topology)
 
     mqtt = None
@@ -123,11 +155,13 @@ def main(argv=None):
     stop = threading.Event()
     for sig in (signal.SIGINT, signal.SIGTERM):         # Ctrl-C and `docker stop`
         signal.signal(sig, lambda *_: stop.set())
-    print(f"gateway running: radio on {a.port}, " +
+    heard = [f"radio on {a.port}"] if a.port != "none" else []
+    heard += [f"network nodes on {a.udp_listen}"] if a.udp_listen else []
+    print(f"gateway running: {', '.join(heard)}, " +
           (f"MQTT {a.mqtt_host}:{a.mqtt_port}" if mqtt else "no MQTT") +
           (f", dashboard {a.dashboard_url}" if feed else ", no dashboard"))
     try:
-        run(gateway, stop)
+        run(gateway, stop, data=a.data)
     finally:
         if feed:
             feed.stop()

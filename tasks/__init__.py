@@ -10,8 +10,8 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 HAL = [("hal.packet",), ("hal.lora433",), ("hal.lora_pi", "--check"),
-       ("hal.esp8266_passthrough", "--check"), ("hal.link",), ("tests.test_hal",)]
-EDGE = [("edge.aqua_edge",), ("tests.test_pi_node",)]
+       ("hal.esp8266_passthrough", "--check"), ("hal.link",), ("hal.udp",), ("tests.test_hal",)]
+EDGE = [("edge.policy",), ("edge.aqua_edge",), ("tests.test_pi_node",), ("tests.test_edge_node",)]
 GATEWAY = [("gateway.topology",), ("gateway.core",), ("tests.test_gateway_analytics",), ("tests.test_gateway_server",),
            ("tests.test_small_buildings",)]
 COMMS = [("comms.common",), ("tests.test_comms",)]

@@ -126,10 +126,12 @@ aqua/v1/B/B-203/sensor {"v":1,"t":1767225600,"flow":0.05,"pressure":10.4}
 ### Alert, flag and command names
 
 - **Node alerts** (`alert`): `LEAK_NIGHT_FLOW`, `LEAK_CONTINUOUS_FLOW`, `LEAK_PRESSURE_DROP`, `ABNORMAL_CONSUMPTION`, `UNUSUAL_NIGHT_CONSUMPTION`, `SUDDEN_CONSUMPTION_CHANGE`, `PROLONGED_ZERO_FLOW`, `ABNORMAL_SUPPLY`, `QUALITY_RUNOFF`, `QUALITY_CHEMICAL`, `QUALITY_LIMIT_VIOLATION`, `QUALITY_TEMPORAL_ANOMALY`.
+- **Valve reports** (`alert`): `VALVE_CLOSED`, `VALVE_OPENED`, `VALVE_FAULT`. What each result makes a node do: [notification levels](../edge/README.md#notification-levels-and-the-valve).
 - **Recoveries** (`alert`): `FLAT_LEAK_CLEARED`, `CONSUMPTION_CLEARED`, `ZERO_FLOW_CLEARED`, `SUPPLY_FLOW_CLEARED`, `QUALITY_CLEARED`, `QUALITY_TEMPORAL_CLEARED`. What closes each: [recovery rules](../edge/README.md#recovery-and-restarts). Silence never closes a problem.
 - **Flags** (`flag`): `SUPPLY_LOW`, `SUPPLY_RECOVERED`.
 - **Gateway commands** (`cmd`): `PIPE_LEAK`, `PIPE_LEAK_CAUSE`, `SUPPLY_EVENT`, `LEAK_TANK_DRAIN`, `SUPPLY_UNCERTAIN`, ended by `PIPE_LEAK_CLEARED`, `PIPE_LEAK_CAUSE_CLEARED` or `SUPPLY_CLEARED`. Which nodes get what: [gateway alerts](../gateway/README.md#gateway-alerts-sent-to-nodes).
-- **Gateway events** (`gateway/event/{EVENT}`): `NEW_ALERT`, `REPEAT_ALERT`, `PIPE_LEAK`, `PIPE_LEAK_PAST`, `BALANCE_PAUSED`, `SUPPLY_EVENT`, `LEAK_TANK_DRAIN`, `SUPPLY_UNCERTAIN`, `SUPPLY_RECOVERED`, `NODE_SILENT`, `NODE_BACK`, `CLOCK_SKEW`, `CLOCK_OK`, `BAD_PACKET`. The payload is the gateway's event without its name; its other fields depend on the event.
+- **Operator orders** (`cmd`): `VALVE_CLOSE`, `VALVE_OPEN`, `ALERT_LED_ON`, `ALERT_LED_OFF` ([orders](../gateway/README.md#orders-to-a-node)).
+- **Gateway events** (`gateway/event/{EVENT}`): `ORDER`, `VALVE_CLOSED`, `VALVE_OPENED`, `VALVE_FAULT`, `NEW_ALERT`, `REPEAT_ALERT`, `PIPE_LEAK`, `PIPE_LEAK_PAST`, `BALANCE_PAUSED`, `SUPPLY_EVENT`, `LEAK_TANK_DRAIN`, `SUPPLY_UNCERTAIN`, `SUPPLY_RECOVERED`, `NODE_SILENT`, `NODE_BACK`, `CLOCK_SKEW`, `CLOCK_OK`, `BAD_PACKET`. The payload is the gateway's event without its name; its other fields depend on the event.
 
 ### State, link and status
 
@@ -181,7 +183,7 @@ An alert:
 
 ```
 node                                          gateway
- check fires → buzzer → saved to SD
+ check fires → local action → saved to SD
  publish {node}/alert (Pi broker)
  ──────────────── ALERT ────────────────────► check, then save state
  ◄─────────────── ACK ─────────────────────── send ACK
@@ -211,7 +213,7 @@ QoS covers only the hop between one program and its broker. **MQTT is a live vie
 
 ## Edge-based solution
 
-Nodes decide their own alerts; the gateway decides what needs several nodes' data. This is the **Existing** radio behaviour plus the **New** MQTT copies. Readings stay on the Pi: the gateway receives alerts, flags and summaries, never raw readings. Local alarms need neither the gateway nor either broker.
+Nodes decide their own alerts; the gateway decides what needs several nodes' data. This is the **Existing** radio behaviour plus the **New** MQTT copies. Readings stay on the Pi: the gateway receives alerts, flags and summaries, never raw readings. Local alarms and valve closing need neither the gateway nor either broker.
 
 ## Cloud-based solution (Proposed)
 

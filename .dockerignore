@@ -21,3 +21,5 @@ dashboard/frontend/dist
 **/sd
 **/*keys.json
 **/.env
+# the one dataset the edge node's image replays
+!simulation/webots/data/sensors.csv

@@ -32,6 +32,7 @@ RECOVERIES = {
 SAVED = ("resolved_history", "last_sum", "last_quality", "last_supply", "last_balance_pct", "pipe_leak_info",
          "bad_packets", "skewed_packets", "online_alerts", "offline_alerts", "buffered_recovered",
          "delay_count", "delay_sum", "delay_max")
+VALVE_STATES = {"VALVE_CLOSED": "closed", "VALVE_OPENED": "open", "VALVE_FAULT": "fault"}
 
 CORRELATION_WINDOW_S = 1800  # 30 min window for grouping co-occurring root-cause symptoms
 MAX_HISTORY = 200
@@ -59,9 +60,11 @@ BASE_WEIGHTS = {
     "PROLONGED_ZERO_FLOW": 14.0,
     "NODE_SILENT": 10.0,
     "CLOCK_SKEW": 8.0,
+    "VALVE_FAULT": 50.0,
 }
 
 ACTIONS = {
+    "VALVE_FAULT": "The node could not move its water valve: check it by hand and close it if needed.",
     "QUALITY_CHEMICAL": "Isolate tank distribution and flush/test water immediately (chemical hazard).",
     "QUALITY_LIMIT_VIOLATION": "Inspect tank water quality against IS 10500 limits immediately.",
     "QUALITY_RUNOFF": "Inspect rooftop tank cover/inlet for contamination or turbidity ingress.",
@@ -132,15 +135,17 @@ class GatewayAnalytics:
         self.buffered_recovered = 0
         self.delay_count, self.delay_sum, self.delay_max = 0, 0.0, 0.0
         self.cleared_at = {}       # (target, category) -> node time of its latest recovery
+        self.valves = {}           # node -> {"state": "closed" | "open" | "fault", "t": node time}
 
     def to_state(self):
-        return {**{name: getattr(self, name) for name in SAVED},
+        return {**{name: getattr(self, name) for name in SAVED}, "valves": self.valves,
                 "incidents": list(self.incidents.values()),
                 "cleared_at": [[*key, t] for key, t in self.cleared_at.items()]}
 
     def load_state(self, state):
         for name in SAVED:
             setattr(self, name, state[name])
+        self.valves = state.get("valves", {})       # not in older state files
         self.incidents = {(it["target"], it["category"]): it for it in state["incidents"]}
         self.cleared_at = {(target, cat): t for target, cat, t in state["cleared_at"]}
 
@@ -241,6 +246,14 @@ class GatewayAnalytics:
                 self.offline_alerts += 1
 
         a = m["a"]
+        if a in VALVE_STATES:       # where the valve is, not a problem (unless it would not move)
+            if m["t"] >= self.valves.get(n, {}).get("t", float("-inf")):
+                self.valves[n] = {"state": VALVE_STATES[a], "t": m["t"]}
+            if a == "VALVE_FAULT":
+                self._upsert(n, a, m["t"], rx)
+            else:
+                self._clear(n, "VALVE_FAULT", m["t"], a)
+            return
         if a in RECOVERIES:
             for category in RECOVERIES[a]:
                 self._clear(n, category, m["t"], a)
@@ -468,6 +481,7 @@ class GatewayAnalytics:
                 "status": "silent" if n in gw.silent else "ok",
                 "last_seen": None if gw.last_seen is None else gw.last_seen.get(n),
                 "last_sum": self.last_sum.get(n),
+                "valve": self.valves.get(n, {}).get("state"),      # None: never reported
             }
         return {
             "t": now,

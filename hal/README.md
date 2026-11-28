@@ -27,8 +27,11 @@ The node board (`../edge/board.py`) also uses these. Give each LED a series resi
 
 | Part | Raspberry Pi |
 |---|---|
-| Green, yellow, red LED | GPIO 17 (pin 11), GPIO 27 (pin 13), GPIO 5 (pin 29) |
+| Green, yellow, red LED | GPIO 17 (pin 11), GPIO 27 (pin 13), GPIO 5 (pin 29). [Blink patterns](../edge/README.md#notification-levels-and-the-valve) |
 | Buzzer module | GPIO 18 (pin 12) |
+| Valve relay input | GPIO 23 (pin 16). **High means shut** |
+
+The relay and valve need their own power supply, not the Pi's pins. With a normally open valve, a power cut opens it until the node is running again; use a latching or fail-closed valve if that must not happen. Nothing reads back whether the valve moved.
 
 ### Gateway: NodeMCU ESP8266
 
@@ -51,7 +54,7 @@ The NodeMCU connects to the computer with a USB data cable, which also powers it
 
 `edge/aqua_edge.py` and `gateway/core.py` run unchanged across environments because they call a small `hal` object supplied from outside. For radio it needs `send` and `receive` (packet bytes) and `key(name)`; both wrap it in `MessageLink` (`link.py`), which sends and returns whole messages: packed, [encrypted](#encryption) and checked. Queues, acknowledgements and retries stay in the node and the gateway. The other parts of a node's `hal` are outside this folder:
 - Simulation HAL (connects to `simulation/live/` or offline CSVs)
-- Raspberry Pi 3B dataset-replay: `../bogo/csv_replay.py` reads local datasets / EPANET outputs row-by-row from microSD, `../edge/board.py` drives the clock, LEDs and buzzer, and the radio comes from here
+- Raspberry Pi 3B dataset-replay: `../edge/sensors/` reads a local dataset (EPANET output) row by row, `../edge/board.py` drives the clock, LEDs and buzzer, and the radio comes from here
 
 ## What exists
 | Layer | State |
@@ -214,20 +217,22 @@ The method list is at the top of `../edge/aqua_edge.py`. A real layer must:
 - call `Gateway.step()` when a packet arrives and at the time it returns, at least every 0.5 s (through the ESP8266 on USB serial);
 - for `send(packet, cad=True)`, run channel activity detection first; if the channel is busy, wait a short random time and try again;
 - call these from one thread (the classes are not thread-safe);
-- optionally provide `buzzer(code)` and `on_gateway_alert(code, active)`.
+- optionally provide `sample_time()`, `set_valve(closed)` (`False` if it could not), `buzzer(code)` and `on_gateway_alert(code, active)`.
 
 ## Running on the Pi
 
 Wiring: [Node: Raspberry Pi](#node-raspberry-pi).
 
-`lora_pi.py` drives the SX1278 on the Pi's GPIO pins, and `../edge/edge_based.py` runs a node on top of it. **None of this has been tested on real hardware.**
+`lora_pi.py` drives the SX1278 on the Pi's GPIO pins, and `../edge/edge_based.py` runs a node on top of it. **None of this has been tested on real hardware.** On a Pi the node runs directly, not in a container (`Dockerfile.edge` is for [virtual nodes](../edge/README.md#run-virtual-nodes) only). What its LEDs and valve do: [notification levels](../edge/README.md#notification-levels-and-the-valve).
+
+For a node without a radio module, `udp.py` carries the same encrypted packets over a network to a gateway started with `--udp-listen` (`--radio udp --gateway host:1700 --actuators sim`). It does not simulate airtime or packet loss.
 
 ### Setup
 
 Enable SPI once (`sudo raspi-config`, Interface Options, SPI). Then use **one** of these:
 
 - **uv:** `uv sync --extra pi` installs `spidev`, `gpiozero` and `lgpio`. `spidev` is compiled during the install, which needs `sudo apt install build-essential python3-dev`. `uv run` keeps these installed, but a later plain `uv sync` removes them. Not tried on a Pi yet.
-- **Raspberry Pi OS packages:** `sudo apt install python3-spidev python3-gpiozero python3-lgpio python3-cryptography`, then use `python3 -m ...` instead of the `uv run` scripts. The node needs only `edge/`, `hal/`, `bogo/` and `tinyml/`, plus a sensor CSV (the default is `simulation/webots/data/sensors.csv`; use `--csv` for another path).
+- **Raspberry Pi OS packages:** `sudo apt install python3-spidev python3-gpiozero python3-lgpio python3-cryptography`, then use `python3 -m ...` instead of the `uv run` scripts. The node needs only `edge/`, `hal/`, `detection/`, `gateway/__init__.py`, `gateway/topology.py` and `gateway/building_B.json`, plus a sensor CSV (the default is `simulation/webots/data/sensors.csv`; use `--csv` for another path).
 
 Real nodes need a key file with this node's key and the `GATEWAY` key: see [Setting up keys](#setting-up-keys). The keys are secrets, so **keep the file outside the repository**.
 
@@ -236,14 +241,14 @@ Real nodes need a key file with this node's key and the `GATEWAY` key: see [Sett
 | With uv | With system Python | What it does |
 |---|---|---|
 | `uv run pi-radio-test` | `python3 -m hal.lora_pi --radio-test` | Checks the module is found, sends one test packet, listens 10 s |
-| `uv run edge-based-node B-203 --keys <file> --sd <folder> --slot 5 20` | `python3 -m edge.edge_based B-203 ...` | Runs a node in real time. Add `--step-s 1` for a fast demo |
+| `uv run prod-edge-edge B-203 --keys <file> --sd <folder> --slot 5 20` | `python3 -m edge.edge_based B-203 ...` | Runs a node in real time. Add `--step-s 1` for a fast demo |
 | `uv run python -m hal.lora_pi --check` | `python3 -m hal.lora_pi --check` | Self-check with a fake radio chip, on any computer |
 
 To check that two modules hear each other, start the radio test on one, then on the other within 10 s. The one started first prints the other's packet as hex. Swap the order to test the other direction.
 
 ### If the radio fails
 
-If the module is missing or miswired at startup, the program stops with a message. Once running, a radio fault (send timeout, SPI error, or a radio that reset itself) is logged and the radio is set up again, at most every 5 s while it stays faulty. The node keeps running its checks, buzzer and LEDs, and keeps unacknowledged messages. The link also checks every 5 s that the radio is still receiving.
+If the module is missing or miswired at startup, the program stops with a message. Once running, a radio fault (send timeout, SPI error, or a radio that reset itself) is logged and the radio is set up again, at most every 5 s while it stays faulty. The node keeps running its checks, valve, buzzer and LEDs, and keeps unacknowledged messages. The link also checks every 5 s that the radio is still receiving.
 
 Before sending or listening before talk, the driver waits up to about 0.45 s for a packet that is already coming in, so that it is not cut off. This relies on the chip's modem status bits and **needs checking on a real module**: if they stayed set on a quiet channel, every send would be delayed and the channel would always look busy.
 
@@ -292,7 +297,7 @@ As on the Pi, the wait for a packet that is already coming in **needs checking o
 
 | Case | What happens |
 |---|---|
-| A node raises an alert or tank flag | Local buzzer and LED at once (no gateway needed); the message is sent in the same call |
+| A node raises an alert or tank flag | LED at once, and for an alert level the valve and buzzer too (no gateway needed); the message is sent in the same call |
 | No reply, gateway heard in the last 15 s | Sent again after 1-2 s, then 2-4 s, then every 4-8 s |
 | No reply, gateway away | Kept on the SD card; tried about every 30 s (summaries every 5 min) |
 | Gateway comes back (beacon after silence, or after a restart) | Stored alerts go at once, each node 0.15 s after the one before; summaries follow from 3.5 s, one per acknowledgement, oldest first |

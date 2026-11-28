@@ -3,7 +3,8 @@
 A parent is upstream of its children: water passes the parent first. "valve": true means a valve
 sits on the pipe just before that entry, so it controls the supply of the entry and of everything
 under it. The root is the tank. "junction" entries are points in the pipes with no monitoring
-device; "flat" entries are leaves. A building with a single monitored node is just that entry: a
+device; "flat" entries are leaves. "unmetered_homes": true on the tank means it also feeds homes
+that are not in the tree, so its outflow cannot be compared with the flats. A building with a single monitored node is just that entry: a
 tank, or a flat. Schema and rules: README.md, "Building tree".
 
     python3 -m gateway.topology      # self-check
@@ -17,7 +18,7 @@ from hal.packet import NAMES, check_custom_name
 
 SCHEMA_VERSION = 1
 BUILDING_B = os.path.join(_GW_DIR, "building_B.json")
-KEYS = {"tank": {"id", "type", "valve", "children", "radio_id"},
+KEYS = {"tank": {"id", "type", "valve", "children", "radio_id", "unmetered_homes"},
         "junction": {"id", "type", "valve", "children", "label"},
         "flat": {"id", "type", "valve", "children", "radio_id"}}
 RADIO_NAMES = set(NAMES) - {"GATEWAY"}
@@ -40,6 +41,9 @@ class Topology:
         self.tank = root["id"] if root["type"] == "tank" else None     # None: a lone flat
         self.flats = {i for i, n in self.nodes.items() if n["type"] == "flat"}
         self.devices = self.flats | ({self.tank} if self.tank else set())   # the monitoring nodes
+        self.unmetered_homes = root.get("unmetered_homes", False)
+        if not isinstance(self.unmetered_homes, bool):
+            raise ValueError(f'{root["id"]}: "unmetered_homes" must be true or false')
 
     def _add(self, node, parent):
         if not isinstance(node, dict) or not isinstance(node.get("id"), str) or not node["id"]:
@@ -150,6 +154,11 @@ if __name__ == "__main__":
             pipes = [line.split() for line in f.read().split("[PIPES]")[1].split("[PUMPS]")[0].splitlines()]
         feeds = {p[2]: p[1] for p in pipes if len(p) > 3 and p[2] in RADIO_NAMES and p[1].startswith("B-D")}
         assert feeds == {n: b.parent[n] for n in b.flats}, "tree differs from the water model's pipes"
+
+    assert not b.unmetered_homes
+    one, three = (Topology.load(os.path.join(_GW_DIR, f"virtual_{n}.json")) for n in ("1node", "3node"))
+    assert one.tank is None and one.devices == {"B-203"} and not one.unmetered_homes
+    assert three.devices == {"B-TANK", "B-203", "B-101"} and three.unmetered_homes
 
     some = b.only(["B-401", "B-101"])
     assert some.flats == {"B-401", "B-101"} and list(some.labels) == ["4", "3", "2", "1"]

@@ -68,7 +68,11 @@ ALERTS = ["LEAK_NIGHT_FLOW", "LEAK_CONTINUOUS_FLOW", "LEAK_PRESSURE_DROP", "ABNO
           "FLAT_LEAK_CLEARED", "CONSUMPTION_CLEARED", "ZERO_FLOW_CLEARED", "SUPPLY_FLOW_CLEARED",
           # gateway -> node (CMD): what only the gateway can know, from several nodes together
           "PIPE_LEAK", "PIPE_LEAK_CLEARED", "PIPE_LEAK_CAUSE", "PIPE_LEAK_CAUSE_CLEARED",
-          "SUPPLY_EVENT", "LEAK_TANK_DRAIN", "SUPPLY_UNCERTAIN", "SUPPLY_CLEARED"]          # append only
+          "SUPPLY_EVENT", "LEAK_TANK_DRAIN", "SUPPLY_UNCERTAIN", "SUPPLY_CLEARED",
+          # gateway -> node (CMD): orders an operator sends
+          "VALVE_CLOSE", "VALVE_OPEN", "ALERT_LED_ON", "ALERT_LED_OFF",
+          # node -> gateway: what its valve did
+          "VALVE_CLOSED", "VALVE_OPENED", "VALVE_FAULT"]                                  # append only
 FLAGS = ["SUPPLY_LOW", "SUPPLY_RECOVERED"]                      # append only
 VIOLATIONS = ["pH", "TDS", "TURBIDITY"]     # "viol" is a bit mask of broken limits
 # field name -> how its value is packed; its number on air is its position here; "B" = index into ALERTS/FLAGS

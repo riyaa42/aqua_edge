@@ -52,6 +52,10 @@ Same hardware layer as the nodes (hal.now / send / receive). Jobs:
                                    alert may not be its own leak)
      One that ended before it could be delivered still goes, marked "over".
      On by default; enable_commands=False keeps these results on the gateway only.
+ 12. Orders: an operator can have a node close or open its valve, or turn its alert LED on or
+     off (order.py). Only an operator's order reopens a valve; the problems in item 11 close the
+     valves of the nodes told about them. What a node's valve did comes back as VALVE_CLOSED,
+     VALVE_OPENED or VALVE_FAULT.
 What the checks need is saved to one state file before any ACK is sent, so a restart keeps the
 open problems and pipe check, and does not reopen the door to replays. Not saved: the in-memory
 message log and event list. The gateway clock must carry on across a restart.
@@ -76,6 +80,9 @@ MIN_SUPPLY_L = 5.0             # ignore near-empty blocks (division by tiny numb
 SILENT_S = 2700                # nothing heard from a node for 3 summary periods = silent
 CLOCK_AHEAD_S = 60             # message time this far ahead of the gateway clock = bad node clock
 SUPPLY_CODES = ("SUPPLY_EVENT", "LEAK_TANK_DRAIN", "SUPPLY_UNCERTAIN")
+VALVE_REPORTS = ("VALVE_CLOSED", "VALVE_OPENED", "VALVE_FAULT")    # what a node's valve did
+ORDER_GROUPS = (("VALVE_CLOSE", "VALVE_OPEN"), ("ALERT_LED_ON", "ALERT_LED_OFF"))   # an operator's
+MAX_GAPS = 2000     # message numbers remembered above a gap, per node
 KEEP_BLOCKS = 7 * 86400 // SUMMARY_S    # per-block data kept: 7 days, for late summaries
 STATE_VERSION = 1
 # saved to disk as they are; the others need converting for JSON (save_state / load_state)
@@ -209,9 +216,15 @@ class Gateway:
         if seq <= fl or seq in ab:
             return True
         ab.add(seq)
-        while (fl + 1) in ab:
-            fl += 1
-            ab.remove(fl)
+        while True:
+            while (fl + 1) in ab:
+                fl += 1
+                ab.remove(fl)
+            if len(ab) <= MAX_GAPS:
+                break
+            # A node that gave up old summaries (a very long time away) leaves gaps that will
+            # never fill: close the oldest, so this cannot grow for ever
+            fl = min(ab) - 1
         self.seen_floor[node] = fl
         return False
 
@@ -240,7 +253,9 @@ class Gateway:
                 self.log.append({**m, "rx": now, "rx_utc": round(utc_s), "rx_iso": iso_utc(utc_s)})
                 self.analytics.on_packet(now, m)
                 self.check_clock(now, m)
-                if m["k"] == "ALERT" and not m["a"].endswith("_CLEARED"):
+                if m["k"] == "ALERT" and m["a"] in VALVE_REPORTS:
+                    self.decide(m["t"], m["a"], node=m["n"])
+                elif m["k"] == "ALERT" and not m["a"].endswith("_CLEARED"):
                     self.check_repeat(m)
                     if self.analytics.is_stale(m["n"], category_of(m["a"]), m["t"]):
                         pass                    # already over: not evidence about the tank now
@@ -326,6 +341,21 @@ class Gateway:
         self.command_number = max(self.command_number + 1, int(now))
         self.outbox[str(self.command_number)] = {"n": node, "a": code, "t": t, "over": over}
         self.dirty = True
+
+    def order(self, node, code):
+        """An operator's order to a node (order.py). It replaces any not yet delivered order about
+        the same thing. ValueError: no such node or order."""
+        group = next((g for g in ORDER_GROUPS if code in g), None)
+        if group is None or node not in self.tree.devices:
+            raise ValueError(f"cannot send {code!r} to {node!r}")
+        now = self.hal.now()
+        for num, c in list(self.outbox.items()):
+            if c["n"] == node and c["a"] in group:
+                del self.outbox[num]
+                self.send_at.pop(num, None)
+                self.tries.pop(num, None)
+        self.command(now, node, code, now)
+        self.decide(now, "ORDER", node=node, order=code)
 
     def tell(self, now, node, code, t):
         """Tell a node a problem is going on (once, until it ends)."""
@@ -524,8 +554,10 @@ class Gateway:
         self.tank_abnormal_supply_recv_t, self.flat_leak_recv_t = -1e9, -1e9
 
     def mass_balance(self, now):
-        if not (self.tank and self.flats):      # one side only: nothing to compare. A lone tank's
-            self._forget_old_blocks()           # whole outflow would otherwise look like a pipe leak
+        # One side only, or a tank that also feeds homes with no node: nothing to compare. All of
+        # that water would otherwise look like a pipe leak
+        if not (self.tank and self.flats) or self.tree.unmetered_homes:
+            self._forget_old_blocks()
             return
         if self.silent and not self.balance_paused:
             self.balance_paused = True

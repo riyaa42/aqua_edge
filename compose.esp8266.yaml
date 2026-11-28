@@ -1,0 +1,8 @@
+# Add this when the gateway has its ESP8266 LoRa modem on USB:
+#   docker compose -f compose.yaml -f compose.esp8266.yaml up -d --build
+services:
+  gateway:
+    environment:
+      AQUA_RADIO_PORT: /dev/ttyUSB0
+    devices:
+      - "${GATEWAY_SERIAL:-/dev/ttyUSB0}:/dev/ttyUSB0"

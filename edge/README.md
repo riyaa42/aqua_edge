@@ -1,12 +1,16 @@
 # Aqua Edge: Firmware
 
-The real code for the nodes and the gateway (this folder for the nodes, [`../gateway/`](../gateway/README.md), [`../hal/`](../hal/README.md) and the water-quality model in [`../tinyml/quality/`](../tinyml/quality/README.md)). It only uses the Python standard library, and it never talks to hardware directly: it calls a small hardware layer (`hal`) for sensors, radio, clock, SD card and buzzer/LED. There are no valves yet: the response to a problem is the buzzer, the LED and an alert. A node sounds `hal.buzzer` for its own alerts and for gateway alerts that concern it. There is a hook for valve control (`hal.on_gateway_alert`) that closes nothing. The simulation (`../simulation/`) plugs in a simulated hardware layer; real hardware has its own: `../hal/pi_hal.py` for the Raspberry Pi 3B nodes (USB powered; SX1278 and buzzer drivers, not verified on hardware in these tests). The laptop gateway's layer, which exchanges packets over USB serial with an ESP8266 (the interface to its LoRa module), and the ESP8266 sketch are not in the repository yet, so **no gateway message reaches a real node yet**.
+The code for the nodes (the gateway's is in [`../gateway/`](../gateway/README.md), radio and packets in [`../hal/`](../hal/README.md), detection models in [`../detection/`](../detection/leakage/README.md)). The node logic never talks to hardware directly: it calls a small hardware layer (`hal`) for sensors, radio, clock, storage, buzzer, LEDs and valve. The simulation (`../simulation/`) plugs in a simulated layer; `board.py` is the node program's, with real pins on a Raspberry Pi or simulated ones in a container. **The Pi, radio, LEDs and valve relay have not been tested on real hardware.**
 
 | File | Runs on | What it does |
 |---|---|---|
 | `aqua_edge.py` | Every node (20 flats + tank), Raspberry Pi 3B | Composable `EdgeRuntime` (`flat`, `tank`, `combined` modes) + `FlatNode`/`TankNode` presets. Learns Day-1 baselines (saved hourly to SD), runs leak + abnormal-consumption checks (`flat`), water quality + tank checks (`tank`), or all 3 pipelines jointly (`combined` for resource validation), with atomic `Store` buffering and TDMA/CSMA-CA LoRa scheduling |
-| `edge_based.py` | Every node | Entry point, edge-based solution: alerts that need only this node's data are decided on the node. `uv run edge-based-node`. Runs the node on the Pi in real time, calling `radio_poll()` between sensor steps. [Setup](../hal/README.md#running-on-the-pi). Tested with a fake radio only (`python3 -m tests.test_pi_node`) |
-| `board.py` | Every node | The Pi's side of the `hal` that `aqua_edge.py` calls, apart from the radio: clock (set from genuine gateway acknowledgements, never from one older than the last used), time slot, keys, storage path, LEDs and buzzer. The buzzer sounds for a node's own alerts and for gateway alerts that concern it, and stops when the LED leaves red. It has no `on_gateway_alert` (the valve hook) |
+| `edge_based.py` | Every node | Entry point, edge-based solution: alerts that need only this node's data are decided on the node. `uv run prod-edge-edge` (same as `edge-based-node`). [On a Pi](../hal/README.md#running-on-the-pi) or [as a virtual node](#run-virtual-nodes). Tested with a fake radio (`tests/test_pi_node.py`) and over the network (`tests/test_edge_node.py`) |
+| `policy.py` | Every node | Which result is an alert, a warning or information ([levels](#notification-levels-and-the-valve)). The one place to change the criteria |
+| `actuators.py` | Every node | LEDs, buzzer and valve: real GPIO pins, or a simulated stand-in that only logs |
+| `valve.py` | Every node | Command to [reopen the valve](#notification-levels-and-the-valve) at the node |
+| `sensors/` | Every node | The node's [sensor readings](#sensor-readings), replayed from a recorded dataset |
+| `board.py` | Every node | The `hal` that `aqua_edge.py` calls, apart from the radio: two [clocks](#clocks-and-what-the-node-stores), time slot, keys, storage path and the actuators |
 | `cloud_based.py` | Every node | Entry point, cloud-based solution: the Pi only buffers and streams sensor data; all ML and every decision happen in the cloud. `uv run cloud-based-node`. **Placeholder, not implemented yet** |
 
 The rest of this README describes the node logic that exists today, which belongs to the edge-based solution.
@@ -14,14 +18,101 @@ The rest of this README describes the node logic that exists today, which belong
 Checks run once a minute; alarms are sent the moment they fire, summaries every 15 minutes, first tried in each node's time slot.
 Self-check, from the repository root: `python3 -m edge.aqua_edge`. The other modules list their own.
 
-How the leak checks work, with the math: [`../tinyml/leakage/README.md`](../tinyml/leakage/README.md).
-Abnormal consumption detection: [`../tinyml/consumption/README.md`](../tinyml/consumption/README.md).
-Water-quality model, data and test results: [`../tinyml/quality/README.md`](../tinyml/quality/README.md).
+How the leak checks work, with the math: [`../detection/leakage/README.md`](../detection/leakage/README.md).
+Abnormal consumption detection: [`../detection/consumption/README.md`](../detection/consumption/README.md).
+Water-quality model, data and test results: [`../detection/quality/README.md`](../detection/quality/README.md).
 
-## Hybrid Physical Pi 3B + Dockerized Multi-Node Setup
+## Notification levels and the valve
 
-- **1 physical node** (`Raspberry Pi 3B` + `SX1278 433 MHz` + `RTC` + `microSD` + `buzzer`) streams one node's dataset/WNTR rows and transmits encrypted `packet.py` frames over LoRa to the **SX1278 → ESP8266 → USB serial** laptop gateway.
-- **20 virtual nodes** run in **Docker containers** using the same `EdgeRuntime` and `packet.py` framing, feeding into the same `Gateway` instance so physical and virtual nodes are indistinguishable to `Gateway` and `GatewayAnalytics` (and from there to the dashboard).
+The rules come from [`../planning/valve_spec.md`](../planning/valve_spec.md), with one override: **valves are only reopened by hand.** The code's one table of them is `policy.py`.
+
+| Light | Pattern (2 s cycle) | When | Valve and buzzer |
+|---|---|---|---|
+| **Red, one blink (R1)** | on 200 ms, off 1800 ms | Water quality: `QUALITY_LIMIT_VIOLATION`, `QUALITY_RUNOFF`, `QUALITY_CHEMICAL`, `QUALITY_TEMPORAL_ANOMALY` | Valve closes; intermittent buzzer |
+| **Red, two blinks (R2)** | on 200, off 200, on 200, off 1400 ms | `LEAK_NIGHT_FLOW`, `LEAK_CONTINUOUS_FLOW`, `LEAK_PRESSURE_DROP`, `ABNORMAL_SUPPLY`, `ABNORMAL_CONSUMPTION`, `UNUSUAL_NIGHT_CONSUMPTION`, `SUDDEN_CONSUMPTION_CHANGE`, `PROLONGED_ZERO_FLOW`. From the gateway: `PIPE_LEAK`, `PIPE_LEAK_CAUSE`, `SUPPLY_EVENT`, `LEAK_TANK_DRAIN`, `SUPPLY_UNCERTAIN`, and the operator's `VALVE_CLOSE` and `ALERT_LED_ON` | Valve closes; intermittent buzzer |
+| **Yellow, one blink (Y1)** | as R1 | A message unacknowledged for more than 30 s (a summary's time slot is not counted), or a radio fault | No change; silent |
+| **Yellow, two blinks (Y2)** | as R2 | A reading missing, no new reading for 3 minutes (also after the replay data ends), a clock warning (more than 60 s from the gateway's), `SUPPLY_LOW`, `VALVE_FAULT` | No change; silent |
+| **Green, solid** | | Nothing active | No change; silent |
+
+Only one is shown: red before yellow before green, R1 before R2, Y1 before Y2. A condition counts until it is really over, so clearing one never hides another. **The light shows conditions, not the valve:** once they are all cleared it goes back to yellow or green and the buzzer stops, even though the valve stays shut. It also stays red while an operator's `VALVE_CLOSE` or `ALERT_LED_ON` order is in force. The buzzer sounds exactly while the light is red, also after a restart.
+
+**The valve** closes on every red condition, found by the node or told by the gateway.
+
+- **It only reopens by hand.** No recovery message, gateway "cleared" message, silence, acknowledgement or restart reopens it. There are two ways, and both work even while a condition is still active (the light then stays red):
+  - the gateway's reopen signal, the [`valve-open` order](../gateway/README.md#orders-to-a-node);
+  - at the node:
+    ```sh
+    python3 -m edge.valve open --sd <the node's --sd folder>
+    ```
+- After reopening, a local problem must be confirmed again before it closes the valve again. `QUALITY_TEMPORAL_ANOMALY` raises only when it starts, so one still active does not close it again until it has cleared and returned. A new gateway problem closes it; one dated before the reopening does not.
+- A node ignores a reopen signal that is older than the last time its valve was closed or opened, or that the gateway marks as no longer meant.
+- While a flat is shut, its flow, pressure and consumption checks pause, nothing is learned, and the zero flow does not count as a recovery, so its light stays red. While the tank is shut, only its outflow checks pause.
+- The node saves what the valve should be before moving it, and drives it again after a restart. It reports `VALVE_CLOSED`, `VALVE_OPENED` or `VALVE_FAULT` (the valve could not be driven, or the node has none).
+- Nothing reads back whether the valve really moved. **Closing the tank valve cuts water to the whole building.**
+
+**Where this differs from the spec:**
+
+- **Reopening.** Section 7 reopens the valve when the red conditions clear. Here it is only reopened by hand. The spec has not been edited.
+- `SUPPLY_LOW` and `VALVE_FAULT` are not in the spec. They show Y2 and close nothing. The gateway may answer `SUPPLY_LOW` with a supply problem, which does close the tank's valve.
+- The drinking-water limit check also runs on the first, learning day, because it needs nothing learned.
+
+**Effect on the 48 h replay,** each node on its own: all 21 close their valves. 19 flats close on `LEAK_CONTINUOUS_FLOW`, although only one flat has a planted leak; `B-203` closes on `LEAK_NIGHT_FLOW` (flats between hours 26.5 and 33). The tank closes at about hour 24.3 on `QUALITY_TEMPORAL_ANOMALY`. With a gateway, its problems close valves too. The thresholds are unchanged.
+
+## Clocks and what the node stores
+
+- **Sample time** is when a reading was taken (replay: the dataset's time). All detection uses it. **Wall time** stamps messages and drives retries; gateway acknowledgements correct it.
+- **Raw readings are never saved after the first day.** `<node>_state.json` holds the learned trends and detector counts in a fixed size (about 7 KB for a flat, 3 KB for the tank in the tests). It is saved every 15 minutes and on any alert or valve change, so a power cut loses at most 15 minutes.
+- Until the gateway acknowledges them, messages wait in `<node>.jsonl`. Alerts and flags are never dropped; at most 7 days of 15-minute summaries are kept (672, oldest dropped and counted).
+- `--prime-s 86400` makes a first start learn from the first day of the data at once, sending and switching nothing.
+
+## Run virtual nodes
+
+`Dockerfile.edge` and the root `compose.yaml` run one or three virtual nodes next to the [gateway, broker and dashboard](../gateway/README.md#run-with-docker-compose). They replay the dataset, send the same encrypted packets over the Compose network (`../hal/udp.py`, port not published), and **only log** what their LEDs and valve would do. This image is not for a Raspberry Pi: [run the node directly there](../hal/README.md#running-on-the-pi).
+
+| Profile | Nodes | `GATEWAY_TREE` |
+|---|---|---|
+| `one-node` | `B-203` (the flat with the planted night leak) | `./gateway/virtual_1node.json` |
+| `three-nodes` | `B-203`, `B-101` (no planted leak; closes on a continuous-flow alert) and `B-TANK` | `./gateway/virtual_3node.json` |
+
+1. [Make the gateway's key file](../hal/README.md#setting-up-keys), then one file per node:
+   ```sh
+   for n in B-203 B-101 B-TANK; do (umask 077; uv run python -c 'import json, sys; k = json.load(open(sys.argv[1])); print(json.dumps({n: k[n] for n in (sys.argv[2], "GATEWAY")}))' ~/gateway_keys.json $n > ~/${n}_keys.json); done
+   ```
+2. In `.env`, set the [gateway's settings](../gateway/README.md#run-with-docker-compose), `GATEWAY_TREE` as above, and `NODE_B203_KEYS`, `NODE_B101_KEYS` and `NODE_TANK_KEYS` (full paths; one node needs only the first).
+3. Start, watch, order and stop:
+   ```sh
+   docker compose --profile three-nodes up -d --build
+   docker compose logs -f node-b203
+   docker compose exec gateway python -m gateway.order B-203 valve-open --data /data
+   docker compose exec node-b203 python -m edge.valve open --sd /data
+   docker compose --profile three-nodes down
+   ```
+
+- A first start learns day 1 at once (`NODE_PRIME_S`, default 86400), then plays day 2 at one row a minute: the tank closes its valve after about 20 minutes, `B-203` after about 2.5 hours and `B-101` after about 8. For a quick demo set `NODE_STEP_S`, for example `0.4` (about 10 seconds, 1 minute and 3 minutes).
+- After the last row a node keeps running: it sends what is left and takes orders. Each node's volume keeps its place, valve and learning across restarts. `down -v` deletes them and starts over.
+- **Use separate volumes for each tree**, with `docker compose -p <name> ...` or `down -v` first: the gateway and dashboard keep saved state. In the commands above, add the same `-p` and `--profile` each time.
+- The three-node tree says its tank also feeds homes that have no node, so the gateway does not compare tank and flats: **no pipe-leak detection** in these demos.
+- Replayed data cannot react to a valve, so a shut node reads zero flow. Radio airtime, range, collisions and packet loss are not simulated.
+- Tested with Podman and `podman-compose`; not with Docker itself.
+
+
+## Sensor readings
+
+There are no physical sensors yet. `sensors/` replays a recorded dataset instead:
+
+```python
+from edge.sensors import sensor_reader
+
+get_readings = sensor_reader("B-203")     # or sensor_reader("B-203", "other.csv")
+sample = get_readings()                   # (time_s, {"flow_lps": ..., "pressure_m": ...}), or None at the end
+```
+
+`board.py` calls `get_readings()` once per step. A flat gets `flow_lps` and `pressure_m`; the tank gets `level_m`, `inflow_lps`, `outflow_lps`, `ph`, `tds_ppm`, `turbidity_ntu` and `temp_c`. A missing or unreadable value is left out, and a failed read does not stop the node.
+
+- **Default dataset:** [`../simulation/webots/data/sensors.csv`](../simulation/webots/README.md): 48 hours of building B, one row per minute, **simulated, not measured**. Day 1 is normal; day 2 has planted leaks, a power cut and water-quality events.
+- **Another dataset:** the same layout (time in seconds first, then one `<node>:<sensor>` column each). The node program takes it with `--csv`. A node with its own name, not one of building B's, needs this.
+- **It plays once.** After the last row the node stops reading but keeps sending and taking orders (`--exit-at-end` stops it). After a restart it carries on from its last saved row. `--step-s` only changes the pace; the readings keep the dataset's time of day.
+- To see a node's first readings: `python3 -m edge.sensors B-203`.
 
 ## Recovery and restarts
 
@@ -36,7 +127,7 @@ A problem is closed only by an explicit recovery, never by silence. Each rule ne
 | Low tank | level is no longer low | `SUPPLY_RECOVERED` flag |
 | Water quality | existing quality rules | `QUALITY_CLEARED`, `QUALITY_TEMPORAL_CLEARED` |
 
-The gateway closes the pipe leak (2 tight blocks in a row), silence (`NODE_BACK`) and clock errors (`CLOCK_OK`) itself. A flat leak that never lets the water stop stays open. A node saves its open problems (`<node>_open.json`) and can report recovery after a reboot, with two limits: the consumption detector's baseline and the tank's learned `min_level` are not saved (a rebooted tank uses its fallback limit), and the water-quality monitor's state is not saved, so a quality problem open across a tank reboot may get no clearing message.
+The gateway closes the pipe leak (2 tight blocks in a row), silence (`NODE_BACK`) and clock errors (`CLOCK_OK`) itself. A flat leak that never lets the water stop stays open. A node saves its open problems and valve (`<node>_open.json`) and its learned trends, consumption detector, tank minimum level and water-quality history (`<node>_state.json`), so it can report recovery after a restart. A recovery never [reopens a valve](#notification-levels-and-the-valve). An old `<node>_baseline.json` is read once.
 
 What the gateway saves is described in [`../gateway/README.md`](../gateway/README.md#recovery-and-restarts).
 

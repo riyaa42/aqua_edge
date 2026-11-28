@@ -224,15 +224,14 @@ def check_programs():
     made = []
     try:
         import comms.gateway
-        real_board, real_make, real_connect = saved[1], saved[2], comms.gateway.connect
+        real_make, real_connect = saved[2], comms.gateway.connect
         node_program.open_radio = lambda: type("Quiet", (), {"send": lambda self, r, c=False: True,
                                                               "receive": lambda self: []})()
-        node_program.NodeBoard = lambda *a, **k: real_board(*a, **k, gpio=False)
         node_program.make_node = lambda *a: made.append(real_make(*a)) or made[-1]
         import sys
         for name, kind in (("prog-tank", TankNode), ("prog-flat", FlatNode)):
             sys.argv = ["edge_based", name, "--keys", keys, "--tree", tree_path, "--csv", csv,
-                        "--sd", os.path.join(folder, "sd"), "--step-s", "0"]
+                        "--sd", os.path.join(folder, "sd"), "--step-s", "0", "--actuators", "sim", "--exit-at-end"]
             node_program.main()
             assert isinstance(made[-1], kind) and made[-1].id == name
         sys.argv = ["edge_based", "B-101", "--keys", keys, "--tree", tree_path, "--step-s", "0"]

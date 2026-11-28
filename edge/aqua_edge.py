@@ -4,8 +4,12 @@ Runs unchanged in Webots; meant for the Raspberry Pi 3B. It never touches hardwa
 directly; everything goes through a small hardware layer `hal` with these methods:
 
     hal.now()                 -> current time in seconds; every message is stamped with it ("t").
-                                 Simulation: seconds since start. Real node: from the DS3231 RTC
-                                 (planned, to discuss next: UTC Unix seconds, ISO 8601 in logs).
+                                 Simulation: seconds since start. Real node: UTC Unix seconds
+                                 (from the DS3231 RTC, planned). Also times retries.
+    hal.sample_time()         -> optional: the local time, in seconds, of the readings read()
+                                 returns now. Every detector goes by it (hour of day, learning
+                                 day, "minutes in a row"). Replayed data gives its own time.
+                                 Without it: now() + hal.utc_offset_s (0 if not there)
     hal.read()                -> dict of sensor readings, e.g. {"flow_lps": 0.01, "pressure_m": 10.4}
     hal.send(packet: bytes, cad=False)
                               -> radio send now (SX1278 at 433 MHz on the real node, settings in
@@ -13,15 +17,20 @@ directly; everything goes through a small hardware layer `hal` with these method
                                  (hal/packet.py). cad: listen before talk (channel activity detection)
     hal.slot                  -> optional (index, count): this node's time slot in each minute
     hal.buzzer(code)          -> optional: sound the local alarm for this alert
+    hal.set_valve(closed)     -> optional: close or open the water valve; False if it failed.
+                                 Without it the node has no valve and nothing pauses
     hal.on_gateway_alert(code, active)
-                              -> optional: the gateway says a cross-node problem started or ended.
-                                 This is where valve control could go later; nothing closes now.
+                              -> optional: the gateway says a cross-node problem started or ended
     hal.receive()             -> list of packets (bytes) received since the last call
     hal.key(name)             -> the 16-byte secret this node shares with the gateway; "GATEWAY"
                                  is the building-wide key that signs the gateway's beacon
-    hal.led(colour)           -> "green" normal, "yellow" messages waiting, "red" alert active
-    hal.storage_path          -> file for the store-and-forward queue (SD card), or None;
-                                 the learned baseline is kept next to it (<name>_baseline.json)
+    hal.led(colour)           -> "green", "yellow" or "red", as policy.py decides
+    hal.led_pattern(colour, blinks)   optional, instead of led(): 0 solid, 1 or 2 blinks
+    hal.link_broken()         optional: True while the radio is faulty
+    hal.clock_warning         optional: True while the node's clock cannot be trusted
+    hal.storage_path          -> file for the store-and-forward queue (SD card), or None. Kept
+                                 next to it: <name>_state.json (what the detectors have learned,
+                                 no raw readings) and <name>_open.json (open problems, valve)
 
 Detection rules (all thresholds are calibration knobs at the top):
     Flat node: night flow, continuous flow and high use (flow only), a pressure-assisted leak
@@ -33,6 +42,10 @@ Detection rules (all thresholds are calibration knobs at the top):
     A missing reading restarts the "minutes in a row" count of every check that uses it.
 Two entry points: step() once a minute (sensors and checks), and radio_poll(), which the HAL
 calls as soon as a packet arrives and again at the time radio_poll() returns.
+Alerts, lights and valve: planning/valve_spec.md, with its table in policy.py. Every red condition,
+    found by the node or told by the gateway, turns the LED red and closes the valve. THE VALVE IS
+    ONLY REOPENED BY HAND: a local request (valve.py) or the gateway's VALVE_OPEN order. No
+    recovery reopens it (this overrides the spec's section 7).
 Delivery: every message is timestamped and kept until the gateway acknowledges it (Mariadhason
 et al. [4], timestamped store-and-forward to SD card). Alerts and tank flags go the moment they
 are raised and are retried every few seconds. The gateway sends a beacon; when it comes back
@@ -46,23 +59,29 @@ import random
 
 
 from detection.consumption.detectors import StatisticalZeroFlowDetector
+from edge import policy
 from hal.link import MessageLink
 from hal.lora433 import (BEACON_S, FLUSH_ROUTINE_AFTER_S, FLUSH_STEP_S, HEARD_S,  # noqa: F401
                      AirtimeBudget, airtime_s, retry_wait)
 from hal.packet import CUSTOM_IDS, is_node, node_number, pack, unpack, violation_mask
-from detection.quality.quality_model import QualityModel, QualityMonitor, TemporalModel
+from detection.quality.quality_model import QualityModel, QualityMonitor, TemporalModel, check_standards
 
 DAY, HOUR = 86400, 3600
 LEARN_S = DAY                 # first day: learn this node's normal pattern
 EWMA_A = 1 / 14               # after day 1, each clean hour moves the baseline 1/14 of the way to
                               # today's value: remembers about 2 weeks (Phyn learns in 21 days, Moen 7)
 SUMMARY_S = 900               # send a summary every 15 minutes
-STUCK_S = 30                  # unacknowledged this long: yellow light
+STUCK_S = 30                  # unacknowledged this long: yellow, one blink
+STALE_S = 180                 # no new reading this long: the sensor data is stale (yellow, two blinks)
 SLOT_GUARD_S = 0.2            # a summary starts this far into our time slot, margin for clock error
 SUPPLY_STATES = {"SUPPLY_EVENT", "LEAK_TANK_DRAIN", "SUPPLY_UNCERTAIN"}    # one at a time
 COMMAND_ENDS = {"PIPE_LEAK_CLEARED": {"PIPE_LEAK"}, "PIPE_LEAK_CAUSE_CLEARED": {"PIPE_LEAK_CAUSE"},
                 "SUPPLY_CLEARED": SUPPLY_STATES}
 REMEMBER_COMMANDS = 200
+MAX_SUMMARIES = 7 * 86400 // SUMMARY_S    # kept while unsent: 7 days, as far back as the gateway's balance check goes
+VALVE_ORDERS = {"VALVE_CLOSE": True, "VALVE_OPEN": False}
+LED_ORDERS = {"ALERT_LED_ON": True, "ALERT_LED_OFF": False}
+ORDER_SLACK_S = 1             # a command's time is sent in whole seconds
 
 
 def iso_utc(utc_s):
@@ -115,7 +134,7 @@ class Store:
 
     def __init__(self, path, seed=0):
         self.path, self.queue, self.next_try, self.retries, self.seq = path, [], {}, {}, 0
-        self.total_resends = 0
+        self.total_resends, self.dropped = 0, 0       # dropped: old summaries given up for room
         self.rng = random.Random(seed)
         if path and os.path.exists(path):
             with open(path) as f:
@@ -125,19 +144,28 @@ class Store:
                         if "k" in d:
                             self.queue.append(d)
                         else:
-                            self.seq = d["seq"]
+                            self.seq, self.dropped = d["seq"], d.get("dropped", 0)
         self.seq = max([self.seq] + [m["s"] for m in self.queue])
 
     def _save(self):
         # ponytail: rewrites the whole file on change; switch to an append log if the queue gets long
         if self.path:
-            save_atomic(self.path, json.dumps({"seq": self.seq}) + "\n"
+            save_atomic(self.path, json.dumps({"seq": self.seq, "dropped": self.dropped}) + "\n"
                         + "".join(json.dumps(m) + "\n" for m in self.queue))
 
     def add(self, msg):
-        """Give the message the next counter value and keep it until acknowledged."""
+        """Give the message the next counter value and keep it until acknowledged. Alerts and
+        flags are never given up; of the summaries only the newest MAX_SUMMARIES are kept."""
         self.seq += 1
         self.queue.append({**msg, "s": self.seq})
+        summaries = [m["s"] for m in self.queue if m["k"] == "SUM"]
+        if len(summaries) > MAX_SUMMARIES:
+            old = set(summaries[:len(summaries) - MAX_SUMMARIES])
+            self.queue = [m for m in self.queue if m["s"] not in old]
+            for s in old:
+                self.next_try.pop(s, None)
+                self.retries.pop(s, None)
+            self.dropped += len(old)
         self._save()
 
     def ack(self, seq):
@@ -221,22 +249,31 @@ class Baseline:
         return max(self.ss[hour] / max(self.n[hour], 1) - m * m, 0.0) ** 0.5
 
 
+def saved_sample_time(storage_path):
+    """The time of the last reading a node's saved state includes, or None. Replayed data
+    resumes after it."""
+    path = storage_path and os.path.splitext(storage_path)[0] + "_state.json"
+    if not path or not os.path.exists(path):
+        return None
+    with open(path) as f:
+        return json.load(f).get("last_sample")
+
+
 class Node:
-    sensors = ()
+    sensors = ()                   # the readings it learns a baseline of
+    expected = ()                  # every reading it should get each time
+    flat_checks = tank_checks = False
 
     def __init__(self, node_id, hal):
         self.id, self.hal = node_id, hal
         self.store = Store(hal.storage_path, seed=sum(ord(c) for c in node_id))
         self.key = hal.key(node_id)
         self.base = {k: Baseline() for k in self.sensors}
-        self.base_path = hal.storage_path and os.path.splitext(hal.storage_path)[0] + "_baseline.json"
-        self.learn_until = None        # end of the learning day: set on first step, saved to SD
-        if self.base_path and os.path.exists(self.base_path):    # restart after a power cut: keep what was learned
-            with open(self.base_path) as f:
-                saved = json.load(f)
-            self.learn_until = saved.pop("learn_until", None)
-            for k, d in saved.items():
-                self.base[k].__dict__.update(d)
+        beside = hal.storage_path and os.path.splitext(hal.storage_path)[0]
+        self.state_path = beside and beside + "_state.json"
+        self.old_baseline = False
+        self.learn_until = None        # end of the learning day (sample time), saved to SD
+        self.last_sample = None        # sample time of the last reading taken in
         self.hour = None
         self.clean = True              # no alert so far in the hour now running
         self.alerts = {}               # active alert type -> last time its condition was seen
@@ -246,7 +283,12 @@ class Node:
         # Gateway commands (cross-node problems): active ones, when each last ended, ones that
         # were already over when they arrived, and the numbers acted on (never act twice)
         self.remote, self.remote_ended, self.missed, self.commands_done = {}, {}, [], []
-        self.open_path = hal.storage_path and os.path.splitext(hal.storage_path)[0] + "_open.json"
+        # The valve: what was last wanted, why, and whether doing it failed. Orders from the
+        # gateway older than the last change are ignored
+        self.has_valve = hasattr(hal, "set_valve")
+        self.valve = {"closed": False, "why": None, "fault": False}
+        self.valve_changed, self.led_order, self.led_changed = -1e18, False, -1e18
+        self.open_path = beside and beside + "_open.json"
         if self.open_path and os.path.exists(self.open_path):    # restart after a power cut
             with open(self.open_path) as f:
                 saved = json.load(f)
@@ -255,6 +297,10 @@ class Node:
             self.open = set(saved["open"])
             self.remote, self.remote_ended = saved.get("remote", {}), saved.get("ended", {})
             self.missed, self.commands_done = saved.get("missed", []), saved.get("done", [])
+            self.valve = saved.get("valve", self.valve)
+            self.valve_changed = saved.get("valve_changed", self.valve_changed)
+            self.led_order = saved.get("led_order", False)
+            self.led_changed = saved.get("led_changed", self.led_changed)
         slot = getattr(hal, "slot", None)
         # without a slot, the radio number sets this node's turn when stored messages go out. Custom
         # numbers start again from 0, so their turns are not half a minute late
@@ -266,6 +312,114 @@ class Node:
         self.airtime = AirtimeBudget()
         self.ok_minutes = {}           # recovery message -> minutes in a row its problem looked over
         self.interval, self.acc = None, {}
+        self.saved_as, self.stuck = None, False
+        self.reading_t, self.reading_at, self.missing = None, None, False      # sensor health, for the light
+
+    def start(self):
+        """Call once the whole node is built: load what was learned, set the valve as saved."""
+        self.load_state()
+        if self.has_valve:
+            failed = not self.drive_valve()
+            if failed != self.valve["fault"]:
+                self.valve["fault"] = failed
+                self.save_open()
+                if failed:
+                    self.emit("ALERT", a="VALVE_FAULT")
+
+    # --- what the detectors have learned (never raw readings) ---
+    def state(self):
+        return {"learn_until": self.learn_until, "last_sample": self.last_sample, "hour": self.hour,
+                "clean": self.clean, "alerts": self.alerts, "ok_minutes": self.ok_minutes,
+                "interval": self.interval, "acc": self.acc,
+                "base": {k: b.__dict__ for k, b in self.base.items()}}
+
+    def restore(self, saved):
+        for name in ("learn_until", "last_sample", "hour", "clean", "alerts", "ok_minutes", "interval", "acc"):
+            setattr(self, name, saved[name])
+        for k, d in saved["base"].items():
+            if k in self.base:
+                self.base[k].__dict__.update(d)
+
+    def save_state(self):
+        if self.state_path:
+            save_atomic(self.state_path, json.dumps(self.state(), separators=(",", ":")))
+
+    def load_state(self):
+        if not self.state_path:
+            return
+        if os.path.exists(self.state_path):
+            with open(self.state_path) as f:
+                self.restore(json.load(f))
+            return
+        old = os.path.splitext(self.state_path)[0].removesuffix("_state") + "_baseline.json"
+        if os.path.exists(old):     # saved by an earlier version: hourly baselines only
+            with open(old) as f:
+                saved = json.load(f)
+            self.learn_until, self.old_baseline = saved.pop("learn_until", None), True
+            for k, d in saved.items():
+                if k in self.base:
+                    self.base[k].__dict__.update(d)
+
+    def sample_time(self):
+        """Local time of the current readings: what every detector goes by."""
+        given = getattr(self.hal, "sample_time", None)
+        return given() if given else self.hal.now() + getattr(self.hal, "utc_offset_s", 0)
+
+    # --- valve ---
+    @property
+    def shut(self):
+        """Whether water is really stopped: a failed close leaves it running, a failed open not."""
+        return self.has_valve and self.valve["closed"] != self.valve["fault"]
+
+    @property
+    def flat_paused(self):
+        return self.flat_checks and self.shut
+
+    @property
+    def tank_paused(self):
+        return self.tank_checks and self.shut
+
+    def drive_valve(self):
+        try:
+            return self.hal.set_valve(self.valve["closed"]) is not False
+        except Exception as e:                  # a broken driver must not stop the node
+            self.note(f"valve: {e!r}")
+            return False
+
+    def set_valve(self, closed, why):
+        """Close or open the valve and report it. What is wanted is saved first, so a power cut
+        in between cannot lose it."""
+        if not self.has_valve:
+            return
+        self.valve_changed = self.hal.now()
+        if self.valve["closed"] == closed and not self.valve["fault"]:
+            if why == "gateway":                    # now an operator's order holds it: the light stays red
+                self.valve["why"] = why
+            self.save_open()
+            return
+        self.valve = {"closed": closed, "why": why, "fault": False}
+        self.save_open()
+        if self.drive_valve():
+            self.emit("ALERT", a="VALVE_CLOSED" if closed else "VALVE_OPENED")
+            if not closed:
+                self.after_reopen()
+        else:
+            self.valve["fault"] = True
+            self.save_open()
+            self.emit("ALERT", a="VALVE_FAULT")
+
+    def open_valve(self):
+        """Reopen at the node itself (a local request, edge/valve.py). With the gateway's
+        VALVE_OPEN order, the only ways a valve ever reopens."""
+        self.set_valve(False, "local")
+
+    def after_reopen(self):
+        """What closed the valve starts fresh, and can close it again once confirmed again."""
+
+    def note(self, text):
+        log = getattr(self.hal, "log", None)
+        if log:
+            log(f"{self.id} {text}")
 
     # --- messaging ---
     def emit(self, kind, **payload):
@@ -283,10 +437,13 @@ class Node:
         """Called every minute the condition holds; sends once per episode."""
         if kind in RECOVERABLE:
             self.set_open(self.open | {kind})      # saved before the alert is queued
-        if kind not in self.alerts:
+        new = kind not in self.alerts
+        self.alerts[kind] = self.sample_time()
+        if new:
             self.emit("ALERT", a=kind, **payload)
-            self.buzz(kind)                        # the local alarm never waits for the gateway
-        self.alerts[kind] = self.hal.now()
+            if policy.level(kind) == policy.ALERT:
+                self.buzz(kind)                    # the local alarm never waits for the gateway
+                self.set_valve(True, kind)
 
     def buzz(self, code):
         buzzer = getattr(self.hal, "buzzer", None)
@@ -300,9 +457,10 @@ class Node:
 
     def save_open(self):
         if self.open_path:
-            save_atomic(self.open_path, json.dumps({"open": sorted(self.open), "remote": self.remote,
-                                                    "ended": self.remote_ended, "missed": self.missed,
-                                                    "done": self.commands_done}))
+            save_atomic(self.open_path, json.dumps({
+                "open": sorted(self.open), "remote": self.remote, "ended": self.remote_ended,
+                "missed": self.missed, "done": self.commands_done, "valve": self.valve,
+                "valve_changed": self.valve_changed, "led_order": self.led_order, "led_changed": self.led_changed}))
 
     def recover(self, message, rules, looks_over):
         """Called every minute. Sends `message` once the open problems among `rules` have looked
@@ -358,7 +516,21 @@ class Node:
             if self.remote.pop(name, None) is not None:
                 hook(name, False)
 
-        if code in COMMAND_ENDS:
+        if code in VALVE_ORDERS:
+            if not over and t >= self.valve_changed - ORDER_SLACK_S:
+                if VALVE_ORDERS[code]:
+                    self.buzz(code)
+                if self.has_valve:
+                    self.set_valve(VALVE_ORDERS[code], "gateway")
+                    self.valve_changed = max(self.valve_changed, t)
+                else:
+                    self.emit("ALERT", a="VALVE_FAULT")     # there is none to move
+        elif code in LED_ORDERS:
+            if not over and t >= self.led_changed - ORDER_SLACK_S:
+                self.led_order, self.led_changed = LED_ORDERS[code], t
+                if self.led_order:
+                    self.red_from_gateway(code, t)
+        elif code in COMMAND_ENDS:
             for name in COMMAND_ENDS[code]:
                 self.remote_ended[name] = max(t, self.remote_ended.get(name, t))
                 if name in self.remote and self.remote[name] <= t:
@@ -372,8 +544,18 @@ class Node:
                 for other in SUPPLY_STATES - {code}:
                     end(other)
             self.remote[code] = t
-            self.buzz(code)
             hook(code, True)
+            if policy.level(code) == policy.ALERT:
+                self.red_from_gateway(code, t)
+
+    def red_from_gateway(self, code, t):
+        """A red condition from the gateway (planning/valve_spec.md, section 7): buzzer, and close
+        the valve. Not if it dates from before the valve was last reopened: that was decided
+        knowing less. Its end never reopens the valve."""
+        self.buzz(code)
+        if t >= self.valve_changed - ORDER_SLACK_S:
+            self.set_valve(True, code)
+            self.valve_changed = max(self.valve_changed, t)     # an older reopen signal cannot undo this
 
     def transmit(self, now):
         """Send what is due, set the light, and return when to call again (None: nothing waits)."""
@@ -383,9 +565,40 @@ class Node:
             urgent = self.store.urgent(m)
             if not self.link.send(wire, admit=lambda s: self.airtime.take(now, s, urgent)):     # transmit-time limit reached
                 self.store.next_try[m["s"]] = now + 60
-        stuck = any(now - m["t"] > STUCK_S for m in self.store.queue)
-        self.hal.led("red" if self.alerts or self.open or self.remote else "yellow" if stuck else "green")
+        slot = getattr(self.hal, "slot", None)
+        slot_wait = slot[0] * 60 / slot[1] + SLOT_GUARD_S if slot else 0    # a summary is not sent before then
+        stuck = any(now - m["t"] > STUCK_S + (slot_wait if m["k"] == "SUM" else 0) for m in self.store.queue)
+        if stuck != self.stuck:
+            self.stuck = stuck
+            self.note("messages are waiting for the gateway" if stuck else "waiting messages delivered")
+        self.show_light(now)
         return self.store.wake(now)
+
+    def active(self):
+        """Every problem in force now, for its level."""
+        return set(self.alerts) | self.open | set(self.remote)
+
+    def signal(self, now):
+        """(colour, blinks) for the LED: policy.py and planning/valve_spec.md."""
+        if self.reading_at is None:
+            self.reading_at = now           # from here a node that gets no reading at all counts as stale
+        link = getattr(self.hal, "link_broken", None)
+        clock = getattr(self.hal, "utc_now", None)
+        return policy.signal(
+            self.active(),
+            red=self.led_order or (self.valve["closed"] and self.valve["why"] == "gateway"),
+            delivery=self.stuck or bool(link and link()),
+            sensors=self.missing or now - self.reading_at > STALE_S or bool(clock and not clock()[1])
+            or bool(getattr(self.hal, "clock_warning", False))
+            or (self.has_valve and self.valve["fault"]))
+
+    def show_light(self, now):
+        colour, blinks = self.signal(now)
+        pattern = getattr(self.hal, "led_pattern", None)    # a hal without blinking shows the colour
+        if pattern:
+            pattern(colour, blinks)
+        else:
+            self.hal.led(colour)
 
     def radio_poll(self):
         """Call when a packet arrives, and at the time this returns. Never touches the sensors."""
@@ -395,38 +608,65 @@ class Node:
 
     # --- main loop, called once per minute ---
     def step(self):
-        now, r = self.hal.now(), self.hal.read()
+        now, td, r = self.hal.now(), self.sample_time(), self.hal.read()
+        if td != self.reading_t:
+            self.reading_t, self.reading_at = td, now
+        self.missing = any(not _finite(r.get(k)) for k in self.expected)
         self.receive(now)
-        if self.learn_until is None:       # very first start: learn for one day from now
-            self.learn_until = now + LEARN_S
-        hour = int((now + getattr(self.hal, "utc_offset_s", 0)) % DAY // HOUR)
-        if hour != self.hour:              # once an hour: update the baseline, keep it on the SD card
+        self.observe(td, r)
+        summary = self.interval
+        self.summarise(now, r)
+        # Save every 15 minutes of readings, with each summary, and whenever something changed,
+        # so a power cut loses at most 15 minutes of learning and repeats no summary
+        as_now = (int(td // SUMMARY_S), sorted(self.alerts), sorted(self.open), dict(self.valve))
+        if as_now != self.saved_as or summary != self.interval:
+            self.saved_as = as_now
+            self.save_state()
+        return self.transmit(now)           # alerts raised just now go in this same call
+
+    def observe(self, td, r, checks=True):
+        """Take one reading into the detectors: learn from it on the first day, check it after."""
+        if self.old_baseline:               # an old file counts only if it is on the same clock
+            self.old_baseline = False
+            if self.learn_until is None or td < self.learn_until - LEARN_S - HOUR:
+                self.learn_until, self.base = None, {k: Baseline() for k in self.sensors}
+        if self.learn_until is None:        # very first start: learn for one day from now
+            self.learn_until = td + LEARN_S
+        hour = int(td % DAY // HOUR)
+        if hour != self.hour:               # once an hour: update the baseline
             for b in self.base.values():
                 b.blend(self.hour, self.clean)
             self.hour, self.clean = hour, True
-            self.save_baseline()
-        if now < self.learn_until:
-            for k in self.sensors:
-                v = r.get(k)
-                if v is not None and not math.isnan(v):
-                    self.base[k].add(hour, v)
-        else:
-            for k in self.sensors:
-                v = r.get(k)
-                if v is not None and not math.isnan(v):
-                    self.base[k].collect(v)
-            self.check(now, hour, r)
-            self.alerts = {k: seen for k, seen in self.alerts.items() if now - seen < ALERT_CLEAR_S}
-            # ponytail: minutes before an alert fires (up to 3 h for continuous flow) still count
-            # as clean; at EWMA_A = 1/14 that moves the baseline a few percent at most
-            self.clean = self.clean and not self.alerts
-        self.summarise(now, r)
-        return self.transmit(now)           # alerts raised just now go in this same call
+        learning = td < self.learn_until
+        paused = self.paused_sensors()      # nothing is learned from a pipe that is shut off
+        for k in self.sensors:
+            v = r.get(k)
+            if k not in paused and v is not None and not math.isnan(v):
+                (self.base[k].add if learning else self.base[k].collect)(*((hour, v) if learning else (v,)))
+        if checks:
+            (self.check_while_learning if learning else self.check)(td, hour, r)
+        self.alerts = {k: seen for k, seen in self.alerts.items() if td - seen < ALERT_CLEAR_S}
+        # ponytail: minutes before an alert fires (up to 3 h for continuous flow) still count
+        # as clean; at EWMA_A = 1/14 that moves the baseline a few percent at most
+        self.clean = self.clean and not self.alerts and not self.shut
+        self.last_sample = td
 
-    def save_baseline(self):
-        if self.base_path:
-            save_atomic(self.base_path, json.dumps({"learn_until": self.learn_until,
-                                                    **{k: b.__dict__ for k, b in self.base.items()}}))
+    def prime(self, r):
+        """Learn from a recorded reading of the first day: no checks, no messages, no valve.
+        False, and nothing taken in, once the first day is over."""
+        td = self.sample_time()
+        if self.learn_until is not None and td >= self.learn_until:
+            return False
+        self.observe(td, r, checks=False)
+        self.accumulate(r)
+        self.acc = {}
+        return True
+
+    def paused_sensors(self):
+        return ()
+
+    def check_while_learning(self, td, hour, r):
+        """Checks that need nothing learned."""
 
     def summarise(self, now, r):
         i = int(now // SUMMARY_S)
@@ -444,7 +684,6 @@ class Node:
 
 
 QUALITY_MODEL = QualityModel()    # Module 3: 8-bit 3-class classifier, Sharma et al. [1]
-TEMPORAL_MODEL = TemporalModel()  # Module 2: 8-bit Temporal AE (Exp 2)
 
 
 def _finite(val):
@@ -465,7 +704,13 @@ class EdgeRuntime(Node):
             raise ValueError(f"unknown EdgeRuntime mode: {mode}")
         self.mode = mode
         self.sensors = self.MODE_SENSORS[mode]
+        self.flat_checks, self.tank_checks = mode in ("flat", "combined"), mode in ("tank", "combined")
+        self.expected = tuple(dict.fromkeys(
+            (("flow_lps", "pressure_m") if self.flat_checks else ())
+            + (("level_m", "inflow_lps", "outflow_lps", "ph", "tds_ppm", "turbidity_ntu", "temp_c")
+               if self.tank_checks else ())))
         super().__init__(node_id, hal)
+        self.rearm = set()          # water-quality problems still there when the valve was reopened
         self._p_sum, self._p_cnt = 0.0, 0
 
         if mode in ("flat", "combined"):
@@ -474,24 +719,109 @@ class EdgeRuntime(Node):
             self.flow_returned = False
         if mode in ("tank", "combined"):
             self.qmon = QualityMonitor(
-                QUALITY_MODEL, temporal_model=TEMPORAL_MODEL, window=3, confirm_n=QUALITY_MIN, clear_n=QUALITY_CLEAR_MIN
+                QUALITY_MODEL, temporal_model=TemporalModel(), window=3,       # Module 2: keeps history, one per node confirm_n=QUALITY_MIN, clear_n=QUALITY_CLEAR_MIN
             )
             self.supply_run = self.low_run = self.ok_run = 0
             self.low_flagged = "SUPPLY_LOW" in self.open
             self.min_level = None
             self._day1_levels = []
             self.prev_level = None
+        self.start()
+
+    # --- saved state ---
+    def state(self):
+        saved = {**super().state(), "p_sum": self._p_sum, "p_cnt": self._p_cnt, "rearm": sorted(self.rearm)}
+        if self.flat_checks:
+            c = self.cmon
+            saved["flat"] = {"night_run": self.night_run, "high_run": self.high_run, "cont_run": self.cont_run,
+                             "p_leak_run": self.p_leak_run, "flow_returned": self.flow_returned}
+            saved["consumption"] = {
+                "base": c.base.__dict__, "hour": c.hour, "clean": c.clean, "active": c.active, "last_t": c.last_t,
+                "high_run": c.high_run, "night_run": c.night_run, "zero_run": c.zero_run,
+                "day_mean_6h": c.day_mean_6h, "holding": sorted(c.holding),
+                "win_6h": [round(v, 5) for v in c.win_6h]}     # the 6-hour check needs the whole window
+        if self.tank_checks:
+            q, t = self.qmon, self.qmon.temporal
+            saved["tank"] = {"supply_run": self.supply_run, "low_run": self.low_run, "ok_run": self.ok_run,
+                             "low_flagged": self.low_flagged, "min_level": self.min_level,
+                             "prev_level": self.prev_level,
+                             # the one list of raw readings: only on the first day, then dropped
+                             "day1_levels": [round(v, 3) for v in self._day1_levels]}
+            saved["quality"] = {
+                "buf": list(q.buf), "limit_state": q.limit_state, "class_state": q.class_state,
+                "t_bad_run": q.t_bad_run, "t_good_run": q.t_good_run, "temporal_active": q.temporal_active,
+                "temporal": {k: getattr(t, k) for k in ("ewma_short", "ewma_long", "last_ts", "warmup_seen")}}
+        return saved
+
+    def restore(self, saved):
+        super().restore(saved)
+        self._p_sum, self._p_cnt, self.rearm = saved["p_sum"], saved["p_cnt"], set(saved["rearm"])
+        if self.flat_checks and "flat" in saved:
+            self.__dict__.update(saved["flat"])
+            c, d = self.cmon, dict(saved["consumption"])
+            c.base.__dict__.update(d.pop("base"))
+            c.holding = set(d.pop("holding"))
+            c.win_6h.clear()
+            c.win_6h.extend(d.pop("win_6h"))
+            c.__dict__.update(d)
+        if self.tank_checks and "tank" in saved:
+            tank = dict(saved["tank"])
+            self._day1_levels = tank.pop("day1_levels")
+            self.__dict__.update(tank)
+            q, d = self.qmon, dict(saved["quality"])
+            q.temporal.__dict__.update(d.pop("temporal"))
+            q.buf.extend(tuple(row) for row in d.pop("buf"))
+            q.__dict__.update(d)
+
+    # --- valve ---
+    def paused_sensors(self):
+        return ((("flow_lps", "pressure_m") if self.flat_paused else ())
+                + (("outflow_lps",) if self.tank_paused else ()))
+
+    def after_reopen(self):
+        if self.flat_checks:
+            self.night_run = self.cont_run = self.high_run = self.p_leak_run = 0
+            self.ok_minutes.clear()
+            for kind in FLAT_LEAK_RULES | CONSUMPTION_RULES | {"PROLONGED_ZERO_FLOW"}:
+                self.alerts.pop(kind, None)
+        if self.tank_checks:
+            self.supply_run = 0
+            self.alerts.pop("ABNORMAL_SUPPLY", None)
+            # still-bad water raises no new event by itself: count it again from now
+            q = self.qmon
+            self.rearm = set()
+            for track, name in ((q.limit_state, "QUALITY_LIMIT_VIOLATION"), (q.class_state, f"QUALITY_{q.active_class}")):
+                if track[2] is not None:
+                    track[0] = 0
+                    self.rearm.add(name)
+                    self.alerts.pop(name, None)
+
+    def active(self):
+        codes = super().active()
+        if self.tank_checks:                 # a quality problem lasts until the water is good again
+            q = self.qmon
+            codes |= ({"QUALITY_LIMIT_VIOLATION"} if q.limit_active else set())
+            codes |= ({f"QUALITY_{q.active_class}"} if q.active_class else set())
+            codes |= ({"QUALITY_TEMPORAL_ANOMALY"} if q.temporal_active else set())
+        return codes
 
     def check(self, now, hour, r):
-        if self.mode in ("flat", "combined"):
+        if self.flat_checks:
             self._check_flat(now, hour, r)
-        if self.mode in ("tank", "combined"):
+        if self.tank_checks:
+            self._check_quality(now, r, r.get("temp_c"))
             self._check_tank(now, hour, r)
+
+    def check_while_learning(self, now, hour, r):
+        if self.tank_checks:        # the drinking-water limits need nothing learned. Without a
+            self._check_quality(now, r, None)       # temperature, only they run
 
     def _check_flat(self, now, hour, r):
         """Flat-side leak & consumption checks. Skips missing/NaN streams safely."""
         flow = r.get("flow_lps")
-        if not _finite(flow):       # a missing reading breaks every "minutes in a row" count
+        # With the valve shut there is no flow to judge: nothing is raised and nothing counts as
+        # recovered. A missing reading breaks every "minutes in a row" count too
+        if self.flat_paused or not _finite(flow):
             self.night_run = self.cont_run = self.high_run = self.p_leak_run = 0
             self.ok_minutes.clear()
             return
@@ -518,6 +848,7 @@ class EdgeRuntime(Node):
                 self.alert("LEAK_PRESSURE_DROP", flow=round(flow, 4), p_min=round(pres, 2))
         else:
             self.p_leak_run = 0
+        self.cmon.learn_s = self.learn_until
         for ev_type, _ in self.cmon.step(now, flow):
             if ev_type != "UNUSUAL_HIGH_CONSUMPTION":
                 self.alert(ev_type, flow=round(flow, 4))
@@ -534,11 +865,10 @@ class EdgeRuntime(Node):
         self.recover("ZERO_FLOW_CLEARED", {"PROLONGED_ZERO_FLOW"},
                      lambda _: self.flow_returned and self.cmon.zero_run < self.cmon.active_zero_min)
 
-    def _check_tank(self, now, hour, r):
-        """Tank-side water quality & outflow/level checks. Skips missing/NaN streams safely."""
+    def _check_quality(self, now, r, temp_c):
+        """Tank-side water quality. temp_c None: only the drinking-water limits are checked."""
         ph, tds, turb = r.get("ph"), r.get("tds_ppm"), r.get("turbidity_ntu")
         if _finite(ph) and _finite(tds) and _finite(turb):
-            temp_c = r.get("temp_c")          # missing: only the standards check runs
             _, _, _, limit_ev, class_ev, t_ev = self.qmon.update(temp_c, ph, tds, turb, ts_s=now)
             cleared = False
             for ev in (limit_ev, class_ev):   # limit violation first: it is the authoritative one
@@ -563,8 +893,27 @@ class EdgeRuntime(Node):
                 elif t_kind == "TEMPORAL_CLEARED":
                     self.alerts.pop("QUALITY_TEMPORAL_ANOMALY", None)
                     self.emit("ALERT", a="QUALITY_TEMPORAL_CLEARED")
+            self._raise_again(ph, tds, turb)
 
-        outflow = r.get("outflow_lps")
+    def _raise_again(self, ph, tds, turb):
+        """After a reopening: a problem that is confirmed again is reported, and acted on, again."""
+        q = self.qmon
+        for track, name in ((q.limit_state, "QUALITY_LIMIT_VIOLATION"), (q.class_state, f"QUALITY_{q.active_class}")):
+            if name in self.rearm and track[2] is not None and track[0] >= QUALITY_MIN:
+                self.rearm.discard(name)
+                extra = {}
+                if name == "QUALITY_LIMIT_VIOLATION":
+                    extra = {"turb": round(turb, 2), "viol": violation_mask(check_standards(ph, tds, turb)[1])}
+                self.alerts.pop(name, None)
+                self.alert(name, ph=round(ph, 2), tds=round(tds), **extra)
+        if not q.limit_active:
+            self.rearm.discard("QUALITY_LIMIT_VIOLATION")
+        if not q.active_class:
+            self.rearm -= {"QUALITY_CHEMICAL", "QUALITY_RUNOFF"}
+
+    def _check_tank(self, now, hour, r):
+        """Tank-side outflow and level checks. Skips missing/NaN streams safely."""
+        outflow = None if self.tank_paused else r.get("outflow_lps")    # shut: nothing flows out
         if _finite(outflow):
             b = self.base["outflow_lps"]
             high = outflow > b.mean(hour) + max(SUPPLY_SIGMAS * b.std(hour), SUPPLY_MARGIN_LPS)
@@ -589,7 +938,6 @@ class EdgeRuntime(Node):
             if self.low_run >= PRESSURE_MIN and not self.low_flagged:
                 self.low_flagged = True
                 self.set_open(self.open | {"SUPPLY_LOW"})
-                self.buzz("SUPPLY_LOW")
                 self.emit("FLAG", f="SUPPLY_LOW", level=round(lvl, 3), inflow=round(inflow_v, 3))
             elif self.ok_run >= PRESSURE_MIN and self.low_flagged:
                 self.low_flagged = False
@@ -599,31 +947,32 @@ class EdgeRuntime(Node):
             self.low_run = self.ok_run = 0
 
     def accumulate(self, r):
-        now = self.hal.now()
-        if self.mode in ("flat", "combined"):
-            flow = r.get("flow_lps")
-            if now < LEARN_S and _finite(flow):
+        now = self.sample_time()
+        if self.flat_checks:
+            flow = 0.0 if self.flat_paused else r.get("flow_lps")
+            if now < self.learn_until and _finite(flow) and not self.flat_paused:
+                self.cmon.learn_s = self.learn_until
                 self.cmon.step(now, flow)
             if _finite(flow):
                 self.acc["vol_l"] = self.acc.get("vol_l", 0.0) + flow * 60
-            pres = r.get("pressure_m")
+            pres = None if self.flat_paused else r.get("pressure_m")
             if _finite(pres):
                 self.acc["p_min"] = min(self.acc.get("p_min", 1e9), pres)
                 self._p_sum += pres
                 self._p_cnt += 1
                 self.acc["p_mean"] = self._p_sum / self._p_cnt
-        if self.mode in ("tank", "combined"):
+        if self.tank_checks:
             lvl = r.get("level_m")
             if _finite(lvl):
-                if 1800 <= now < LEARN_S:
+                if self.learn_until - LEARN_S + 1800 <= now < self.learn_until:
                     self._day1_levels.append(lvl)
-                elif now >= LEARN_S and self.min_level is None and self._day1_levels:
+                elif now >= self.learn_until and self.min_level is None and self._day1_levels:
                     s = sorted(self._day1_levels)
                     self.min_level = s[int(0.10 * (len(s) - 1))]
                     self._day1_levels.clear()
                 self.prev_level = lvl
                 self.acc["level_m"] = lvl
-            outflow = r.get("outflow_lps")
+            outflow = 0.0 if self.tank_paused else r.get("outflow_lps")
             if self.mode == "tank" and _finite(outflow):
                 self.acc["vol_l"] = self.acc.get("vol_l", 0.0) + outflow * 60
             inflow = r.get("inflow_lps")
@@ -696,7 +1045,7 @@ if __name__ == "__main__":
     run(a, 12 * HOUR)
     b = FlatNode("B-101", FakeHAL(os.path.join(tmp, "B-101.jsonl"), use))   # power back, new process
     nb, na = b.base["flow_lps"].n, a.base["flow_lps"].n
-    assert nb[:11] == na[:11] and nb[7] == 60 and nb[11] == 0     # at most the unfinished hour is lost
+    assert nb[:11] == na[:11] and nb[7] == 60 and 60 - 15 <= nb[11] <= 60     # at most 15 minutes are lost
 
     # Normal flat: no alerts. Small daytime leak (0.01 L/s from 10:00 on day 2, below the night
     # limit): continuous-flow alert after 3 h, the night check never fires

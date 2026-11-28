@@ -47,7 +47,7 @@ python3 run_offline.py --no-outage  # same, perfect network
 webots worlds/aqua_edge.wbt         # Webots R2025a
 ```
 
-In Webots, press play. One step is one minute of water time, so 48 h takes about 6 minutes at normal speed; use fast-forward to skip ahead. LEDs: green normal, yellow messages stuck waiting to send, red alert. Results are written to `results/webots_run/` when the 48 h end. `AQUA_SNAPSHOTS=1` before the command saves two screenshots for slides.
+In Webots, press play. One step is one minute of water time, so 48 h takes about 6 minutes at normal speed; use fast-forward to skip ahead. LEDs show the [notification level](../../edge/README.md#notification-levels-and-the-valve): green normal, yellow warning, red alert. Webots nodes have no valve. Results are written to `results/webots_run/` when the 48 h end. `AQUA_SNAPSHOTS=1` before the command saves two screenshots for slides.
 
 After changing the scenario: `uv run python make_scenario.py` (uses the root `uv` project), then `python3 make_world.py` if the node list changed.
 

@@ -89,7 +89,7 @@ Most leak decisions are made **on the node itself**, not on the gateway. This is
 | Tank outflow check | Tank node | Needs only the tank's own meter |
 | Building check (water in = water out) | Gateway | Needs numbers from every node at once, and only the gateway receives them all |
 
-If the radio or the gateway goes down, flats still catch their own leaks turn their light red and sound their buzzer. Only the gateway's work pauses, such as the building check; it catches up when the stored summaries arrive, and then sends the affected nodes any alerts it finds.
+If the radio or the gateway goes down, flats still catch their own leaks: red light, valve closed and buzzer ([rules](../../edge/README.md#notification-levels-and-the-valve)). Only the gateway's work pauses, such as the building check; it catches up when the stored summaries arrive, and then sends the affected nodes any alerts it finds.
 
 ---
 
@@ -108,7 +108,7 @@ This is the `Baseline` class in `aqua_edge.py`. We checked its math against Pyth
 
 **Kept up to date after day 1.** Every hour, that hour's readings move the learned value 1/14 of the way towards today's (EWMA, an average that gives recent days more weight; it remembers about 2 weeks), so changed habits are learned. An hour with an active alert is skipped, so a leak is not learned as normal. The night and continuous-flow checks use fixed numbers and never learn.
 
-**Saved to the SD card.** Once an hour the node saves what it has learned (`<name>_baseline.json`, next to the message queue), using the same power-cut-safe save as the queue. After a power cut the node loads it and carries on; at most the unfinished hour of learning is lost. Without this, every building power cut (our nodes have no battery) would wipe what every node had learned.
+**Saved to the SD card.** Once an hour the node saves what it has learned (now every 15 minutes and on any alert or valve change, in `<name>_state.json` next to the message queue), using the same power-cut-safe save as the queue. After a power cut the node loads it and carries on; at most 15 minutes of learning is lost. Without this, every building power cut (our nodes have no battery) would wipe what every node had learned.
 
 **Not everything is saved.** Only the hourly averages and spreads are. After a reboot past Day 1, the tank node's learned low level (`min_level`) is gone and is not relearned, so its tank check uses only the limits based on hourly readings (section 6). The consumption detector's own baseline is also lost (`../consumption/README.md`).
 
@@ -223,7 +223,7 @@ This follows common practice for LoRa networks: track when each device was last 
 
 ## 7. How an alarm reaches the gateway
 
-1. **The node decides.** A check trips, and in the same step the node turns its light red and sounds the buzzer (driven on the Pi by `edge/board.py`; not verified on hardware in these tests). No gateway is needed for this.
+1. **The node decides.** A check trips, and in the same step the node sets its light, and for an [alert level](../../edge/README.md#notification-levels-and-the-valve) closes its valve and sounds the buzzer (driven on the Pi by `edge/board.py`; not verified on hardware in these tests). No gateway is needed for this.
 2. **It saves the alarm to the SD card first,** so nothing is lost if the power or radio fails.
 3. **It sends the alarm straight away.** Alarms skip the queue. They listen first to check the radio channel is free (listen before talk), then send.
 4. **The gateway replies "got it"** (an ACK). The reply also carries the gateway's time for setting node clocks. The firmware does not set any clock itself; only the live simulation's hardware layer uses it.

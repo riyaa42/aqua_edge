@@ -15,10 +15,10 @@ There are two solutions, and `edge/` and `gateway/` each have an entry point for
 
 | Solution | Node (Pi) | Gateway server |
 |---|---|---|
-| Edge-based | `uv run edge-based-node` (`edge/edge_based.py`) | `uv run edge-based-gateway` (`gateway/edge_based.py`) |
+| Edge-based | `uv run prod-edge-edge`, or `uv run edge-based-node` (`edge/edge_based.py`) | `uv run edge-based-gateway` (`gateway/edge_based.py`) |
 | Cloud-based | `uv run cloud-based-node` (`edge/cloud_based.py`) | `uv run cloud-based-gateway` (`gateway/cloud_based.py`) |
 
-**The two edge-based programs run; the two cloud-based ones do not.** They are placeholders: each prints "not implemented yet" and exits with an error. `edge-based-node` replays a CSV in place of sensors and runs the node checks on the node. It needs a Raspberry Pi with an SX1278 (options: `uv run edge-based-node --help`); `uv run test-edge` tests it with a fake radio. On the Pi, first run `uv sync --extra pi`, then `uv run pi-radio-test` checks the LoRa module. Wiring and setup: [Running on the Pi](hal/README.md#running-on-the-pi).
+**The two edge-based programs run; the two cloud-based ones do not.** They are placeholders: each prints "not implemented yet" and exits with an error. `edge-based-node` replays a CSV in place of sensors and runs the node checks on the node. It runs on a Raspberry Pi with an SX1278, or [as a virtual node](edge/README.md#run-virtual-nodes) with Docker Compose (options: `uv run edge-based-node --help`); `uv run test-edge` tests it with a fake radio. On the Pi, first run `uv sync --extra pi`, then `uv run pi-radio-test` checks the LoRa module. Wiring and setup: [Running on the Pi](hal/README.md#running-on-the-pi).
 
 The gateway computer reaches the nodes through an ESP8266 on USB. After flashing it, run `uv sync --extra gateway`, then `uv run gate-radio-test` checks the modem (`--port` if it is not `/dev/ttyUSB0`). Wiring and flashing: [Gateway modem (ESP8266)](hal/README.md#gateway-modem-esp8266). `uv run dashboard-server` runs the [dashboard API](dashboard/README.md#running-it). To run the gateway, with or without Docker Compose: [Running the server](gateway/README.md#running-the-server). What the two ends publish over MQTT: [`comms/README.md`](comms/README.md).
 
@@ -66,17 +66,17 @@ The comparisons against the baselines planned in [`planning/experiments.md`](pla
 | `planning/circuit_plan.md` | Updated hardware components and connections: Raspberry Pi 3B nodes on 5 V USB power, a laptop gateway with an ESP8266 interface to its LoRa module, and the dataset-replay layer (replacing physical sensors, ADC, and battery HAT) |
 | `planning/archive/branch_reference.md` | Checklist of technical alignments for porting `live-simulation` and the full experimentation plan |
 | `planning/archive/` | Older planning and handover notes (`IMPROVEMENT_PLAN.md`, `HANDOVER.md`) kept for history |
-| `edge/` | The Python code for the Raspberry Pi 3B nodes (`aqua_edge.py`). `edge_based.py` runs a node on the Pi, with its clock, LEDs and buzzer in `board.py`; `cloud_based.py` is a placeholder for the other node entry point |
+| `edge/` | The Python code for the Raspberry Pi 3B nodes (`aqua_edge.py`). `edge_based.py` runs a node on the Pi, with its clocks, LEDs, buzzer and valve in `board.py` and `actuators.py`, its alert levels in `policy.py` and its sensor readings replayed from a recorded dataset by [`sensors/`](edge/README.md#sensor-readings), in place of physical sensors; `cloud_based.py` is a placeholder for the other node entry point |
 | `gateway/` | The Python code for the laptop gateway (`core.py`, `analytics.py`). The gateway reads the building's pipes and valves as a tree of nodes from `gateway/building_B.json` (schema in `gateway/README.md`). `edge_based.py` is the edge-based gateway server, also run with Docker Compose (`compose.yaml`); `cloud_based.py` is a placeholder |
 | `hal/` | Radio packets and SX1278 433 MHz settings (`packet.py`, `lora433.py`) and the hardware adapters (`pi_hal.py`) so the same detection code runs unchanged in simulation and on the Pi; placeholder for the gateway's ESP8266 passthrough |
-| `compose.yaml`, `Dockerfile`, `.env.example` | Docker Compose setup for the building's computer: gateway server, MQTT broker and dashboard server ([how to run](gateway/README.md#run-with-docker-compose)) |
+| `compose.yaml`, `Dockerfile`, `.env.example` | Docker Compose setup for the building's computer: gateway server, MQTT broker and dashboard server ([how to run](gateway/README.md#run-with-docker-compose)). `compose.esp8266.yaml` adds the radio modem |
+| `Dockerfile.edge` | Image of a virtual node: `compose.yaml` runs [one or three](edge/README.md#run-virtual-nodes) |
 | `comms/` | How the Pi and gateway communicate: the specification (`comms/README.md`) and the code for its MQTT topics and publishing |
 | `detection/` | The three detection subsystems: `quality/` (IS 10500 + `int8` TinyML), `leakage/` (flow/pressure rules + mass balance) and `consumption/` (statistical + Lempel–Ziv) |
 | `detection/quality/` | Offline training, quantization, and testing code for the water-quality neural network (`train_quality.py`, `results.txt`). Holds `quality_model.py` and produces `quality_model.json` for `edge/` |
 | `detection/leakage/` | Standalone leak-rule comparison scripts (`compare_leaks.py`) and documentation comparing flow-based and pressure-based leak detection |
 | `detection/consumption/` | Abnormal water-consumption detection experiments (spikes, night bursts, prolonged zero flow, and Paper [3] Lempel–Ziv compression-rate analytics), scored separately from leaks |
 | `dashboard/` | Buffered gateway-to-dashboard shipper and the ingest and read API server ([how to run](dashboard/README.md#running-it)). The web page is not written yet |
-| `bogo/` | *(Planned, empty for now)* Streams parts of the datasets as real-time sensor data, in place of physical sensors |
 | `tests/` | Gateway analytics tests and the unified runtime replay and benchmark |
 | `tasks/` | The functions behind the `uv run` scripts above |
 | `simulation/` | Everything that models the physical world: EPANET/WNTR pipe network (`scripts/`), real-time 21-node + LoRa radio simulator (`live/`), ns-3 LoRaWAN check (`ns3/`), and parked 3D simulator (`webots/`) |

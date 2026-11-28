@@ -258,7 +258,7 @@ Their outputs stay separate, interpretable signals (`QUALITY_LIMIT_VIOLATION`, `
 - **Regulatory-standard differences:** GECCO 2019 demonstrates that a model trained on IS 10500 flags compliant water from utilities operating under higher pH limits (*TrinkwV*).
 - **Low event prevalence in GECCO:** With `0.44%` event prevalence, even `0.14%` FPR yields `0.23` false alerts/day (`P = 0.642`), and `4-7` of `28` events are still missed at high-precision thresholds.
 - **Temporal model scope:** Tested primarily on GECCO 2019; it is not yet proven to eliminate seasonal drift across all water utilities.
-- **No physical sensors or Pi 3B hardware benchmarks yet:** There are no physical sensors; the Pi 3B hardware layer (`edge/board.py`, with `bogo/csv_replay.py`) replays recorded readings and has not been benchmarked on hardware; replays and timings (about `37 µs` per model call in pure Python) are from development machines.
+- **No physical sensors or Pi 3B hardware benchmarks yet:** There are no physical sensors; the Pi 3B hardware layer (`edge/board.py`, with `edge/sensors/`) replays recorded readings and has not been benchmarked on hardware; replays and timings (about `37 µs` per model call in pure Python) are from development machines.
 
 ---
 
@@ -278,7 +278,7 @@ Their outputs stay separate, interpretable signals (`QUALITY_LIMIT_VIOLATION`, `
 
 ## 15. Future Work
 
-1. Verify the Raspberry Pi 3B dataset-replay HAL (`edge/board.py`, `bogo/csv_replay.py`, `hal/pi_hal.py`), including the buzzer output, on hardware.
+1. Verify the Raspberry Pi 3B dataset-replay HAL (`edge/board.py`, `edge/sensors/`, `hal/pi_hal.py`), including the buzzer output, on hardware.
 2. Benchmark full runtime RAM, flash, and per-minute CPU time on physical Raspberry Pi 3B hardware using that HAL.
 3. Validate `QualityModel` and `TemporalModel` against physically measured, NTU-calibrated contamination experiments if sensor calibration data becomes available.
 4. Evaluate `TemporalModel` on additional continuous drinking-water utility time series beyond GECCO 2019.

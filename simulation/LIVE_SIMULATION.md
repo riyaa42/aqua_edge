@@ -42,7 +42,7 @@ The timekeeper waits for every node before moving on (this is called *lockstep*)
 - **Leaks.** Leaks are added while the model runs, with three fixed sizes: small 0.05 L/s (a running toilet), medium 0.5 L/s and large 1.5 L/s. The leak hole size comes from the orifice formula `A = Q / (Cd * sqrt(2gP))`.
 - **Leak locations.** Leaks can go in any flat or on any downtake pipe (`B-D*`).
 - **Water quality.** Runoff (rainwater-like: low TDS, lower pH) and chemical contamination (high TDS, high pH) are switched on for a set number of minutes. Normal and event values are kept in one table in `webots/make_scenario.py`.
-- **Not included for now.** Power outages. (The project has no valves.)
+- **Not included for now.** Power outages. (Simulated nodes here have no [valve](../edge/README.md#notification-levels-and-the-valve).)
 
 ## 4. Detection and alerts (firmware)
 

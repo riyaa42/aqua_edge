@@ -151,6 +151,26 @@ def check_compose_files():
     assert "--group dashboard" in dockerfile and "dashboard.server:create_app" in compose and "dashboard" in copied
     assert compose.count("AQUA_DASHBOARD_TOKEN: ${AQUA_DASHBOARD_TOKEN:?") == 2, "no default token in this setup"
     assert "AQUA_ENABLE_OUTAGE_SIM:-0" in compose
+    assert "devices:" not in compose, "the base setup needs no radio hardware"
+    assert "/dev/ttyUSB0" in read("compose.esp8266.yaml") and "AQUA_RADIO_PORT: /dev/ttyUSB0" in read("compose.esp8266.yaml")
+    assert "1700:1700" not in compose and ":1700\"" not in compose.replace("gateway:1700\"", ""), "never published"
+    # the virtual nodes' image: only the required library, and every file it copies is sent
+    edge = read("Dockerfile.edge")
+    assert "uv sync --locked" in edge and "--no-default-groups" in edge and "--extra" not in edge
+    sources = [x for line in re.findall(r"^COPY (?!--from)(.+)$", edge, re.M) for x in line.split()[:-1]]
+    for source in sources:
+        assert os.path.exists(os.path.join(ROOT, source)) and any(
+            source == i[1:] or source.startswith(i[1:] + "/") for i in ignored if i.startswith("!")), source
+    assert ignored.index("!simulation/webots/data/sensors.csv") > ignored.index("**/data")
+    nodes = compose[compose.index("x-node:"):]
+    assert "devices:" not in nodes and '"gpio"' not in nodes and '"lora"' not in nodes
+    # one node or three, and a tree for each with exactly those nodes
+    services = dict(re.findall(r"^  (node-[a-z0-9]+):.*?\n(.*?)(?=^  \S|^\S)", compose, re.M | re.S))
+    for profile, tree in (("one-node", "virtual_1node.json"), ("three-nodes", "virtual_3node.json")):
+        started = {re.search(r'"edge\.edge_based", "([^"]+)"', body).group(1) for body in services.values()
+                   if profile in (re.search(r"profiles: \[(.+)\]", body) or
+                                  re.search(r"x-node:.*?profiles: \[(.+?)\]", compose, re.S)).group(1)}
+        assert started == Topology.load(os.path.join(ROOT, "gateway", tree)).devices, (profile, started)
     assert "allow_anonymous false" in read("gateway", "mosquitto", "mosquitto.conf")
     start = read("gateway", "mosquitto", "start.sh")        # or the broker cannot start a second time
     assert start.index('rm -rf "$dir"') < start.index("mosquitto_passwd -c")

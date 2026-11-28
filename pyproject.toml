@@ -54,6 +54,7 @@ test-runtime = "tasks:test_runtime"
 test-parity = "tasks:test_parity"
 test-dashboard = "tasks:test_dashboard"
 edge-based-node = "tasks:edge_based_node"
+prod-edge-edge = "tasks:edge_based_node"     # the same: the edge device, edge-based solution
 edge-based-gateway = "tasks:edge_based_gateway"
 cloud-based-node = "tasks:cloud_based_node"
 cloud-based-gateway = "tasks:cloud_based_gateway"
@@ -80,4 +81,4 @@ default-groups = ["research", "dashboard", "test"]
 
 [tool.uv.build-backend]
 module-root = ""
-module-name = ["detection", "gateway", "hal", "edge", "bogo", "comms", "dashboard", "tests", "tasks"]
+module-name = ["detection", "gateway", "hal", "edge", "comms", "dashboard", "tests", "tasks"]

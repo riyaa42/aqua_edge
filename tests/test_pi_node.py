@@ -1,4 +1,4 @@
-"""The Pi node put together (edge/edge_based.py, edge/board.py, bogo/csv_replay.py and the HAL's
+"""The Pi node put together (edge/edge_based.py, edge/board.py, edge/sensors/ and the HAL's
 LoRa link) with a fake radio chip and no GPIO. Runs on any computer.
 
     uv run python -m tests.test_pi_node
@@ -7,10 +7,10 @@ import os
 import tempfile
 import time
 
-from bogo.csv_replay import CSVReplay
 from edge.aqua_edge import DAY, HOUR
 from edge.board import NodeBoard, seconds_until
 from edge.edge_based import _wait_with_radio, make_node, run
+from edge.sensors import sensor_reader
 from hal.lora_pi import CAD_TRIES, LoRaLink
 from hal.packet import pack, sim_key, unpack
 
@@ -38,22 +38,51 @@ def board_for(name, step_s, storage=None):
     radio, slept = FakeRadio(), []
     link = LoRaLink(radio, sleep=lambda s: board.sleep(s), log=lambda m: board.log(m), listen=False)
     keys = {name: sim_key(name), "GATEWAY": sim_key("GATEWAY")}
-    board = NodeBoard(name, link, CSVReplay(name), storage, keys, slot=(5, 20), step_s=step_s, gpio=False)
+    board = NodeBoard(name, link, sensor_reader(name), storage, keys, slot=(5, 20), step_s=step_s, gpio=False)
     board.log, board.sleep = (lambda *a: None), slept.append
     return board, radio, slept
 
 
+def check_sensor_reader():
+    path = os.path.join(tempfile.mkdtemp(), "data.csv")
+    with open(path, "w") as f:
+        f.write("t_s,B-101:flow_lps,B-1010:flow_lps,B-101:pressure_m\n0,1,9,2\n60,3,9,4\n")
+    first, second = sensor_reader("B-101", path), sensor_reader("B-101", path)
+    assert first() == (0.0, {"flow_lps": 1.0, "pressure_m": 2.0}), "only this node's columns"
+    assert first() == (60.0, {"flow_lps": 3.0, "pressure_m": 4.0})
+    assert first() is None and first() is None, "None at the end, and after it"
+    assert second()[0] == 0.0, "each reader keeps its own place"
+    for node, where, error in (("B-999", path, ValueError), ("B-101", path + ".missing", OSError)):
+        try:
+            sensor_reader(node, where)
+        except error:
+            continue
+        raise AssertionError(f"accepted {node} in {where}")
+    board, _, _ = board_for("B-203", 0)
+    rows = 0
+    while board.advance():
+        rows += 1
+    assert rows == 48 * 60 and board.sample_time() == (rows - 1) * 60 and board.read(), "the whole default dataset"
+
+
 def main():
-    # 1. Only this node's columns, one row per step
+    check_sensor_reader()
+    # 1. Only this node's columns, one row per step. Detectors get the row's time; messages the real one
     board, radio, _ = board_for("B-203", 0)
-    assert board.advance() and board.now() == 0 and set(board.read()) == {"flow_lps", "pressure_m"}
-    assert board.advance() and board.now() == 60
+    assert board.advance() and board.sample_time() == 0 and set(board.read()) == {"flow_lps", "pressure_m"}
+    assert board.advance() and board.sample_time() == 60 and abs(board.now() - time.time()) < 5
 
     # 2. Whole planted scenario, fast mode: the leak in B-203 (day 2, 02:00) goes out on the radio
     board, radio, _ = board_for("B-203", 0)
-    run(make_node("B-203", board), board, step_s=0)
+    node, raised = make_node("B-203", board), []
+    emit = node.emit
+    node.emit = lambda kind, **m: (raised.append((board.sample_time(), m["a"])) if kind == "ALERT" else None,
+                                   emit(kind, **m))
+    run(node, board, step_s=0)
     msgs = [unpack(p, board.key) for p in radio.sent]
-    alerts = sorted({(m["t"], m["a"]) for m in msgs if m["k"] == "ALERT"})
+    assert {m["a"] for m in msgs if m["k"] == "ALERT"} >= {"LEAK_NIGHT_FLOW", "VALVE_CLOSED"}
+    assert node.valve["closed"] and board.actuators.valve_closed and board.colour == "red"
+    alerts = [x for x in raised if x[1] != "VALVE_CLOSED"]
     assert alerts and alerts[0][1] == "LEAK_NIGHT_FLOW", alerts
     assert DAY + 2 * HOUR <= alerts[0][0] <= DAY + 3 * HOUR, alerts[0]
     assert radio.cads >= 1, "alerts listen before sending"
@@ -113,11 +142,12 @@ def main():
     node.store.next_try.clear()
     node.radio_poll()
     assert any(unpack(p, board.key).get("a") == "LEAK_NIGHT_FLOW" for p in radio.sent)
-    # 7. Fast mode keeps the CSV clock: a signed ACK does not change it
+    # 7. A signed ACK sets the real clock, never the time of the readings
     board, radio, _ = board_for("B-104", 0)
+    board.advance()
     radio.air = [pack({"k": "ACK", "n": "B-104", "s": 1, "gt": 5000}, sim_key("B-104"))]
     board.radio.service()
-    assert len(board.receive()) == 1 and board.clock_fix == 0
+    assert len(board.receive()) == 1 and abs(board.now() - 5000) < 5 and board.sample_time() == 0
 
     # 8. The node reads only its own and the beacon's packets, even if its board holds more keys
     board, radio, _ = board_for("B-104", 0)
