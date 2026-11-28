@@ -211,7 +211,8 @@ class Dashboard(_Dashboard):
         headers = {"Content-Type": "application/json", **({"Authorization": f"Bearer {token}"} if token else {})}
         data = raw if raw is not None else (None if body is None else json.dumps(body).encode())
         try:
-            with urllib.request.urlopen(urllib.request.Request(self.base + path, data, headers), timeout=5) as r:
+            opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+            with opener.open(urllib.request.Request(self.base + path, data, headers), timeout=5) as r:
                 return r.status, json.load(r)
         except urllib.error.HTTPError as e:
             return e.code, json.load(e)

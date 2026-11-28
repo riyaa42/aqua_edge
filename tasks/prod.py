@@ -11,6 +11,7 @@ none deletes data. Standard library and the project's own modules only.
 import argparse
 import json
 import os
+import posixpath
 import shlex
 import shutil
 import subprocess
@@ -142,7 +143,7 @@ def logs():
 # --- a Pi ---
 def unit(node, keys, csv, sd, slot, tree=None, user="pi", root=ROOT):
     """A systemd service running one node on a Pi, with the real radio and GPIO."""
-    command = [os.path.join(root, ".venv", "bin", "python"), "-m", "edge.edge_based", node,
+    command = [posixpath.join(root, ".venv", "bin", "python"), "-m", "edge.edge_based", node,
                "--keys", keys, "--csv", csv, "--sd", sd, "--slot", str(slot[0]), str(slot[1]),
                "--radio", "lora", "--actuators", "gpio", *(["--tree", tree] if tree else [])]
     quoted = " ".join('"' + part.replace("\\", "\\\\").replace('"', '\\"').replace("%", "%%").replace("$", "$$") + '"'
