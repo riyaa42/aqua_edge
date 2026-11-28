@@ -76,7 +76,7 @@ This runs without MQTT. To publish to a broker you run yourself, add `--mqtt-hos
 
 ### Run with Docker Compose
 
-This starts the server and a Mosquitto broker together, using `compose.yaml` and `Dockerfile` at the repository root. The dashboard is meant to join the same setup; it has no server yet. The image installs the project's locked libraries with `uv`. That includes the simulation and experiment libraries, so it is larger than the gateway alone needs. From the repository root:
+This starts the server and a Mosquitto broker together, using `compose.yaml` and `Dockerfile` at the repository root. The dashboard is meant to join the same setup; it has no server yet. The image installs the locked libraries with `uv`: only the project's required ones and the `gateway` extra. It leaves out the `research` group ([Python setup](../README.md#python-setup)), so a service that needs one of those libraries, such as a dashboard using `streamlit`, must add it in `pyproject.toml` or the `Dockerfile`. From the repository root:
 
 ```sh
 cp .env.example .env      # set both passwords and the full path of the key file

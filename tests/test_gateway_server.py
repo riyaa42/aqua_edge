@@ -135,6 +135,7 @@ def check_compose_files():
     read = lambda *path: open(os.path.join(ROOT, *path)).read()
     dockerfile = read("Dockerfile")
     assert "uv sync --locked" in dockerfile and "--extra gateway" in dockerfile
+    assert "--no-default-groups" in dockerfile, "the image needs none of the research libraries"
     ignored = [line for line in read(".dockerignore").splitlines() if not line.startswith("#")]
     assert ignored[0] == "*" and {"**/*keys.json", "**/.env", "**/data"} <= set(ignored)
     copied = [source for line in re.findall(r"^COPY (?!--from)(.+)$", dockerfile, re.M) for source in line.split()[:-1]]

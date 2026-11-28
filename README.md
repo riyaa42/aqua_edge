@@ -90,6 +90,8 @@ This repository uses one `uv` project at the repository root (`pyproject.toml`, 
 uv sync
 ```
 
+The libraries for the simulation, the experiments and some tests (`numpy`, `pandas`, `wntr`, `scikit-learn`, `matplotlib`, `streamlit`) are in the `research` dependency group in `pyproject.toml`. `uv sync` and `uv run` install it by default. The nodes and the gateway do not need it: `--no-default-groups` leaves it out, as the gateway's Docker image does. Add a library to the project's `dependencies` only if a node or the gateway needs it to run.
+
 Run every existing simulation check in one go:
 
 ```sh

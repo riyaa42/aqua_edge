@@ -6,6 +6,13 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
   "cryptography>=38",    # packet encryption (hal/packet.py): needed by every node and the gateway
+]
+
+# Libraries for the simulation, the experiments and some tests: the nodes and the gateway run
+# without them. `uv sync` and `uv run` install them (default-groups below); the gateway image
+# leaves them out with --no-default-groups.
+[dependency-groups]
+research = [
   "matplotlib>=3.8",
   "numpy>=2.0",
   "pandas>=2.0",
@@ -61,6 +68,7 @@ build-backend = "uv_build"
 
 [tool.uv]
 package = true
+default-groups = ["research"]
 
 [tool.uv.build-backend]
 module-root = ""

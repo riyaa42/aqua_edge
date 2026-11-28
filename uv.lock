@@ -46,16 +46,9 @@ wheels = [
 name = "aqua-edge"
 version = "0.1.0"
 source = { editable = "." }
+default-groups = ["research"]
 dependencies = [
     { name = "cryptography" },
-    { name = "matplotlib" },
-    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
-    { name = "numpy", version = "2.5.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
-    { name = "pandas" },
-    { name = "scikit-learn" },
-    { name = "six" },
-    { name = "streamlit" },
-    { name = "wntr" },
 ]
 
 [package.optional-dependencies]
@@ -72,24 +65,40 @@ pi = [
     { name = "spidev", marker = "sys_platform == 'linux'" },
 ]
 
+[package.dev-dependencies]
+research = [
+    { name = "matplotlib" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "numpy", version = "2.5.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "pandas" },
+    { name = "scikit-learn" },
+    { name = "six" },
+    { name = "streamlit" },
+    { name = "wntr" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "cryptography", specifier = ">=38" },
     { name = "gpiozero", marker = "extra == 'pi'", specifier = ">=2.0" },
     { name = "lgpio", marker = "sys_platform == 'linux' and extra == 'pi'", specifier = ">=0.2" },
-    { name = "matplotlib", specifier = ">=3.8" },
-    { name = "numpy", specifier = ">=2.0" },
     { name = "paho-mqtt", marker = "extra == 'gateway'", specifier = ">=2" },
     { name = "paho-mqtt", marker = "extra == 'mqtt'", specifier = ">=2" },
-    { name = "pandas", specifier = ">=2.0" },
     { name = "pyserial", marker = "extra == 'gateway'", specifier = ">=3.5" },
+    { name = "spidev", marker = "sys_platform == 'linux' and extra == 'pi'", specifier = ">=3.6" },
+]
+provides-extras = ["pi", "gateway", "mqtt"]
+
+[package.metadata.requires-dev]
+research = [
+    { name = "matplotlib", specifier = ">=3.8" },
+    { name = "numpy", specifier = ">=2.0" },
+    { name = "pandas", specifier = ">=2.0" },
     { name = "scikit-learn", specifier = ">=1.9.1" },
     { name = "six", specifier = ">=1.17" },
-    { name = "spidev", marker = "sys_platform == 'linux' and extra == 'pi'", specifier = ">=3.6" },
     { name = "streamlit", specifier = ">=1.66.1" },
     { name = "wntr", specifier = ">=1.5" },
 ]
-provides-extras = ["pi", "gateway", "mqtt"]
 
 [[package]]
 name = "attrs"
