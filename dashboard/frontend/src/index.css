@@ -1,0 +1,32 @@
+@import "tailwindcss";
+
+:root {
+  --radius: 0px;
+  --page-bg: #3e2c59;
+  --panel-bg: #eae2f8;
+  --panel-alt: #dfd4f4;
+  --ink: #111111;
+  --accent-line: #3e2c59;
+  --border-ink: #111111;
+}
+
+[data-theme="cloud"] {
+  --page-bg: #2f5241;
+  --panel-bg: #dff2e8;
+  --panel-alt: #cee8da;
+  --ink: #111111;
+  --accent-line: #264738;
+  --border-ink: #111111;
+}
+
+* {
+  border-radius: 0px !important;
+  box-shadow: none !important;
+}
+
+body {
+  margin: 0;
+  background-color: var(--page-bg);
+  color: var(--ink);
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}

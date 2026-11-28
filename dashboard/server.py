@@ -14,6 +14,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Header, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 
 from dashboard.shipper import MAX_BATCH_SIZE, MAX_PAYLOAD_BYTES, SCHEMA_VERSION, VALID_MODES
 from dashboard.store import DashboardStore, OVERFLOW_SENTINEL
@@ -305,6 +306,10 @@ def create_app(
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
+
+    dist_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "frontend", "dist")
+    if os.path.isfile(os.path.join(dist_dir, "index.html")):
+        app.mount("/", StaticFiles(directory=dist_dir, html=True), name="frontend")
 
     return app
 
