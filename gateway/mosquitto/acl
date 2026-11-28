@@ -1,0 +1,6 @@
+# The gateway only publishes; viewers only read. Nothing read over MQTT changes what the gateway does.
+user gateway
+topic write aqua/v1/#
+
+user viewer
+topic read aqua/v1/#

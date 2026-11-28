@@ -1,0 +1,18 @@
+# For the Dockerfile here: send only what it copies.
+*
+!pyproject.toml
+!uv.lock
+!.python-version
+!comms
+!dashboard
+!detection
+!edge
+!gateway
+!hal
+**/__pycache__
+**/data
+**/results
+**/run
+**/sd
+**/*keys.json
+**/.env

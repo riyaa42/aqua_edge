@@ -60,7 +60,11 @@ dependencies = [
 
 [package.optional-dependencies]
 gateway = [
+    { name = "paho-mqtt" },
     { name = "pyserial" },
+]
+mqtt = [
+    { name = "paho-mqtt" },
 ]
 pi = [
     { name = "gpiozero" },
@@ -75,6 +79,8 @@ requires-dist = [
     { name = "lgpio", marker = "sys_platform == 'linux' and extra == 'pi'", specifier = ">=0.2" },
     { name = "matplotlib", specifier = ">=3.8" },
     { name = "numpy", specifier = ">=2.0" },
+    { name = "paho-mqtt", marker = "extra == 'gateway'", specifier = ">=2" },
+    { name = "paho-mqtt", marker = "extra == 'mqtt'", specifier = ">=2" },
     { name = "pandas", specifier = ">=2.0" },
     { name = "pyserial", marker = "extra == 'gateway'", specifier = ">=3.5" },
     { name = "scikit-learn", specifier = ">=1.9.1" },
@@ -83,7 +89,7 @@ requires-dist = [
     { name = "streamlit", specifier = ">=1.66.1" },
     { name = "wntr", specifier = ">=1.5" },
 ]
-provides-extras = ["pi", "gateway"]
+provides-extras = ["pi", "gateway", "mqtt"]
 
 [[package]]
 name = "attrs"
@@ -1350,6 +1356,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/c3/75/ffb1dc0ed12352139fb4ca0e3fde4325a23e3d0f3f40efe89717bc4f557b/packaging-26.4.tar.gz", hash = "sha256:c4b671c41ddb9bf26e543c37723610d28fb6bf7affc4da17cf048d419d2c062a", size = 355877, upload-time = "2026-11-23T21:44:11.152Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/ba/7b/5504f91c9c2733f693d7759e50ede5d27119d4da7e5836c46d3b5ff81d56/packaging-26.4-py3-none-any.whl", hash = "sha256:81383611a09c1bc0b08b76e0fd5829d7c6824c65b27a6aee339da133f4233ea2", size = 140049, upload-time = "2026-11-23T21:44:09.531Z" },
+]
+
+[[package]]
+name = "paho-mqtt"
+version = "2.2.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/da/66/bba39edaac853235385c59e1e30600cd104b8779164c181780742d8095fc/paho_mqtt-2.2.0.tar.gz", hash = "sha256:bcf706f03f1f49e0fc3ae166dc7b67ee35463496f8bdfd7c9c36181f6ba635c9", size = 133751, upload-time = "2026-11-04T20:10:51.405Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/bf/af/fea4b0ee14cee6149f18d180430a14be0963b9a4fbc7875421a7de75f831/paho_mqtt-2.2.0-py3-none-any.whl", hash = "sha256:3243630f7c2b05f71d1de8c6f59865eb04d3a59ae8c866e92377faed6753db4d", size = 77202, upload-time = "2026-11-04T20:10:50.148Z" },
 ]
 
 [[package]]

@@ -23,13 +23,16 @@ pi = [
   "spidev>=3.6; sys_platform == 'linux'",
 ]
 # Only on the gateway computer with the ESP8266 LoRa modem
-gateway = ["pyserial>=3.5"]
+gateway = ["pyserial>=3.5", "paho-mqtt>=2"]
+# MQTT for comms/, on a Pi or for any program that subscribes
+mqtt = ["paho-mqtt>=2"]
 
 [project.scripts]
 test-all = "tasks:test_all"
 test-hal = "tasks:test_hal"
 test-edge = "tasks:test_edge"
 test-gateway = "tasks:test_gateway"
+test-comms = "tasks:test_comms"
 test-quality = "tasks:test_quality"
 test-consumption = "tasks:test_consumption"
 test-leakage = "tasks:test_leakage"
@@ -61,4 +64,4 @@ package = true
 
 [tool.uv.build-backend]
 module-root = ""
-module-name = ["detection", "gateway", "hal", "edge", "bogo", "dashboard", "tests", "tasks"]
+module-name = ["detection", "gateway", "hal", "edge", "bogo", "comms", "dashboard", "tests", "tasks"]

@@ -12,7 +12,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HAL = [("hal.packet",), ("hal.lora433",), ("hal.lora_pi", "--check"),
        ("hal.esp8266_passthrough", "--check"), ("hal.link",), ("tests.test_hal",)]
 EDGE = [("edge.aqua_edge",), ("tests.test_pi_node",)]
-GATEWAY = [("gateway.topology",), ("gateway.core",), ("tests.test_gateway_analytics",)]
+GATEWAY = [("gateway.topology",), ("gateway.core",), ("tests.test_gateway_analytics",), ("tests.test_gateway_server",)]
+COMMS = [("comms.common",), ("tests.test_comms",)]
 QUALITY = [("detection.quality.quality_model",)]
 CONSUMPTION = [("detection.consumption.test_integration",)]
 LEAKAGE = [("detection.leakage.test_regression",), ("detection.leakage.test_offline_supply",),
@@ -41,7 +42,7 @@ def _suite(checks):
 
 # tests
 def test_all():
-    _suite(HAL + EDGE + GATEWAY + QUALITY + CONSUMPTION + LEAKAGE + RUNTIME)
+    _suite(HAL + EDGE + GATEWAY + COMMS + QUALITY + CONSUMPTION + LEAKAGE + RUNTIME)
 
 
 def test_hal():
@@ -54,6 +55,10 @@ def test_edge():
 
 def test_gateway():
     _suite(GATEWAY)
+
+
+def test_comms():
+    _suite(COMMS)
 
 
 def test_quality():

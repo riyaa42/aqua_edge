@@ -32,3 +32,7 @@ tinyml/*/results/
 # Secret radio keys and runtime dashboard state
 *keys.json
 dashboard/run/
+
+# Gateway deployment: MQTT passwords, and saved state when run outside Docker
+.env
+gateway-data/

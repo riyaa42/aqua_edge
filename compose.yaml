@@ -1,0 +1,43 @@
+# Aqua Edge on the building's computer: the edge-based gateway and its MQTT broker. The dashboard
+# will be another service here, on the same image, once it has a server.
+# Setup: gateway/README.md, "Run with Docker Compose".
+#   cp .env.example .env   # set the passwords and the key file
+#   docker compose up -d --build
+name: aqua-edge
+
+services:
+  mqtt:
+    image: docker.io/library/eclipse-mosquitto:2
+    entrypoint: ["sh", "/config/start.sh"]
+    environment:
+      MQTT_GATEWAY_PASSWORD: ${MQTT_GATEWAY_PASSWORD:?set it in .env}
+      MQTT_VIEWER_PASSWORD: ${MQTT_VIEWER_PASSWORD:?set it in .env}
+    volumes:
+      - ./gateway/mosquitto:/config:ro
+      - mqtt-data:/mosquitto/data
+    ports:
+      - "127.0.0.1:${MQTT_PORT:-1883}:1883"      # this computer only
+    restart: unless-stopped
+
+  gateway:
+    image: aqua-edge
+    build: .
+    command: ["python", "-m", "gateway.edge_based", "--keys", "/run/keys/gateway_keys.json", "--data", "/data"]
+    environment:
+      MQTT_HOST: mqtt
+      MQTT_USER: gateway
+      MQTT_PASSWORD: ${MQTT_GATEWAY_PASSWORD:?set it in .env}
+    devices:
+      - "${GATEWAY_SERIAL:-/dev/ttyUSB0}:/dev/ttyUSB0"       # the ESP8266
+    volumes:
+      - gateway-data:/data                                    # state: keep it across restarts
+      - ${GATEWAY_KEYS:?set it in .env}:/run/keys/gateway_keys.json:ro
+    depends_on: [mqtt]                                        # start order only: the radio never waits
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+
+volumes:
+  mqtt-data:
+  gateway-data:

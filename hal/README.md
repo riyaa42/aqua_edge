@@ -57,7 +57,7 @@ The NodeMCU connects to the computer with a USB data cable, which also powers it
 | Layer | State |
 |---|---|
 | Node, Raspberry Pi: `pi_hal.py` | SX1278 SPI driver (in `lora_pi.py`), tested with a fake radio chip, not on hardware (`python3 -m hal.lora_pi --check`, from the repository root). The node runner is `../edge/edge_based.py`. Setup: [Running on the Pi](#running-on-the-pi) |
-| Gateway laptop + ESP8266: `gate_hal.py` | Radio link written (`esp8266_passthrough.py` and the ESP sketch), tested with a fake radio chip, not on hardware. The gateway server that would use it is not written yet: until it is, a real node gets no beacon, acknowledgement or gateway alert. Setup: [Gateway modem (ESP8266)](#gateway-modem-esp8266) |
+| Gateway laptop + ESP8266: `gate_hal.py` | Radio link written (`esp8266_passthrough.py` and the ESP sketch), tested with a fake radio chip, not on hardware. The gateway server that uses it is [`../gateway/edge_based.py`](../gateway/README.md#running-the-server): until it runs, a real node gets no beacon, acknowledgement or gateway alert. Setup: [Gateway modem (ESP8266)](#gateway-modem-esp8266) |
 
 ## Files
 
@@ -266,7 +266,7 @@ On Linux your user needs access to the serial port. Run `sudo usermod -aG uucp $
 
 To check the radio link to a node, run this and `pi-radio-test` on the Pi: start one, then the other within 10 s. The one started first prints the other's packet. Swap the order to test the other direction.
 
-In code, `gate_hal.open_radio(port)` gives the same `send(packet, cad=True)` and `receive()` (arrival time and bytes) as the Pi's `pi_hal.open_radio()`. `Gateway` expects `receive()` to return only the bytes, so the gateway server will have to drop the arrival times, as `../edge/board.py` does for a node. That server is not written yet.
+In code, `gate_hal.open_radio(port)` gives the same `send(packet, cad=True)` and `receive()` (arrival time and bytes) as the Pi's `pi_hal.open_radio()`. `Gateway` expects `receive()` to return only the bytes, so the gateway server (`../gateway/edge_based.py`) drops the arrival times, as `../edge/board.py` does for a node.
 
 ### If the modem fails
 
