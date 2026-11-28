@@ -50,6 +50,8 @@ CREATE TABLE IF NOT EXISTS telemetry_points (
     pipe_leak_active INTEGER,
     quality_class TEXT,
     quality_compliant INTEGER,
+    quality_temporal_anomaly INTEGER,
+    quality_viol_mask INTEGER,
     ph REAL,
     tds REAL,
     turb REAL,
@@ -161,7 +163,15 @@ class DashboardStore:
             self.conn.execute("PRAGMA journal_mode=WAL;")
             self.conn.execute("PRAGMA synchronous=NORMAL;")
             self.conn.executescript(SCHEMA_SQL)
+            self._migrate_schema()
             self.conn.commit()
+
+    def _migrate_schema(self):
+        cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(telemetry_points)").fetchall()}
+        if "quality_temporal_anomaly" not in cols:
+            self.conn.execute("ALTER TABLE telemetry_points ADD COLUMN quality_temporal_anomaly INTEGER")
+        if "quality_viol_mask" not in cols:
+            self.conn.execute("ALTER TABLE telemetry_points ADD COLUMN quality_viol_mask INTEGER")
 
     def close(self):
         with self._lock:
@@ -251,10 +261,11 @@ class DashboardStore:
                         INSERT INTO telemetry_points (
                             frame_id, gateway_id, seq, mode, created_at_utc, snapshot_t,
                             building_status, node_count, balance_pct, pipe_leak_active,
-                            quality_class, quality_compliant, ph, tds, turb, quality_score,
+                            quality_class, quality_compliant, quality_temporal_anomaly, quality_viol_mask,
+                            ph, tds, turb, quality_score,
                             supply_state, tank_level_m, tank_inflow_lps,
                             active_incident_count, mean_delay_s, max_delay_s
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             frame_id,
@@ -269,6 +280,8 @@ class DashboardStore:
                             _opt_int_bool(lk.get("pipe_leak_active")) if "pipe_leak_active" in lk else None,
                             wq.get("class"),
                             _opt_int_bool(wq.get("compliant")) if "compliant" in wq else None,
+                            _opt_int_bool(wq.get("temporal_anomaly")) if "temporal_anomaly" in wq else None,
+                            int(wq["viol_mask"]) if wq.get("viol_mask") is not None and not isinstance(wq.get("viol_mask"), bool) else None,
                             _opt_float(wq.get("ph")),
                             _opt_float(wq.get("tds")),
                             _opt_float(wq.get("turb")),
@@ -492,6 +505,8 @@ class DashboardStore:
                 d["pipe_leak_active"] = bool(d["pipe_leak_active"])
             if d["quality_compliant"] is not None:
                 d["quality_compliant"] = bool(d["quality_compliant"])
+            if d.get("quality_temporal_anomaly") is not None:
+                d["quality_temporal_anomaly"] = bool(d["quality_temporal_anomaly"])
             out.append(d)
         return out
 

@@ -39,6 +39,8 @@ function frameToPoint(fr: FrameRecord): TelemetryPoint {
     pipe_leak_active: lk?.pipe_leak_active ?? null,
     quality_class: wq?.class ?? null,
     quality_compliant: wq?.compliant ?? null,
+    quality_temporal_anomaly: wq?.temporal_anomaly ?? null,
+    quality_viol_mask: wq?.viol_mask ?? null,
     ph: wq?.ph ?? null,
     tds: wq?.tds ?? null,
     turb: wq?.turb ?? null,
@@ -229,7 +231,11 @@ export function App() {
           )}
 
           <div className="grid gap-4 lg:grid-cols-2">
-            <MaintenanceQueue queue={snap?.maintenance_queue} loading={loading} />
+            <MaintenanceQueue
+              queue={snap?.maintenance_queue}
+              pipeLeak={snap?.leakage?.pipe_leak ?? null}
+              loading={loading}
+            />
             <TopologyTree
               topology={topology}
               topologyError={topologyError}

@@ -425,6 +425,111 @@ class TestDashboardBackend(unittest.TestCase):
             self.assertIn("id: 3\n", rec_resp.text)
             self.assertIn("id: 4\n", rec_resp.text)
 
+    def test_phase4_1_observability_fields_and_migration(self):
+        # 1. Existing SQLite DB without quality_temporal_anomaly / quality_viol_mask migrates cleanly
+        import sqlite3
+        mig_db = os.path.join(self.tmp.name, "legacy_mig.db")
+        con = sqlite3.connect(mig_db)
+        con.execute("""
+            CREATE TABLE telemetry_points (
+                frame_id INTEGER PRIMARY KEY,
+                gateway_id TEXT NOT NULL,
+                seq INTEGER NOT NULL,
+                mode TEXT NOT NULL,
+                created_at_utc REAL NOT NULL,
+                snapshot_t REAL,
+                building_status TEXT,
+                node_count INTEGER NOT NULL,
+                balance_pct REAL,
+                pipe_leak_active INTEGER,
+                quality_class TEXT,
+                quality_compliant INTEGER,
+                ph REAL, tds REAL, turb REAL, quality_score REAL,
+                supply_state TEXT, tank_level_m REAL, tank_inflow_lps REAL,
+                active_incident_count INTEGER, mean_delay_s REAL, max_delay_s REAL
+            )
+        """)
+        con.commit()
+        con.close()
+
+        # 2. Rich snapshot covering pipe_leak localization, null isolation_valve, viol_mask=7,
+        # temporal anomaly, missing quality values, multiple flat leaks, heterogeneous nodes,
+        # balance_paused, and clock_skew_nodes.
+        snap_rich = {
+            "t": 8000.0,
+            "building_status": "CRITICAL",
+            "maintenance_queue": [
+                {
+                    "rank": 1, "target": "B-D4", "category": "PIPE_LEAK",
+                    "risk_score": 78.0, "severity": "CRITICAL",
+                    "affected_flats": 4, "duration_min": 15.0,
+                    "symptoms": ["PIPE_LEAK", "B-101:FLAT_LEAK"],
+                    "evidence": {"error_pct": 42.5, "suspected_floor": "4", "localization_confidence": "high", "isolation_valve": "B-TANK"},
+                    "recommended_action": "Inspect vertical riser section.",
+                },
+            ],
+            "active_incidents": [
+                {
+                    "target": "B-D4", "category": "PIPE_LEAK",
+                    "symptoms": ["PIPE_LEAK", "B-101:FLAT_LEAK"],
+                    "t_onset": 7100.0, "t_last": 8000.0, "repeat_count": 2,
+                    "affected_flats": 4, "evidence": {"error_pct": 42.5},
+                }
+            ],
+            "incident_history": [],
+            "water_quality": {
+                "class": "CHEMICAL", "compliant": False, "viol_mask": 7,
+                "temporal_anomaly": True, "ph": None, "tds": 840.0, "turb": None, "score": 0.91,
+            },
+            "leakage": {
+                "pipe_leak_active": True, "last_balance_pct": 42.5,
+                "pipe_leak": {
+                    "target": "B-D4", "suspected_floor": "4", "localization_confidence": "high",
+                    "error_pct": 42.5, "isolation_valve": None,
+                },
+                "flat_leaks": [
+                    {"rank": 2, "target": "B-101", "category": "FLAT_LEAK", "severity": "MEDIUM", "evidence": {"rule": "LEAK_NIGHT_FLOW", "flow": 0.25}},
+                    {"rank": 3, "target": "B-102", "category": "FLAT_LEAK", "severity": "HIGH", "evidence": {"rule": "LEAK_CONTINUOUS_FLOW", "flow": 0.45}},
+                ],
+            },
+            "supply": {"state": "LEAK_TANK_DRAIN", "level_m": 1.12, "inflow_lps": 0.05},
+            "abnormal_consumption": [],
+            "network_health": {
+                "silent_nodes": ["B-103"], "balance_paused": True,
+                "bad_packets": 1, "skewed_packets": 2, "clock_skew_nodes": ["B-102"],
+                "online_alerts": 3, "offline_alerts": 1, "buffered_recovered": 1,
+                "mean_delay_s": 12.5, "max_delay_s": 120.0,
+            },
+            "nodes": {
+                "B-TANK": {"status": "ok", "last_seen": 8000.0, "last_sum": {"vol_l": 500.0, "level_m": 1.12}},
+                "B-101": {"status": "ok", "last_seen": 7995.0, "last_sum": {"vol_l": 42.0, "p_min": 8.4, "p_mean": 9.1}},
+                "B-103": {"status": "silent", "last_seen": 5000.0, "last_sum": None},
+            },
+        }
+
+        with TestClient(create_app(db_path=mig_db, auth_token="test-token", topology_path=self.topo_path)) as c:
+            r = c.post("/api/v1/ingest", headers=_hdr(), json={
+                "schema_version": 1, "gateway_id": "gw-p41", "mode": "edge",
+                "frames": [{"seq": 1, "created_at_utc": 8000.0, "buffered": False, "snapshot": snap_rich}],
+            })
+            self.assertEqual(r.status_code, 200)
+            tel = c.get("/api/v1/telemetry", params={"gateway_id": "gw-p41"}).json()["points"]
+            self.assertEqual(len(tel), 1)
+            p = tel[0]
+            self.assertIsNone(p["ph"])
+            self.assertIsNone(p["turb"])
+            self.assertEqual(p["tds"], 840.0)
+            self.assertTrue(p["quality_temporal_anomaly"])
+            self.assertEqual(p["quality_viol_mask"], 7)
+            self.assertEqual(p["tank_level_m"], 1.12)
+            self.assertEqual(p["tank_inflow_lps"], 0.05)
+
+            latest = c.get("/api/v1/snapshots/latest", params={"gateway_id": "gw-p41"}).json()["frame"]
+            self.assertIsNone(latest["snapshot"]["leakage"]["pipe_leak"]["isolation_valve"])
+            self.assertEqual(len(latest["snapshot"]["leakage"]["flat_leaks"]), 2)
+            self.assertTrue(latest["snapshot"]["network_health"]["balance_paused"])
+            self.assertEqual(latest["snapshot"]["network_health"]["clock_skew_nodes"], ["B-102"])
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

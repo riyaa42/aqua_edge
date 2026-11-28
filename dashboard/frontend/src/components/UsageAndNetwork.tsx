@@ -11,6 +11,8 @@ export function UsageAndNetwork({ snapshot }: Props) {
   const usage = snapshot?.abnormal_consumption ?? [];
   const nh = snapshot?.network_health;
   const silent = nh?.silent_nodes ?? [];
+  const skewNodes = nh?.clock_skew_nodes ?? [];
+  const balancePaused = nh?.balance_paused;
 
   return (
     <div className="grid gap-4 lg:grid-cols-2">
@@ -44,7 +46,7 @@ export function UsageAndNetwork({ snapshot }: Props) {
       <Card>
         <CardHeader>
           <CardTitle>Sensor Network</CardTitle>
-          <Badge tone={silent.length > 0 ? "dark" : "plain"}>
+          <Badge tone={silent.length > 0 || balancePaused ? "dark" : "plain"}>
             {silent.length} silent
           </Badge>
         </CardHeader>
@@ -71,13 +73,30 @@ export function UsageAndNetwork({ snapshot }: Props) {
               <div className="font-bold">{formatNumber(nh?.max_delay_s, "s", 1)}</div>
             </div>
             <div className="border border-black bg-[var(--panel-alt)] p-2">
-              <div className="text-[10px] uppercase">Bad Packets</div>
-              <div className="font-bold">{nh?.bad_packets ?? 0}</div>
+              <div className="text-[10px] uppercase">Bad / Skewed</div>
+              <div className="font-bold">
+                {nh?.bad_packets ?? 0} / {nh?.skewed_packets ?? 0}
+              </div>
             </div>
           </div>
+
+          <div className="border border-black bg-[var(--panel-alt)] p-2">
+            {balancePaused == null
+              ? "Pipe balance status: Not available."
+              : balancePaused
+                ? "Pipe balance is paused because a sensor is silent or not enough nodes are reporting."
+                : "Pipe balance check is active."}
+          </div>
+
           {silent.length > 0 && (
             <div className="border border-black bg-[var(--panel-alt)] p-2">
               Not heard recently: {silent.join(", ")}
+            </div>
+          )}
+
+          {skewNodes.length > 0 && (
+            <div className="border border-black bg-[var(--panel-alt)] p-2">
+              Sensor clock ahead of gateway: {skewNodes.join(", ")}
             </div>
           )}
         </CardContent>

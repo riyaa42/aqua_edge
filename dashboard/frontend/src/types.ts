@@ -126,6 +126,8 @@ export interface TelemetryPoint {
   pipe_leak_active: boolean | null;
   quality_class: string | null;
   quality_compliant: boolean | null;
+  quality_temporal_anomaly?: boolean | null;
+  quality_viol_mask?: number | null;
   ph: number | null;
   tds: number | null;
   turb: number | null;
