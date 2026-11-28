@@ -144,13 +144,19 @@ class DashboardFeed:
             self.take_requests()
         now = self.clock()
         waited = float("inf") if self.taken_at is None else now - self.taken_at
-        news = len(self.gw.events) > self.taken
+        events_total = getattr(self.gw, "events_offset", 0) + len(self.gw.events)
+        news = events_total > self.taken
         if not (force or waited >= self.interval_s or (news and waited >= EVENT_GAP_S)) or self.inbox.full():
             return
+        new_events, next_taken = (
+            self.gw.events_since(self.taken, consumer="dashboard")
+            if hasattr(self.gw, "events_since")
+            else (self.gw.events[self.taken:], len(self.gw.events))
+        )
         # through JSON: the other thread must not share objects the gateway goes on changing
-        frame = json.loads(json.dumps({"snapshot": self.gw.snapshot(), "events": self.gw.events[self.taken:]}))
+        frame = json.loads(json.dumps({"snapshot": self.gw.snapshot(), "events": new_events}))
         self.inbox.put_nowait({**frame, "created": time.time()})
-        self.taken, self.taken_at = len(self.gw.events), now
+        self.taken, self.taken_at = next_taken, now
 
     # --- the dashboard thread ---
     def _store(self, frame):

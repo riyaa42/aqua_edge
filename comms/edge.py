@@ -82,6 +82,7 @@ class EdgeComms:
             "gateway_alerts": dict(node.remote),        # cross-node problems now active
         }, t=now)
         self.out.publish_changed(node.id, "link", {
-            "gateway_heard": node.heard_at is not None and now - node.heard_at <= HEARD_S,
+            "gateway_heard": node.gateway_heard() if hasattr(node, "gateway_heard") else (
+                node.heard_at is not None and now - node.heard_at <= HEARD_S),
             "waiting": len(node.store.queue),           # messages not yet acknowledged
         }, t=now)

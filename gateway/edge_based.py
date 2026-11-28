@@ -42,6 +42,9 @@ class GatewayBoard:
 
     def __init__(self, radio, keys, storage_path, clock=time.time):
         self.radio, self.keys, self.storage_path, self.clock = radio, keys, storage_path, clock
+        if hasattr(radio, "start_send") and hasattr(radio, "poll_send"):
+            self.start_send = radio.start_send
+            self.poll_send = radio.poll_send
 
     def now(self):
         return self.clock()         # UTC seconds. Nodes set their clocks from this
@@ -65,9 +68,9 @@ def run(gateway, stop, log=print, data=None):
             look_at = time.monotonic() + ORDERS_S
             order.take(gateway, data, log)
         wake = gateway.step()
-        for event in gateway.events[logged:]:
+        new_events, logged = gateway.events_since(logged, consumer="runner")
+        for event in new_events:
             log(f"gateway: {event}")
-        logged = len(gateway.events)
         stop.wait(max(MIN_WAIT_S, min(wake - gateway.hal.now(), POLL_S)))
 
 

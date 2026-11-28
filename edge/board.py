@@ -64,18 +64,21 @@ class NodeBoard:
     def now(self):
         return time.time() + self.clock_fix
 
+    def monotonic(self):
+        if "now" in self.__dict__:
+            return self.now()
+        return time.monotonic()
+
     def key(self, name):
         return self.keys[name]
 
     # --- radio ---
-    def send(self, raw, at_s=None, cad=False):
-        if not cad and at_s is not None and self.step_s is None:
-            # ponytail: blocks the step until our slot; fine at one step a minute
-            self.sleep(seconds_until(self.now(), at_s))
+    def send(self, raw, cad=False):
         if not self.radio.send(raw, cad):              # alerts (cad): listen first, back off, then send anyway
-            return                                     # radio fault: the node keeps the message and retries
+            return False                               # radio fault: the node keeps the message and retries
         m = unpack(raw, self.key) or peek(raw)
         self.log(f"{self.now():.0f} {self.name} sent {m['k']} #{m['s']} {m.get('a', '')}")
+        return True
 
     def receive(self):
         got = self.radio.receive()

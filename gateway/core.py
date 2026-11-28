@@ -78,8 +78,13 @@ from hal.lora433 import BEACON_S, AirtimeBudget, retry_wait
 from hal.packet import add_names, pack, unpack
 from gateway.topology import Topology  # noqa: F401  (callers build one for Gateway)
 
+SUPPLY_WINDOW_S = 900          # a SUPPLY_LOW flag from the tank counts for this long
+MASS_BALANCE_PCT = 10.0        # Ali et al. [6] threshold
+MASS_BALANCE_INTERVALS = 2     # blocks in a row above threshold before alerting, and normal before re-arming
+MIN_SUPPLY_L = 5.0             # ignore near-empty blocks (division by tiny numbers)
 SILENT_S = 2700                # nothing heard from a node for 3 summary periods = silent
 CLOCK_AHEAD_S = 60             # message time this far ahead of the gateway clock = bad node clock
+SUPPLY_CODES = ("SUPPLY_EVENT", "LEAK_TANK_DRAIN", "SUPPLY_UNCERTAIN")
 VALVE_REPORTS = ("VALVE_CLOSED", "VALVE_OPENED", "VALVE_FAULT")    # what a node's valve did
 ORDER_GROUPS = (("VALVE_CLOSE", "VALVE_OPEN"), ("ALERT_LED_ON", "ALERT_LED_OFF"))   # an operator's
 MAX_GAPS = 2000     # message numbers remembered above a gap, per node
@@ -422,6 +427,14 @@ class Gateway(SupplyRule, PipeLeakCheck):
             self.tell_ended(now, node, "PIPE_LEAK_CAUSE_CLEARED", ("PIPE_LEAK_CAUSE",), now)
         self.told_pipe, self.told_cause = [], []
 
+    def supply_recovered(self, now, m):
+        if m["t"] < self.tank_low_t:
+            return                  # an old recovery arriving after a newer low-tank flag
+        self.supply_rule(now)       # a low flag delivered together with this still gets decided
+        self.supply_cleared_t = m["t"]
+        self.tank_low_recv_t, self.supply_active_until, self.tank_drain_reported = -1e9, -1, False
+        self.decide(now, "SUPPLY_RECOVERED", event_t=m["t"])
+
     def decide(self, now, kind, **info):
         if kind in ("PIPE_LEAK", "PIPE_LEAK_PAST"):
             junction = self.tree.labels.get(info.get("suspected_floor"))
@@ -470,6 +483,168 @@ class Gateway(SupplyRule, PipeLeakCheck):
                 self.decide(now, "NODE_SILENT", node=n, last_heard_min=round((now - t) / 60))
             elif now - t < SILENT_S and n in self.silent:
                 self.decide(now, "NODE_BACK", node=n, silent_min=round((now - self.silent.pop(n)) / 60))
+
+    def _cross_floor_drops(self, interval=None):
+        """Compute per-floor pressure drop (m) relative to clean baseline (prefers p_mean over p_min)."""
+        use_mean = bool(self.p_mean_sums and self.p_mean_base)
+        sums = self.p_mean_sums if use_mean else self.p_sums
+        base = self.p_mean_base if use_mean else self.p_base
+        if not sums or not base:
+            return {}
+        i = interval if interval is not None else max(sums)
+        cur = sums.get(i, {})
+        by_floor = {}
+        for f, p_now in cur.items():
+            section = self.tree.section_of(f)       # the junction feeding the flat ("floor")
+            if f in base and section is not None:
+                by_floor.setdefault(section, []).append(base[f] - p_now)
+        return {fl: round(sum(vs) / len(vs), 3) for fl, vs in by_floor.items() if vs}
+
+    def _localize_floor(self, drops):
+        """Confidence-aware localization using the downward headloss gradient along the pipes.
+        -> (suspected section or None, sections to check, confidence). A section is the
+        junction feeding some flats, named by its label.
+
+        A leak at a junction increases flow (and thus headloss) in all pipe segments upstream
+        of it, creating positive pressure-drop steps step[s] = drop[s] - drop[upstream of s]
+        down to it, and ~0 step beyond it.
+        """
+        if not drops or max(drops.values()) < 0.05:
+            return None, [], "unlocalised"
+        if len(drops) == 1:
+            only = next(iter(drops))
+            return only, [only], "medium"
+
+        above = {s: self.tree.upstream_sections(s) for s in drops}          # nearest first
+        up = {s: next((a for a in above[s] if a in drops), None) for s in drops}
+        steps = {s: round(drops[s] - drops[up[s]], 4) for s in drops if up[s] is not None}
+        sig = [s for s in steps if steps[s] >= 0.022]
+        deepest = [s for s in sig if not any(s in above[other] for other in sig)]
+        if len(deepest) == 1:           # the furthest section with a significant headloss step
+            suspected = deepest[0]
+            return suspected, [suspected] + [s for s in drops if up[s] == suspected], "high"
+        if not sig:
+            # No significant step: either a large burst at a junction fed straight from the
+            # tank (drop > 0.45 m) or a medium/small leak whose gradient is below burst noise.
+            top = [s for s in drops if not above[s] and drops[s] >= 0.45]
+            if len(top) == 1:
+                return top[0], top + [s for s in drops if above[s][:1] == top], "high"
+        # (steps on two separate branches also end up here: one leak cannot be both)
+        ranked = sorted(drops.items(), key=lambda kv: -kv[1])
+        return None, [s for s, _ in ranked[:2]], "unlocalised"
+
+    def supply_rule(self, now):
+        """Multi-signal supply classification: distinguishes supply interruption from leak-induced tank drain."""
+        if now - self.tank_low_recv_t <= SUPPLY_WINDOW_S:
+            leak_ev = (
+                self.pipe_alerted
+                or (now - self.tank_abnormal_supply_recv_t <= SUPPLY_WINDOW_S)
+                or (abs(self.tank_abnormal_supply_t - self.tank_low_t) <= SUPPLY_WINDOW_S)
+                or (now - self.flat_leak_recv_t <= SUPPLY_WINDOW_S)
+                or (abs(self.flat_leak_t - self.tank_low_t) <= SUPPLY_WINDOW_S)
+            )
+            if leak_ev and not self.tank_drain_reported:
+                self.tank_drain_reported = True
+                self.decide(now, "LEAK_TANK_DRAIN", tank_low=True, inflow_lps=self.last_tank_inflow, event_t=self.tank_low_t)
+                self.supply_active_until = now + SUPPLY_WINDOW_S
+                return
+            if now > self.supply_active_until:
+                inflow_low = self.last_tank_inflow is not None and self.last_tank_inflow < 0.1
+                inflow_active = self.last_tank_inflow is not None and self.last_tank_inflow >= 0.1
+                drops = self._cross_floor_drops()
+                uniform_drop = len(drops) >= 2 and sum(1 for d in drops.values() if d > 0.2) >= max(len(drops) - 1, 1)
+                if inflow_low or (not inflow_active and uniform_drop):
+                    self.decide(now, "SUPPLY_EVENT", tank_low=True, inflow_lps=self.last_tank_inflow, floor_drops=drops, event_t=self.tank_low_t)
+                else:
+                    self.decide(now, "SUPPLY_UNCERTAIN", tank_low=True, inflow_lps=self.last_tank_inflow, event_t=self.tank_low_t)
+                self.supply_active_until = now + SUPPLY_WINDOW_S
+        else:
+            self.tank_drain_reported = False
+        self.tank_abnormal_supply_recv_t, self.flat_leak_recv_t = -1e9, -1e9
+
+    def mass_balance(self, now):
+        # One side only, or a tank that also feeds homes with no node: nothing to compare. All of
+        # that water would otherwise look like a pipe leak
+        if not (self.tank and self.flats) or self.tree.unmetered_homes:
+            self._forget_old_blocks()
+            return
+        if self.silent and not self.balance_paused:
+            self.balance_paused = True
+            self.decide(now, "BALANCE_PAUSED", silent=sorted(self.silent))
+        elif not self.silent:
+            self.balance_paused = False
+        for i in sorted(self.sums):
+            got = self.sums[i]
+            if i in self.balance_done or self.tank not in got or not self.flats <= set(got):
+                continue                                    # wait until every node's summary for i arrived
+            self.balance_done.add(i)
+            supply = got[self.tank]
+            if supply < MIN_SUPPLY_L:
+                continue
+            err = 100 * (supply - sum(got[n] for n in self.flats)) / supply
+            self.analytics.last_balance_pct = round(err, 2)
+            leaking = err > MASS_BALANCE_PCT
+            if not leaking and not self.pipe_alerted and i in self.p_sums:
+                for f, p_v in self.p_sums[i].items():
+                    self.p_base[f] = p_v if f not in self.p_base else 0.9 * self.p_base[f] + 0.1 * p_v
+                for f, p_v in self.p_mean_sums.get(i, {}).items():
+                    self.p_mean_base[f] = p_v if f not in self.p_mean_base else 0.9 * self.p_mean_base[f] + 0.1 * p_v
+            self.verdicts[i] = (leaking, round(err, 1))
+            self._extend_leak_back()
+            # Only two blocks next to each other in time decide anything, in whatever order
+            # their summaries arrived
+            for first in (i - 1, i):
+                if first in self.verdicts and first + 1 in self.verdicts \
+                        and self.verdicts[first][0] == self.verdicts[first + 1][0]:
+                    self._judge_pair(now, first, self.verdicts[first][0])
+        self._forget_old_blocks()
+
+    def _extend_leak_back(self):
+        """Late summaries can show that the active leak began earlier than first known."""
+        if not self.pipe_alerted:
+            return
+        while self.verdicts.get(self.pipe_first - 1, (False,))[0]:
+            self.pipe_first -= 1
+            self.reported.add(self.pipe_first)
+        self.pipe_since = self.pipe_first * SUMMARY_S
+
+    def _judge_pair(self, now, first, leaking):
+        newest = first >= self.last_pair
+        self.last_pair = max(first, self.last_pair)
+        if not leaking:
+            if newest and self.pipe_alerted:
+                self.pipe_alerted = False                   # re-arm: a later leak alerts again
+                self.analytics.clear_pipe_leak(t_resolved=now)
+                self.end_pipe_leak(now)
+            return
+        pair, error_pct = {first, first + 1}, self.verdicts[first + 1][1]
+        if newest and not self.pipe_alerted:
+            self.pipe_alerted, self.pipe_first = True, first
+            self.reported |= pair
+            self._extend_leak_back()
+            drops = self._cross_floor_drops(first + 1)
+            suspected, floor_range, conf = self._localize_floor(drops)
+            self.decide(now, "PIPE_LEAK", interval=first + 1, error_pct=error_pct,
+                        suspected_floor=suspected, suspected_range=floor_range,
+                        localization_confidence=conf, floor_drops=drops)
+            return
+        if not newest and not pair & self.reported:         # an earlier leak, known only now
+            suspected, floor_range, conf = self._localize_floor(self._cross_floor_drops(first + 1))
+            self.decide(now, "PIPE_LEAK_PAST", interval=first + 1, error_pct=error_pct,
+                        began_t=first * SUMMARY_S, suspected_floor=suspected, suspected_range=floor_range,
+                        localization_confidence=conf)
+        self.reported |= pair
+
+    def _forget_old_blocks(self):
+        if not self.sums:
+            return
+        oldest = max(self.sums) - KEEP_BLOCKS
+        for data in (self.sums, self.p_sums, self.p_mean_sums, self.verdicts):
+            for i in [i for i in data if i < oldest]:
+                del data[i]
+        self.balance_done = {i for i in self.balance_done if i >= oldest}
+        self.reported = {i for i in self.reported if i >= oldest}
+
 
 if __name__ == "__main__":
     import tempfile

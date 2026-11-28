@@ -90,7 +90,9 @@ function TreeRow({
               <Badge>{node.valve ? "Valve" : "No valve"}</Badge>
             )}
             {status && (
-              <Badge tone={status.alert ? "dark" : "plain"}>{status.label}</Badge>
+              <Badge tone={status.alert ? "red" : status.label === "OK" ? "green" : "plain"}>
+                {status.label}
+              </Badge>
             )}
           </div>
         </div>
@@ -154,7 +156,9 @@ export function TopologyTree({ topology, topologyError, nodes, activeIncidents }
                     >
                       <div className="flex items-center justify-between">
                         <span className="font-bold">{id}</span>
-                        <Badge tone={st.alert ? "dark" : "plain"}>{st.label}</Badge>
+                        <Badge tone={st.alert ? "red" : st.label === "OK" ? "green" : "plain"}>
+                          {st.label}
+                        </Badge>
                       </div>
                       {summary && <div className="mt-0.5 text-[11px] opacity-90">{summary}</div>}
                     </div>

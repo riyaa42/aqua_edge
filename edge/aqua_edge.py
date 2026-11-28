@@ -58,6 +58,7 @@ import json
 import math
 import os
 import random
+import time
 
 
 from detection.consumption.detectors import StatisticalZeroFlowDetector
@@ -132,7 +133,17 @@ def save_atomic(path, text):
         f.write(text)
         f.flush()
         os.fsync(f.fileno())          # new contents really on the SD card
-    os.replace(tmp, path)             # atomic swap: old file or new file, nothing in between
+    if os.name == "nt":
+        for attempt in range(10):
+            try:
+                os.replace(tmp, path)
+                break
+            except PermissionError:
+                if attempt == 9:
+                    raise
+                time.sleep(0.015)
+    else:
+        os.replace(tmp, path)             # atomic swap: old file or new file, nothing in between
     if os.name != "nt":               # POSIX: fsync parent directory; Windows does not support os.open on dirs
         fd = os.open(os.path.dirname(os.path.abspath(path)), os.O_RDONLY)
         try:
@@ -149,6 +160,7 @@ class Store:
 
     def __init__(self, path, seed=0):
         self.path, self.queue, self.next_try, self.retries, self.seq = path, [], {}, {}, 0
+        self.queued_at = {}                     # seq -> monotonic enqueue time (in-memory only, for stuck check)
         self.total_resends, self.dropped = 0, 0       # dropped: old summaries given up for room
         self.rng = random.Random(seed)
         if path and os.path.exists(path):
@@ -168,11 +180,13 @@ class Store:
             save_atomic(self.path, json.dumps({"seq": self.seq, "dropped": self.dropped}) + "\n"
                         + "".join(json.dumps(m) + "\n" for m in self.queue))
 
-    def add(self, msg):
+    def add(self, msg, mono_now=None):
         """Give the message the next counter value and keep it until acknowledged. Alerts and
         flags are never given up; of the summaries only the newest MAX_SUMMARIES are kept."""
         self.seq += 1
         self.queue.append({**msg, "s": self.seq})
+        if mono_now is not None:
+            self.queued_at[self.seq] = mono_now
         summaries = [m["s"] for m in self.queue if m["k"] == "SUM"]
         if len(summaries) > MAX_SUMMARIES:
             old = set(summaries[:len(summaries) - MAX_SUMMARIES])
@@ -180,6 +194,7 @@ class Store:
             for s in old:
                 self.next_try.pop(s, None)
                 self.retries.pop(s, None)
+                self.queued_at.pop(s, None)
             self.dropped += len(old)
         self._save()
 
@@ -188,6 +203,7 @@ class Store:
         self.queue = [m for m in self.queue if m["s"] != seq]
         self.next_try.pop(seq, None)
         self.retries.pop(seq, None)
+        self.queued_at.pop(seq, None)
         if len(self.queue) != before:
             self._save()
 
@@ -547,18 +563,46 @@ class Node:
             log(f"{self.id} {text}")
 
     # --- messaging ---
+    def _mono(self):
+        fn = getattr(self.hal, "monotonic", None)
+        return fn() if fn else self.hal.now()
+
+    def gateway_heard(self):
+        return self.heard_at is not None and self._mono() - self.heard_at <= HEARD_S
+
+    def _send_airtime(self, wire, urgent, mono_now):
+        charged = []
+
+        def admit(seconds):
+            if self.airtime.take(mono_now, seconds, urgent):
+                charged.append(seconds)
+                return True
+            return False
+
+        try:
+            ok = self.link.send(wire, admit=admit)
+        except Exception:
+            if charged:
+                self.airtime.refund_last()
+            raise
+        if not ok and charged:
+            self.airtime.refund_last()
+        return ok, bool(charged)
+
     def emit(self, kind, **payload):
         sim_t = self.hal.now()
+        mono_t = self._mono()
         slot = getattr(self.hal, "slot", None)
         utc_fn = getattr(self.hal, "utc_now", None)
         utc_s, rtc_ok = utc_fn() if utc_fn else (sim_t, True)
         self.store.add(
-            {"n": self.id, "t": sim_t, "ts_utc": round(utc_s), "ts_iso": iso_utc(utc_s), "rtc_ok": bool(rtc_ok), "k": kind, **payload}
+            {"n": self.id, "t": sim_t, "ts_utc": round(utc_s), "ts_iso": iso_utc(utc_s), "rtc_ok": bool(rtc_ok), "k": kind, **payload},
+            mono_now=mono_t,
         )
         if kind == "ALERT" and payload.get("a") in RECOVERY_ENDS:
             self.release(RECOVERY_ENDS[payload["a"]])      # after the message is queued
         if kind == "SUM" and slot:      # summaries start in this node's own slot (TDMA)
-            self.store.next_try[self.store.seq] = sim_t + slot[0] * 60 / slot[1] + SLOT_GUARD_S
+            self.store.next_try[self.store.seq] = mono_t + slot[0] * 60 / slot[1] + SLOT_GUARD_S
 
     def alert(self, kind, **payload):
         """Called every minute the condition holds; sends once per episode."""
@@ -604,27 +648,29 @@ class Node:
             self.ok_minutes[message] = 0
 
     # --- radio ---
-    def heard_gateway(self, now, boot=None):
-        back = (self.heard_at is None or now - self.heard_at > HEARD_S
+    def heard_gateway(self, mono_now, boot=None):
+        back = (self.heard_at is None or mono_now - self.heard_at > HEARD_S
                 or (boot is not None and self.gateway_boot not in (None, boot)))
-        self.heard_at = now
+        self.heard_at = mono_now
         if boot is not None:
             self.gateway_boot = boot
         if back:
-            self.store.flush(now, self.index)
+            self.store.flush(mono_now, self.index)
 
-    def receive(self, now):
+    def receive(self, now, mono_now=None):
+        if mono_now is None:
+            mono_now = self._mono()
         messages, _ = self.link.receive()       # not ours or forged: already left out
         for m in messages:
             if m["n"] == "GATEWAY":
                 if m["k"] == "BEACON" and m["gt"] > self.last_beacon_gt:    # an old one: replayed
                     self.last_beacon_gt = m["gt"]
-                    self.heard_gateway(now, boot=m["s"])
+                    self.heard_gateway(mono_now, boot=m["s"])
             elif m["k"] == "ACK":
-                self.heard_gateway(now)
+                self.heard_gateway(mono_now)
                 self.store.ack(m["s"])
             elif m["k"] == "CMD":
-                self.heard_gateway(now)
+                self.heard_gateway(mono_now)
                 self.command(now, m)
 
     def command(self, now, m):
@@ -635,8 +681,7 @@ class Node:
             self.apply_command(m["a"], m["t"], m.get("over"))
             self.commands_done = (done + [m["s"]])[-REMEMBER_COMMANDS:]
             self.save_open()
-        self.link.send({"k": "GOT", "n": self.id, "s": m["s"], "t": now},
-                       admit=lambda s: self.airtime.take(now, s, True))
+        self._send_airtime({"k": "GOT", "n": self.id, "s": m["s"], "t": now}, True, self._mono())
 
     def apply_command(self, code, t, over):
         hook = getattr(self.hal, "on_gateway_alert", lambda code, active: None)
@@ -694,43 +739,50 @@ class Node:
             self.hold(code)
             self.valve_changed = max(self.valve_changed, t)     # an older reopen signal cannot undo this
 
-    def transmit(self, now):
+    def transmit(self, now, mono_now=None):
         """Send what is due, set the light, and return when to call again (None: nothing waits)."""
-        heard = self.heard_at is not None and now - self.heard_at <= HEARD_S
-        for m in self.store.due(now, heard):
+        if mono_now is None:
+            mono_now = self._mono()
+        heard = self.heard_at is not None and mono_now - self.heard_at <= HEARD_S
+        for m in self.store.due(mono_now, heard):
             wire = {k: v for k, v in m.items() if k not in ("ts_utc", "ts_iso", "rtc_ok")}
             urgent = self.store.urgent(m)
-            if not self.link.send(wire, admit=lambda s: self.airtime.take(now, s, urgent)):     # transmit-time limit reached
-                self.store.next_try[m["s"]] = now + 60
+            ok, admitted = self._send_airtime(wire, urgent, mono_now)
+            if not admitted:     # transmit-time limit reached
+                self.store.next_try[m["s"]] = mono_now + 60
         slot = getattr(self.hal, "slot", None)
         slot_wait = slot[0] * 60 / slot[1] + SLOT_GUARD_S if slot else 0    # a summary is not sent before then
-        stuck = any(now - m["t"] > STUCK_S + (slot_wait if m["k"] == "SUM" else 0) for m in self.store.queue)
+        for m in self.store.queue:
+            if m["s"] not in self.store.queued_at:
+                self.store.queued_at[m["s"]] = mono_now
+        stuck = any(mono_now - self.store.queued_at[m["s"]] > STUCK_S + (slot_wait if m["k"] == "SUM" else 0)
+                    for m in self.store.queue)
         if stuck != self.stuck:
             self.stuck = stuck
             self.note("messages are waiting for the gateway" if stuck else "waiting messages delivered")
-        self.show_light(now)
-        return self.store.wake(now)
+        self.show_light(mono_now)
+        return self.store.wake(mono_now)
 
     def active(self):
         """Every problem in force now, for its level."""
         return set(self.alerts) | self.open | set(self.remote)
 
-    def signal(self, now):
+    def signal(self, mono_now):
         """(colour, blinks) for the LED: policy.py and planning/valve_spec.md."""
         if self.reading_at is None:
-            self.reading_at = now           # from here a node that gets no reading at all counts as stale
+            self.reading_at = mono_now      # from here a node that gets no reading at all counts as stale
         link = getattr(self.hal, "link_broken", None)
         clock = getattr(self.hal, "utc_now", None)
         return policy.signal(
             self.active(),
             red=self.led_order or (self.valve["closed"] and self.valve["why"] == "gateway"),
             delivery=self.stuck or bool(link and link()),
-            sensors=self.missing or now - self.reading_at > STALE_S or bool(clock and not clock()[1])
+            sensors=self.missing or mono_now - self.reading_at > STALE_S or bool(clock and not clock()[1])
             or bool(getattr(self.hal, "clock_warning", False))
             or (self.has_valve and self.valve["fault"]))
 
-    def show_light(self, now):
-        colour, blinks = self.signal(now)
+    def show_light(self, mono_now):
+        colour, blinks = self.signal(mono_now)
         pattern = getattr(self.hal, "led_pattern", None)    # a hal without blinking shows the colour
         if pattern:
             pattern(colour, blinks)
@@ -739,19 +791,21 @@ class Node:
 
     def radio_poll(self):
         """Call when a packet arrives, and at the time this returns. Never touches the sensors."""
-        now = self.hal.now()
+    def radio_poll(self):
+        """Call when a packet arrives, and at the time this returns. Never touches the sensors."""
+        now, mono_now = self.hal.now(), self._mono()
         self.check_trial_watched(now)
-        self.receive(now)
-        return self.transmit(now)
+        self.receive(now, mono_now)
+        return self.transmit(now, mono_now)
 
     # --- main loop, called once per minute ---
     def step(self):
-        now, td, r = self.hal.now(), self.sample_time(), self.hal.read()
+        now, mono_now, td, r = self.hal.now(), self._mono(), self.sample_time(), self.hal.read()
         new_reading = td != self.reading_t
         if new_reading:
-            self.reading_t, self.reading_at = td, now
+            self.reading_t, self.reading_at = td, mono_now
         self.missing = any(not _finite(r.get(k)) for k in self.expected)
-        self.receive(now)
+        self.receive(now, mono_now)
         self.observe(td, r)
         self.reopen_when_normal(new_reading)
         self.try_reopening(td, r, new_reading)
@@ -763,7 +817,7 @@ class Node:
         if as_now != self.saved_as or summary != self.interval:
             self.saved_as = as_now
             self.save_state()
-        return self.transmit(now)           # alerts raised just now go in this same call
+        return self.transmit(now, mono_now) # alerts raised just now go in this same call
 
     def observe(self, td, r, checks=True):
         """Take one reading into the detectors: learn from it on the first day, check it after."""

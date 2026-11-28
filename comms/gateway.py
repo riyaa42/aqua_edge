@@ -47,7 +47,7 @@ class GatewayComms:
 
     def _messages(self):
         """Node messages, copied once each: the gateway has already dropped duplicates."""
-        new, self.logged = self.gw.log[self.logged:], len(self.gw.log)
+        new, self.logged = self.gw.log_since(self.logged, consumer="mqtt")
         for m in new:
             self.last_message[m["n"]] = m["rx"]
             try:
@@ -60,7 +60,7 @@ class GatewayComms:
 
     def _events(self):
         """The gateway's own decisions: gateway/event/{EVENT}."""
-        new, self.decided = self.gw.events[self.decided:], len(self.gw.events)
+        new, self.decided = self.gw.events_since(self.decided, consumer="mqtt")
         for event in new:
             self.out.publish(GATEWAY, "event", {k: v for k, v in event.items() if k != "event"},
                              name=event["event"])

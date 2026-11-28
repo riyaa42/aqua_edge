@@ -31,25 +31,35 @@ class MessageLink:
 
     def send(self, message, cad=True, admit=None):
         """Encrypt (packet.py) and send one message. admit(seconds_on_air) may refuse it first (the transmit-time
-        limit): then nothing is sent and this returns False. True means handed to the radio, not
-        that it arrived."""
+        limit): then nothing is sent and this returns False. Returns True if the radio accepted/sent it,
+        False if refused by admit or the radio reported failure (not that the destination acknowledged)."""
         raw = pack(message, self.key_for(message["n"]))
         if admit is not None and not admit(airtime_s(len(raw))):
             return False
-        self.radio.send(raw, cad=cad)
-        return True
+        sent = self.radio.send(raw, cad=cad)
+        return True if sent is None else bool(sent)
 
-    def receive(self):
-        """(messages received since the last call, number rejected). Rejected: broken, changed,
-        made with another key, or not ours to read."""
-        messages, rejected = [], 0
-        for raw in self.radio.receive():
+    def receive_timed(self):
+        """([(arrival_time_or_None, message)], number rejected) received since the last call.
+        Handles both (arrival_time, raw_bytes) tuples from RadioLink/UdpRadio/UdpHub and plain raw_bytes."""
+        items, rejected = [], 0
+        for entry in self.radio.receive():
+            if isinstance(entry, tuple) and len(entry) == 2:
+                arrived, raw = entry
+            else:
+                arrived, raw = None, entry
             message = unpack(raw, self._known_key)
             if message is None:
                 rejected += 1
             else:
-                messages.append(message)
-        return messages, rejected
+                items.append((arrived, message))
+        return items, rejected
+
+    def receive(self):
+        """(messages received since the last call, number rejected). Rejected: broken, changed,
+        made with another key, or not ours to read."""
+        items, rejected = self.receive_timed()
+        return [m for _, m in items], rejected
 
 
 if __name__ == "__main__":

@@ -951,7 +951,9 @@ def check_programs_over_the_network():
     with open(keys, "w") as f:
         json.dump({n: sim_key(n).hex() for n in ("GATEWAY", "B-203")}, f)
     log = os.path.join(folder, "node.log")
-    state = lambda: json.load(open(os.path.join(sd, "B-203_open.json")))
+    def state():
+        with open(os.path.join(sd, "B-203_open.json")) as f:
+            return json.load(f)
     queue = lambda: Store(os.path.join(sd, "B-203.jsonl")).queue
 
     def start_node():
