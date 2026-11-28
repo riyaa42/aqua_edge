@@ -4,6 +4,7 @@ maintenance prioritization, delivery-latency accounting, and dashboard snapshot 
 Kept separate from transport/protocol handling in core.py so the same analytics
 work identically in simulation, USB-serial hardware mode, and dashboard feeds.
 """
+from gateway import flags
 
 FLAT_LEAK_ALERTS = {"LEAK_NIGHT_FLOW", "LEAK_CONTINUOUS_FLOW", "LEAK_PRESSURE_DROP"}
 CONSUMPTION_ALERTS = {
@@ -136,9 +137,11 @@ class GatewayAnalytics:
         self.delay_count, self.delay_sum, self.delay_max = 0, 0.0, 0.0
         self.cleared_at = {}       # (target, category) -> node time of its latest recovery
         self.valves = {}           # node -> {"state": "closed" | "open" | "fault", "t": node time}
+        self.ordered = {}          # node -> operator's orders in force: "VALVE_CLOSE", "ALERT_LED_ON"
 
     def to_state(self):
         return {**{name: getattr(self, name) for name in SAVED}, "valves": self.valves,
+                "ordered": self.ordered,
                 "incidents": list(self.incidents.values()),
                 "cleared_at": [[*key, t] for key, t in self.cleared_at.items()]}
 
@@ -146,6 +149,7 @@ class GatewayAnalytics:
         for name in SAVED:
             setattr(self, name, state[name])
         self.valves = state.get("valves", {})       # not in older state files
+        self.ordered = state.get("ordered", {})
         self.incidents = {(it["target"], it["category"]): it for it in state["incidents"]}
         self.cleared_at = {(target, cat): t for target, cat, t in state["cleared_at"]}
 
@@ -246,6 +250,8 @@ class GatewayAnalytics:
                 self.offline_alerts += 1
 
         a = m["a"]
+        if a == "VALVE_OPENED":     # only a person reopens a valve under an order to close: it is over
+            self._order(n, "VALVE_CLOSE", False)
         if a in VALVE_STATES:       # where the valve is, not a problem (unless it would not move)
             if m["t"] >= self.valves.get(n, {}).get("t", float("-inf")):
                 self.valves[n] = {"state": VALVE_STATES[a], "t": m["t"]}
@@ -287,9 +293,17 @@ class GatewayAnalytics:
         elif a == "ABNORMAL_SUPPLY":
             self._upsert(n, "ABNORMAL_SUPPLY", m["t"], rx, flow=m.get("flow"))
 
+    def _order(self, node, name, on):
+        active = set(self.ordered.get(node, ()))
+        active = active | {name} if on else active - {name}
+        self.ordered[node] = sorted(active)
+
     def on_event(self, rx, ev):
         kind = ev["event"]
         t_ev = ev["t"]
+        if kind == "ORDER" and ev["order"] != "VALVE_OPEN":      # a close ends with the node's report
+            self._order(ev["node"], "ALERT_LED_ON" if ev["order"].startswith("ALERT_LED") else ev["order"],
+                        ev["order"] != "ALERT_LED_OFF")
         if kind == "BAD_PACKET":
             self.bad_packets += int(ev.get("count", 1))
         elif kind == "NODE_SILENT":
@@ -460,6 +474,8 @@ class GatewayAnalytics:
                 "evidence": ev,
                 "recommended_action": ACTIONS.get(cat, "Inspect node and sensor readings."),
             })
+        for item in queue:
+            item["level"] = flags.level(item["category"])
         queue.sort(key=lambda x: (-x["risk_score"], x["target"]))
         for idx, item in enumerate(queue, 1):
             item["rank"] = idx
@@ -476,19 +492,25 @@ class GatewayAnalytics:
         mean_delay = round(self.delay_sum / self.delay_count, 2) if self.delay_count else 0.0
         max_delay = round(self.delay_max, 2)
         nodes = {}
+        supply_low = gw.tank_low_t > max(gw.supply_cleared_t, -1e9)
         for n in sorted(self.tree.devices):
             nodes[n] = {
                 "status": "silent" if n in gw.silent else "ok",
                 "last_seen": None if gw.last_seen is None else gw.last_seen.get(n),
                 "last_sum": self.last_sum.get(n),
                 "valve": self.valves.get(n, {}).get("state"),      # None: never reported
+                # what its light should show, by the spec; None: silent, so not known
+                "light": None if n in gw.silent else flags.light(
+                    n, self.incidents, gw.told.get(n, ()), supply_low and n == self.tank,
+                    bool(self.ordered.get(n))),
             }
         return {
             "t": now,
             "building_status": top_sev,
             "maintenance_queue": queue,
-            "active_incidents": self.correlate_incidents(now),
-            "incident_history": [dict(it) for it in self.resolved_history],
+            "active_incidents": [{**it, "level": flags.level(it["category"])}
+                                 for it in self.correlate_incidents(now)],
+            "incident_history": [{**it, "level": flags.level(it["category"])} for it in self.resolved_history],
             "water_quality": dict(self.last_quality),
             "leakage": {
                 "pipe_leak_active": gw.pipe_alerted,

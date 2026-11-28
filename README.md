@@ -15,7 +15,7 @@ There are two solutions, and `edge/` and `gateway/` each have an entry point for
 
 | Solution | Node (Pi) | Gateway server |
 |---|---|---|
-| Edge-based | `uv run prod-edge-edge`, or `uv run edge-based-node` (`edge/edge_based.py`) | `uv run edge-based-gateway` (`gateway/edge_based.py`) |
+| Edge-based | `uv run prod-edge-edge`, or `uv run edge-based-node` (`edge/edge_based.py`) | `uv run prod-edge-gateway`, or `uv run edge-based-gateway` (`gateway/edge_based.py`) |
 | Cloud-based | `uv run cloud-based-node` (`edge/cloud_based.py`) | `uv run cloud-based-gateway` (`gateway/cloud_based.py`) |
 
 **The two edge-based programs run; the two cloud-based ones do not.** They are placeholders: each prints "not implemented yet" and exits with an error. `edge-based-node` replays a CSV in place of sensors and runs the node checks on the node. It runs on a Raspberry Pi with an SX1278, or [as a virtual node](edge/README.md#run-virtual-nodes) with Docker Compose (options: `uv run edge-based-node --help`); `uv run test-edge` tests it with a fake radio. On the Pi, first run `uv sync --extra pi`, then `uv run pi-radio-test` checks the LoRa module. Wiring and setup: [Running on the Pi](hal/README.md#running-on-the-pi).
@@ -82,6 +82,40 @@ The comparisons against the baselines planned in [`planning/experiments.md`](pla
 | `simulation/` | Everything that models the physical world: EPANET/WNTR pipe network (`scripts/`), real-time 21-node + LoRa radio simulator (`live/`), ns-3 LoRaWAN check (`ns3/`), and parked 3D simulator (`webots/`) |
 | `planning/baselines.md` | *(Planned)* Cloud-dependent baseline (Ali et al. [6]) and single-task edge baselines kept separate from the Aqua Edge code for fair comparison |
 | `planning/experiments.md` | *(Planned)* Evaluation scripts that feed identical scenarios and controlled outages (0 min–24 h) into the Aqua Edge code (`edge/`, `gateway/`) and the baselines to measure all 6 Slide 10 metrics |
+
+## Deploy
+
+The edge-based solution in production. **Not tested on real hardware** (no ESP8266, SX1278, Pi or valve), and the building setup has been tried only with Podman, not Docker.
+
+> **The nodes have no sensor drivers yet.** A node replays a CSV file, and on a Pi it moves a real valve by what is in that file. Do not connect a real water supply until real sensor reading exists.
+
+**1. Building computer** (gateway, MQTT broker and dashboard, in containers). It needs Docker or Podman with Compose, the [flashed ESP8266](hal/README.md#gateway-modem-esp8266), the [key file](hal/README.md#setting-up-keys) and the right time.
+
+```sh
+cp .env.example .env                    # fill it in: gateway/README.md, "Run with Docker Compose"
+uv run --no-default-groups prod-up      # checks the settings, builds, starts, waits for the gateway
+```
+
+| Script | What it does |
+|---|---|
+| `uv run prod-up` | Deploys, or updates after a code change. It refuses missing or unsafe settings, always uses the ESP8266 and never starts virtual nodes. `--check` only checks; `--no-modem` rehearses without the radio |
+| `uv run prod-status` | The services |
+| `uv run prod-logs` | Follows their logs (or `uv run prod-logs --tail 50 gateway`) |
+| `uv run prod-down` | Stops them. The data is kept; it refuses `-v` |
+
+The services restart if they fail. Whether they start again after a reboot depends on Docker or Podman being set up to start them, which these scripts do not do. The dashboard is reachable from that computer only; before opening it to others, put HTTPS and a login in front.
+
+**2. Each Pi** (after [its setup](hal/README.md#running-on-the-pi)):
+
+```sh
+uv sync --no-default-groups --extra pi
+uv run --no-default-groups --extra pi prod-node-service B-203 --keys /home/pi/keys.json \
+    --csv /home/pi/sensors.csv --sd /home/pi/aqua --slot 5 20 > aqua-edge-B-203.service
+```
+
+`prod-node-service` checks the node, key and data files, then **only prints** a systemd service and the commands that install it, which need `sudo`. `--csv` has no default, so the simulated data is never used by accident. Add `--tree` for another building and `--user` if the account is not `pi`.
+
+Without containers, `uv run prod-edge-gateway` and `uv run dashboard-server` run the two programs in the foreground; `uv run prod-edge-edge` does the same for a node.
 
 ## Python setup
 

@@ -131,7 +131,7 @@ aqua/v1/B/B-203/sensor {"v":1,"t":1767225600,"flow":0.05,"pressure":10.4}
 - **Flags** (`flag`): `SUPPLY_LOW`, `SUPPLY_RECOVERED`.
 - **Gateway commands** (`cmd`): `PIPE_LEAK`, `PIPE_LEAK_CAUSE`, `SUPPLY_EVENT`, `LEAK_TANK_DRAIN`, `SUPPLY_UNCERTAIN`, ended by `PIPE_LEAK_CLEARED`, `PIPE_LEAK_CAUSE_CLEARED` or `SUPPLY_CLEARED`. Which nodes get what: [gateway alerts](../gateway/README.md#gateway-alerts-sent-to-nodes).
 - **Operator orders** (`cmd`): `VALVE_CLOSE`, `VALVE_OPEN`, `ALERT_LED_ON`, `ALERT_LED_OFF` ([orders](../gateway/README.md#orders-to-a-node)).
-- **Gateway events** (`gateway/event/{EVENT}`): `ORDER`, `VALVE_CLOSED`, `VALVE_OPENED`, `VALVE_FAULT`, `NEW_ALERT`, `REPEAT_ALERT`, `PIPE_LEAK`, `PIPE_LEAK_PAST`, `BALANCE_PAUSED`, `SUPPLY_EVENT`, `LEAK_TANK_DRAIN`, `SUPPLY_UNCERTAIN`, `SUPPLY_RECOVERED`, `NODE_SILENT`, `NODE_BACK`, `CLOCK_SKEW`, `CLOCK_OK`, `BAD_PACKET`. The payload is the gateway's event without its name; its other fields depend on the event.
+- **Gateway events** (`gateway/event/{EVENT}`): `ORDER`, `VALVE_CLOSED`, `VALVE_OPENED`, `VALVE_FAULT`, `NEW_ALERT`, `REPEAT_ALERT`, `PIPE_LEAK`, `PIPE_LEAK_PAST`, `BALANCE_PAUSED`, `SUPPLY_EVENT`, `LEAK_TANK_DRAIN`, `SUPPLY_UNCERTAIN`, `SUPPLY_RECOVERED`, `NODE_SILENT`, `NODE_BACK`, `CLOCK_SKEW`, `CLOCK_OK`, `BAD_PACKET`, `BAD_READING`, `ORDER_EXPIRED`. The payload is the gateway's event without its name; it has a `level` (`ALERT`, `WARNING` or `INFO`), and its other fields depend on the event.
 
 ### State, link and status
 

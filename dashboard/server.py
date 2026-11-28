@@ -40,6 +40,7 @@ def create_app(
     topology_path=None,
     heartbeat_s=15.0,
     enable_outage_sim=None,
+    operator_token=None,
 ):
     """Create a configured FastAPI dashboard backend instance."""
     resolved_db = db_path or os.environ.get("AQUA_DASHBOARD_DB", os.path.join("dashboard", "run", "dashboard.db"))
@@ -47,6 +48,9 @@ def create_app(
         os.makedirs(os.path.dirname(os.path.abspath(resolved_db)), exist_ok=True)
     resolved_token = auth_token if auth_token is not None else os.environ.get("AQUA_DASHBOARD_TOKEN", "dev-token")
     resolved_topo = topology_path if topology_path is not None else os.environ.get("AQUA_TOPOLOGY_PATH")
+    # for the dashboard's reopen button. Not the gateway's token, which must never be in a web page
+    resolved_operator = operator_token if operator_token is not None else os.environ.get("AQUA_OPERATOR_TOKEN", "")
+    reopen_enabled = bool(resolved_operator) and resolved_operator != resolved_token
     if enable_outage_sim is None:
         env_sim = os.environ.get("AQUA_ENABLE_OUTAGE_SIM", "1").strip().lower()
         resolved_outage_sim = env_sim in ("1", "true", "yes")
@@ -77,6 +81,88 @@ def create_app(
             return False
         expected = f"Bearer {resolved_token}"
         return hmac.compare_digest(authorization, expected)
+
+    def _outage():
+        with sim_lock:
+            return state["internet_outage"]
+
+    async def _json_object(request):
+        """A small JSON object from the request body, or None."""
+        raw = b""
+        async for chunk in request.stream():
+            raw += chunk
+            if len(raw) > 4096:
+                return None
+        try:
+            body = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            return None
+        return body if isinstance(body, dict) else None
+
+    def _valves_of(frame):
+        nodes = frame["snapshot"].get("nodes") if frame else None
+        return nodes if isinstance(nodes, dict) else {}
+
+    # --- manual valve reopen: the button asks here, the gateway collects (API_SPEC.md) ---
+    @app.post("/api/v1/valves/reopen")
+    async def reopen_valve(request: Request, authorization: str | None = Header(default=None)):
+        if not reopen_enabled:
+            return _err(403, "valve reopen is disabled: set AQUA_OPERATOR_TOKEN, different from the gateway's token")
+        expected = f"Bearer {resolved_operator}".encode()
+        if not authorization or not hmac.compare_digest(authorization.encode(), expected):
+            return _err(401, "unauthorized")
+        body = await _json_object(request)
+        if body is None or not all(isinstance(body.get(k), str) and body[k] for k in ("gateway_id", "node")):
+            return _err(400, "body must be {'gateway_id': string, 'node': string}")
+        frame = store.get_latest_snapshot(gateway_id=body["gateway_id"])
+        if frame is None:
+            return _err(404, "unknown gateway: it has sent nothing")
+        if body["node"] not in _valves_of(frame):
+            return _err(404, "unknown node for this gateway")
+        asked = store.request_reopen(body["gateway_id"], body["node"])
+        return JSONResponse(status_code=202, content={"ok": True, "request": asked})
+
+    @app.get("/api/v1/valves")
+    def valves(gateway_id: str | None = Query(default=None)):
+        frame = store.get_latest_snapshot(gateway_id=gateway_id)
+        if frame is None:
+            return _err(404, "no snapshots found")
+        requests = store.latest_requests(frame["gateway_id"])
+        return {"ok": True, "gateway_id": frame["gateway_id"], "reopen_enabled": reopen_enabled,
+                "snapshot_received_at_utc": frame["received_at_utc"],
+                "valves": {name: {"state": node.get("valve") if isinstance(node, dict) else None,
+                                  "request": requests.get(name)}
+                           for name, node in _valves_of(frame).items()}}
+
+    @app.get("/api/v1/gateway/commands")
+    def gateway_commands(gateway_id: str = Query(min_length=1),
+                         authorization: str | None = Header(default=None)):
+        if not _check_auth(authorization):
+            return _err(401, "unauthorized")
+        if _outage():
+            return _err(503, "simulated internet outage")
+        now = time.time()
+        return {"ok": True, "commands": [
+            {"id": r["id"], "node": r["node"], "command": "VALVE_OPEN",
+             "age_s": max(0.0, now - r["requested_at_utc"])}        # an age: no shared clock needed
+            for r in (store.pending_requests(gateway_id, now) if reopen_enabled else [])]}
+
+    @app.post("/api/v1/gateway/commands/ack")
+    async def gateway_command_ack(request: Request, authorization: str | None = Header(default=None)):
+        if not _check_auth(authorization):
+            return _err(401, "unauthorized")
+        if _outage():
+            return _err(503, "simulated internet outage")
+        body = await _json_object(request)
+        if (body is None or not all(isinstance(body.get(k), str) and body[k] for k in ("gateway_id", "id"))
+                or body.get("result") not in ("sent", "rejected")
+                or not isinstance(body.get("detail"), (str, type(None)))):
+            return _err(400, "body must be {'gateway_id', 'id', 'result': 'sent'|'rejected', 'detail'?}")
+        answered = store.answer_request(body["gateway_id"], body["id"], body["result"],
+                                        (body.get("detail") or "")[:200] or None)
+        if answered is None:
+            return _err(404, "no such request")
+        return {"ok": True, "request": answered}
 
     @app.get("/api/v1/health")
     def health():

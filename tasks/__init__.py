@@ -13,7 +13,7 @@ HAL = [("hal.packet",), ("hal.lora433",), ("hal.lora_pi", "--check"),
        ("hal.esp8266_passthrough", "--check"), ("hal.link",), ("hal.udp",), ("tests.test_hal",)]
 EDGE = [("edge.policy",), ("edge.aqua_edge",), ("tests.test_pi_node",), ("tests.test_edge_node",)]
 GATEWAY = [("gateway.topology",), ("gateway.core",), ("tests.test_gateway_analytics",), ("tests.test_gateway_server",),
-           ("tests.test_small_buildings",)]
+           ("tests.test_small_buildings",), ("tests.test_gateway_edge",)]
 COMMS = [("comms.common",), ("tests.test_comms",)]
 DASHBOARD = [("dashboard.tests.test_shipper",), ("dashboard.tests.test_server",), ("tests.test_dashboard_link",)]
 QUALITY = [("detection.quality.quality_model",)]

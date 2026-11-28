@@ -5,8 +5,10 @@
 | `core.py` | Gateway: laptop (ESP8266 over USB serial to an SX1278 433 MHz LoRa module) | Combines data from all nodes. Replies to every message (with the time), building check (water in = water out), silent-node alerts, supply-event rule, new vs repeat alerts, clock check, saved state, and delegates analytics to `GatewayAnalytics` |
 | `building_B.json` + `topology.py` | Gateway | The building's pipes as a tree of nodes, and its loader and checks ([Building tree](#building-tree)) |
 | `analytics.py` | Gateway | Open incidents, closed by explicit recovery messages, cross-node root-cause correlation (tank contamination & main riser leak groups), composite risk scoring (0–100) & ranked maintenance queue, online vs. offline delivery-latency accounting, and `Gateway.snapshot()` JSON export |
-| `edge_based.py` | Gateway | Server entry point, edge-based solution: nodes decide their own alerts, and the gateway decides what needs several nodes' data. It reaches the LoRa antenna through an ESP8266 (`../hal/gate_hal.py`), runs `core.py` and publishes over MQTT (`../comms/`). `uv run edge-based-gateway`, or [with Docker Compose](#run-with-docker-compose). Not tested on real hardware |
-| `dashboard_link.py` | Gateway | Sends snapshots to the [dashboard](../dashboard/README.md) on its own thread, through `dashboard/shipper.py` |
+| `edge_based.py` | Gateway | Server entry point, edge-based solution: nodes decide their own alerts, and the gateway decides what needs several nodes' data. It reaches the LoRa antenna through an ESP8266 (`../hal/gate_hal.py`), runs `core.py` and publishes over MQTT (`../comms/`). `uv run prod-edge-gateway` (same as `edge-based-gateway`), or [with Docker Compose](#run-with-docker-compose). Not tested on real hardware |
+| `dashboard_link.py` | Gateway | Sends snapshots to the [dashboard](../dashboard/README.md) on its own thread, through `dashboard/shipper.py`, and collects its [valve reopen requests](../dashboard/API_SPEC.md#7-manual-valve-reopen) |
+| `readings.py` | Gateway | Leaves out [readings](#the-gateway-node) that cannot be true |
+| `flags.py` | Gateway | [Levels and expected lights](#the-gateway-node) for the dashboard, by the valve spec |
 | `order.py` | Gateway | Command that sends a node a [valve or alert-LED order](#orders-to-a-node) |
 | `virtual_1node.json`, `virtual_3node.json` | Gateway | Trees for the [virtual-node demos](../edge/README.md#run-virtual-nodes) |
 | `mosquitto/` | Gateway | The MQTT broker's settings and access rules, used by [Docker Compose](#run-with-docker-compose) |
@@ -15,6 +17,17 @@
 The rest of this README describes the gateway logic that exists today, which belongs to the edge-based solution.
 
 Self-checks, from the repository root: `python3 -m gateway.topology`, `python3 -m gateway.core`.
+
+## The gateway node
+
+| Job | How |
+|---|---|
+| Sensor readings | The gateway has no sensors. It works from what nodes send: alerts, flags and 15-minute summaries, never raw samples. A reading that is not a number, or a negative litres or flow value, is left out as if the sensor gave nothing, and logged as `BAD_READING` |
+| Cross-node checks | The building check, leak location and supply rule are in [`../detection/leakage/`](../detection/leakage/README.md) (`mass_balance.py`, `localize.py`, `supply.py`). `core.py` feeds them and sends their results to the nodes concerned |
+| Flags | By [`../planning/valve_spec.md`](../planning/valve_spec.md): each incident, queue item and event has a `level`, and each node an expected `light` ([fields](../dashboard/API_SPEC.md#8-flags-added-to-the-snapshot)). They are labels; only the [commands below](#gateway-alerts-sent-to-nodes) close valves |
+| Dashboard | Sends snapshots, and collects [reopen requests](../dashboard/API_SPEC.md#7-manual-valve-reopen) from the dashboard's button. No port is opened on the gateway |
+
+This is a draft: it has run only on one computer, with network nodes.
 
 ## Building tree
 
@@ -112,7 +125,7 @@ Without Docker, from the repository root:
 
 ```sh
 uv sync --extra gateway
-uv run edge-based-gateway --keys /full/path/gateway_keys.json --data gateway-data --port /dev/ttyUSB0
+uv run prod-edge-gateway --keys /full/path/gateway_keys.json --data gateway-data --port /dev/ttyUSB0
 ```
 
 `--udp-listen 127.0.0.1:1700` also takes nodes over the network (`../hal/udp.py`), and `--port none` runs without the ESP8266.
@@ -136,6 +149,7 @@ docker compose logs -f gateway
 | `MQTT_GATEWAY_PASSWORD` | The gateway's broker login `gateway`: may only publish |
 | `MQTT_VIEWER_PASSWORD` | The login `viewer` for subscribers: may only read |
 | `AQUA_DASHBOARD_TOKEN` | A long random secret, which the gateway sends with its data. For example `openssl rand -hex 32` |
+| `AQUA_OPERATOR_TOKEN` | Optional: another secret, which turns on the dashboard's [valve reopen](../dashboard/API_SPEC.md#7-manual-valve-reopen) |
 | `DASHBOARD_PORT` | The dashboard's port on this computer, default 8000 |
 | `DASHBOARD_URL` | Send to a dashboard elsewhere instead of this setup's own (its full ingest address; use `https` over a network) |
 | `DASHBOARD_GATEWAY_ID` | This gateway's name on the dashboard, default `building-<building>` |
@@ -185,8 +199,8 @@ docker compose exec gateway python -m gateway.order B-203 valve-open --data /dat
 | `valve-open` | The reopen signal: opens its valve at once, whatever the conditions |
 | `led-on` / `led-off` | Turns the ordered red LED and buzzer on or off. Red closes the valve, so **`led-on` closes it too**; after `led-off` it reopens once the [tolerance period](../edge/README.md#when-the-valve-reopens) has passed. `led-off` does not hide any other red condition |
 
-- The command only leaves a request in the gateway's data folder, so only someone who can write there can order anything. No port takes orders, and MQTT stays read-only. **The gateway sends these orders only when an operator asks.** The problems it finds are [sent separately](#gateway-alerts-sent-to-nodes) and do close valves.
-- Orders are signed with the node's key, repeated until confirmed and kept across restarts. A newer order replaces an undelivered opposite one. A node ignores an order older than its last valve or LED change, including a reopening at the node.
+- The command only leaves a request in the gateway's data folder, so only someone who can write there can use it. The one other source of orders is the [dashboard's reopen button](../dashboard/API_SPEC.md#7-manual-valve-reopen) (`valve-open` only), which the gateway collects from the dashboard server it is told to send to, so **whoever controls that server can open valves**. No port on the gateway takes orders, and MQTT stays read-only. **The gateway sends these orders only when an operator asks.** The problems it finds are [sent separately](#gateway-alerts-sent-to-nodes) and do close valves.
+- Orders are signed with the node's key, repeated until confirmed and kept across restarts. A newer order replaces an undelivered opposite one. **A `valve-open` the node has not confirmed within 15 minutes of being asked for is dropped** (`ORDER_EXPIRED`), so it cannot open a valve much later. A node ignores an order older than its last valve or LED change, including a reopening at the node.
 - Confirmation only means the node received it. What the valve did comes back as `VALVE_CLOSED`, `VALVE_OPENED` or `VALVE_FAULT` (an incident). `Gateway.snapshot()` shows each node's `valve`; the web page does not display it yet.
 - **Update the gateway before the nodes:** an older gateway rejects the new packet names.
 

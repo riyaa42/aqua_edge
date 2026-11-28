@@ -2,21 +2,22 @@
 
 This document explains, step by step, how Aqua Edge finds water leaks in building B: which sensors are used, where each decision is made, the simple math behind every check, how the results reach the gateway, how well it worked in testing, and what still needs fixing.
 
-All numbers below come from the code in `../../edge/aqua_edge.py` (the node firmware) and `../../gateway/core.py` (the gateway).
+All numbers below come from the code in `../../edge/aqua_edge.py` (the node firmware), `../../gateway/core.py` (the gateway) and this folder's cross-node rules (`mass_balance.py`, `localize.py`, `supply.py`), which the gateway runs.
 
 ### Where the code is
 
 | What | File | Where in it |
 |---|---|---|
 | Learning "normal" (hourly average and spread) | `../../edge/aqua_edge.py` | `class Baseline` |
-| All settings (limits, waits) | `../../edge/aqua_edge.py`, `../../gateway/core.py` | Constants at the top of each file |
+| All settings (limits, waits) | `../../edge/aqua_edge.py`, `../../gateway/core.py`, `mass_balance.py`, `supply.py` | Constants at the top of each file |
 | Night check, continuous-flow check, pressure-assisted leak check, too-much check (every flat node) | `../../edge/aqua_edge.py` | `FlatNode.check` |
 | Litres, `p_min`, and `p_mean` per 15 minutes sent to the gateway (flat node) | `../../edge/aqua_edge.py` | `FlatNode.accumulate` |
 | Tank outflow check, tank level flag (tank node) | `../../edge/aqua_edge.py` | `TankNode.check` |
-| Building check (water in = water out) | `../../gateway/core.py` | `Gateway.mass_balance` |
-| Supply-event rule | `../../gateway/core.py` | `Gateway.supply_rule` |
+| Building check (water in = water out) | `mass_balance.py` (this folder) | `PipeLeakCheck.mass_balance` |
+| Supply-event rule | `supply.py` (this folder) | `SupplyRule.supply_rule` |
 | Building layout: junctions, what is upstream, valves | `../../gateway/building_B.json`, `../../gateway/topology.py` | `class Topology` |
-| Locating a pipe leak and choosing who is alerted | `../../gateway/core.py` | `Gateway._localize_floor`, `Gateway.pipe_leak_nodes` |
+| Locating a pipe leak | `localize.py` (this folder) | `cross_floor_drops`, `localize_floor` |
+| Choosing who is alerted | `../../gateway/core.py` | `Gateway.pipe_leak_nodes` |
 | Silent nodes, clock check | `../../gateway/core.py` | `Gateway.check_silence`, `Gateway.check_clock` |
 | New vs repeat alert | `../../gateway/core.py` | `Gateway.check_repeat` |
 | Flow vs pressure comparison | `compare_leaks.py` (this folder) | |
@@ -193,7 +194,7 @@ Earlier firmware had a pressure-drop rule (`PRESSURE_LOW`) that triggered withou
 
 ### The supply-event rule (gateway)
 
-`TankNode` emits `SUPPLY_LOW` when the level has been below **both** its learned floor (`min_level - 0.03 m`, where `min_level` is the 10th percentile of Day-1 levels) **and** this hour's average minus `0.3 m` for `10 min`. (Until `min_level` is learned, the floor is the hourly average minus `max(4 x spread, 0.3 m)`.) The gateway (`Gateway.supply_rule`) combines `SUPPLY_LOW` with tank inflow, cross-floor pressure drops, and `PIPE_LEAK`/`ABNORMAL_SUPPLY`/flat-leak evidence to emit:
+`TankNode` emits `SUPPLY_LOW` when the level has been below **both** its learned floor (`min_level - 0.03 m`, where `min_level` is the 10th percentile of Day-1 levels) **and** this hour's average minus `0.3 m` for `10 min`. (Until `min_level` is learned, the floor is the hourly average minus `max(4 x spread, 0.3 m)`.) The gateway (`SupplyRule.supply_rule`, `supply.py`) combines `SUPPLY_LOW` with tank inflow, cross-floor pressure drops, and `PIPE_LEAK`/`ABNORMAL_SUPPLY`/flat-leak evidence to emit:
 
 - `SUPPLY_EVENT` — low tank, no leak evidence, and either low inflow (`< 0.1 L/s`, including buffered `SUPPLY_LOW` delivered after a LoRa outage) or, if inflow is unknown, pressure down on nearly every floor.
 - `LEAK_TANK_DRAIN` — low tank with active leak evidence (`PIPE_LEAK`, `ABNORMAL_SUPPLY`, or flat leak).
@@ -203,7 +204,7 @@ Earlier firmware had a pressure-drop rule (`PRESSURE_LOW`) that triggered withou
 
 ### Cross-floor riser localisation (gateway)
 
-When `PIPE_LEAK` triggers, `Gateway._localize_floor` uses the 15-minute `p_mean` drops relative to clean per-flat baselines and computes the downward riser headloss gradient (`step[s] = drop[s] - drop[junction above s]`). Which flats share a junction, and which junction is above which, come from the [building tree](../../gateway/README.md#building-tree), not from flat names. The suspected junction is the furthest one down with a significant step; if two separate branches have one, the leak is `unlocalised`. It reports `suspected_floor` (the junction's label), `suspected_node` (its id), `suspected_range` (the suspect and the junctions directly below it), `isolation_valve` (nearest valve at or above it, recorded only) and `localization_confidence` (`"high"`, `"medium"`, or `"unlocalised"` when medium-leak gradients are smaller than 15-minute burst noise).
+When `PIPE_LEAK` triggers, `localize_floor` (`localize.py`) uses the 15-minute `p_mean` drops relative to clean per-flat baselines and computes the downward riser headloss gradient (`step[s] = drop[s] - drop[junction above s]`). Which flats share a junction, and which junction is above which, come from the [building tree](../../gateway/README.md#building-tree), not from flat names. The suspected junction is the furthest one down with a significant step; if two separate branches have one, the leak is `unlocalised`. It reports `suspected_floor` (the junction's label), `suspected_node` (its id), `suspected_range` (the suspect and the junctions directly below it), `isolation_valve` (nearest valve at or above it, recorded only) and `localization_confidence` (`"high"`, `"medium"`, or `"unlocalised"` when medium-leak gradients are smaller than 15-minute burst noise).
 
 **Who is alerted:** the tank and every flat fed through the suspected junction, so a leak located at floor 1 alerts floors 1 and G. If the leak is `unlocalised`, only the tank is alerted. For building B the new tree-based code gave the same localisation as the earlier name-based code on 200,000 random pressure-drop patterns.
 
@@ -333,7 +334,7 @@ For full benchmark numbers, confusion matrices, and multi-dataset results, see [
 #### Validation & Robustness Limitations
 8. **Supply-event detection is not reliable:** both simulated interruptions were detected (about 20 h after the cut, when the tank got low), but the two 7-day normal runs gave `7` false `SUPPLY_EVENT`s. Only 2 interruption scenarios were tested.
 9. **Day-1 supply baseline dependence:** `TankNode` learns `min_level` from Day 1 (`1800 s .. LEARN_S`) using the 10th percentile (`min_level - 0.03 m`), which rejects startup transients and brief (`< 2.4 h`) Day-1 outages, but a multi-hour (`> 2.4 h`) Day-1 outage or shallow Day-1 cycling can still skew the learned floor (see `test_supply_robustness.py`). `min_level` is also lost at any reboot after Day 1 (section 4).
-10. **Inflow suppression threshold (`inflow_lps >= 0.1`):** `Gateway.supply_rule` suppresses `SUPPLY_EVENT` (emitting `SUPPLY_UNCERTAIN` instead) whenever residual tank inflow remains `>= 0.1 L/s`, even if inflow is below building demand (`test_supply_robustness.py` case `2c`).
+10. **Inflow suppression threshold (`inflow_lps >= 0.1`):** `SupplyRule.supply_rule` suppresses `SUPPLY_EVENT` (emitting `SUPPLY_UNCERTAIN` instead) whenever residual tank inflow remains `>= 0.1 L/s`, even if inflow is below building demand (`test_supply_robustness.py` case `2c`).
 11. **Simulated hydraulics rather than physical deployment:** Building B and `NET_6` use EPANET/WNTR simulations, and Cache County has no pipe-leak labels or pressure data; there is no physical building deployment with real sensors yet.
 12. **Sparse sensor coverage in `NET_6`:** Monitoring only `10` of `4,419` junctions limits spatial localisation at unseen nodes; denser sensor placement would raise hardware/deployment cost.
 13. **A downtake leak can raise a flat leak alert** on a flat that is using water at the time (section 2). The gateway's `possible_cause=PIPE_LEAK` label only means *possibly*: a real flat leak during a pipe leak is labelled too. There is no label if the flat alert reaches the gateway before `PIPE_LEAK` is decided, which includes after a radio outage, because alerts are sent before summaries. The label is in the gateway's event only.

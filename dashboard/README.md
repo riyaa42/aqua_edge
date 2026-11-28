@@ -20,10 +20,11 @@ uv run edge-based-gateway --keys /full/path/gateway_keys.json --dashboard-url ht
 | `AQUA_DASHBOARD_TOKEN` | Needed to send. Run on its own, the server uses `dev-token` if unset, which anyone can guess; Docker Compose has no default |
 | `AQUA_DASHBOARD_DB` | Database file, default `dashboard/run/dashboard.db` |
 | `AQUA_DASHBOARD_HOST`, `AQUA_DASHBOARD_PORT` | Where `dashboard-server` listens, default `127.0.0.1:8000` |
+| `AQUA_OPERATOR_TOKEN` | Turns on [manual valve reopen](API_SPEC.md#7-manual-valve-reopen): the secret the reopen button sends. Not the same as the gateway's token. Unset: off |
 | `AQUA_TOPOLOGY_PATH` | The [building tree](../gateway/README.md#building-tree) served at `/api/v1/topology` |
 | `AQUA_ENABLE_OUTAGE_SIM` | Allows `POST /api/v1/sim/outage`, which makes the server refuse data, for outage demos. On by default on its own, off in Docker Compose |
 
-**Reading needs no token.** Anyone who can reach the server can read everything, so keep it on `127.0.0.1` unless something in front of it adds a login and TLS.
+**Reading needs no token; reopening a valve needs the operator token.** Anyone who can reach the server can read everything, so keep it on `127.0.0.1` unless something in front of it adds a login and TLS.
 
 | To read | Address |
 |---|---|
@@ -32,6 +33,7 @@ uv run edge-based-gateway --keys /full/path/gateway_keys.json --dashboard-url ht
 | Tank and balance history | `GET /api/v1/telemetry` |
 | Incidents | `GET /api/v1/incidents` |
 | Building tree | `GET /api/v1/topology` |
+| Valve states and reopen requests | `GET /api/v1/valves` |
 | Live stream of new snapshots (server-sent events) | `GET /api/v1/stream` |
 
 ## How the gateway sends

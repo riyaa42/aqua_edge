@@ -1,9 +1,11 @@
-"""Gateway server entry point, edge-based solution: nodes decide their own alerts, and the gateway
+"""Gateway node entry point, edge-based solution (uv run prod-edge-gateway): nodes decide their own alerts, and the gateway
 decides what needs several nodes' data (core.py). It reaches the nodes through the ESP8266 LoRa
 modem (hal/gate_hal.py), or over the network to nodes without radio hardware (hal/udp.py), or
 both. It publishes what it hears and decides over MQTT (comms/), sends snapshots to the dashboard
-(dashboard_link.py), and passes on an operator's orders to nodes (order.py).
+(dashboard_link.py), and passes on an operator's orders to nodes (order.py, and the dashboard's
+reopen button). It has no sensors: it works from what the nodes send.
 
+    uv run prod-edge-gateway --keys gateway_keys.json --data gateway-data --port /dev/ttyUSB0
     python3 -m gateway.edge_based --keys gateway_keys.json --data gateway-data --port /dev/ttyUSB0
     python3 -m gateway.edge_based ... --mqtt-host 127.0.0.1 --mqtt-user gateway    # password: MQTT_PASSWORD
 
@@ -24,7 +26,7 @@ import time
 from dashboard.shipper import DashboardShipper
 from gateway import order
 from gateway.core import Gateway
-from gateway.dashboard_link import DashboardFeed
+from gateway.dashboard_link import DashboardCommands, DashboardFeed
 from gateway.topology import BUILDING_B, Topology
 from hal.gate_hal import open_radio
 from hal.packet import add_names, load_keys
@@ -147,10 +149,17 @@ def main(argv=None):
 
     feed = None
     if a.dashboard_url:
+        gateway_id = a.dashboard_id or f"building-{building}"
+        token = os.environ.get("AQUA_DASHBOARD_TOKEN", "")
         shipper = DashboardShipper(a.dashboard_url, os.path.join(a.data, "dashboard-outbox"),
-                                   gateway_id=a.dashboard_id or f"building-{building}", mode="edge",
-                                   auth_token=os.environ.get("AQUA_DASHBOARD_TOKEN", ""))
-        feed = DashboardFeed(gateway, shipper).start()
+                                   gateway_id=gateway_id, mode="edge", auth_token=token)
+        try:
+            commands = DashboardCommands(a.dashboard_url, gateway_id, token,
+                                         os.path.join(a.data, "dashboard-commands.json"))
+        except ValueError as e:
+            commands = None
+            print(f"gateway: no reopen requests from the dashboard: {e}")
+        feed = DashboardFeed(gateway, shipper, commands=commands).start()
 
     stop = threading.Event()
     for sig in (signal.SIGINT, signal.SIGTERM):         # Ctrl-C and `docker stop`

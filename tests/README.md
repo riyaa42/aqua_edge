@@ -9,6 +9,7 @@
 | `test_comms.py` | Dev / CI | `comms/` with real nodes and a real gateway, a fake radio and fake MQTT objects, and the tables and examples in `comms/README.md`. No broker or `paho-mqtt` |
 | `test_gateway_server.py` | Dev / CI | `gateway/edge_based.py` with a fake radio and fake MQTT connection, and checks on the Docker Compose files. No hardware or Docker |
 | `test_small_buildings.py` | Dev / CI | One-node (tank or flat) and four-node trees with custom names: real nodes and gateway with encrypted packets over a fake radio, radio numbers, and both programs started with `--tree` |
+| `test_gateway_edge.py` | Dev / CI | The gateway node: bad readings, levels and expected lights, the dashboard's valve reopen requests (tokens, expiry, lost answers, restarts) with the real server, and from reopen request to open valve with the real gateway and node programs |
 | `test_dashboard_link.py` | Dev / CI | `gateway/dashboard_link.py` with a real gateway, shipper and dashboard server on this computer: outage, restart, a server that never answers, a full disk, and the gateway program with `--dashboard-url`. The dashboard's own tests are in `../dashboard/tests/` |
 | `offline_radio.py` | Tests | Lets a fake radio with no airtime deliver replies within one step. Also used by the `detection/` tests |
 

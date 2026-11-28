@@ -8,9 +8,22 @@ import queue
 import sqlite3
 import threading
 import time
+import uuid
+
+REQUEST_TTL_S = 120     # a reopen request the gateway has not collected in this long expires
 
 SCHEMA_SQL = """
 PRAGMA foreign_keys = ON;
+
+CREATE TABLE IF NOT EXISTS valve_requests (
+    id TEXT PRIMARY KEY,
+    gateway_id TEXT NOT NULL,
+    node TEXT NOT NULL,
+    requested_at_utc REAL NOT NULL,
+    status TEXT NOT NULL,
+    detail TEXT,
+    updated_at_utc REAL NOT NULL
+);
 
 CREATE TABLE IF NOT EXISTS frames (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -442,6 +455,64 @@ class DashboardStore:
             "snapshot": json.loads(row["snapshot_json"]),
             "new_events": json.loads(row["new_events_json"]),
         }
+
+    # --- manual valve reopen requests ---
+    def _expire_requests(self, now):
+        self.conn.execute(
+            "UPDATE valve_requests SET status = 'expired', detail = 'not collected by the gateway in time', "
+            "updated_at_utc = ? WHERE status = 'pending' AND requested_at_utc < ?", (now, now - REQUEST_TTL_S))
+        self.conn.commit()
+
+    @staticmethod
+    def _request(row):
+        return {**dict(row), "expires_at_utc": row["requested_at_utc"] + REQUEST_TTL_S}
+
+    def request_reopen(self, gateway_id, node, now=None):
+        """A new pending request, or the one already waiting for this valve."""
+        now = float(time.time() if now is None else now)
+        with self._lock:
+            self._expire_requests(now)
+            find = "SELECT * FROM valve_requests WHERE gateway_id = ? AND node = ? AND status = 'pending'"
+            row = self.conn.execute(find, (gateway_id, node)).fetchone()
+            if row is None:
+                self.conn.execute("INSERT INTO valve_requests VALUES (?, ?, ?, ?, 'pending', NULL, ?)",
+                                  (uuid.uuid4().hex, gateway_id, node, now, now))
+                self.conn.commit()
+                row = self.conn.execute(find, (gateway_id, node)).fetchone()
+            return self._request(row)
+
+    def pending_requests(self, gateway_id, now=None):
+        now = float(time.time() if now is None else now)
+        with self._lock:
+            self._expire_requests(now)
+            rows = self.conn.execute(
+                "SELECT * FROM valve_requests WHERE gateway_id = ? AND status = 'pending' "
+                "ORDER BY requested_at_utc LIMIT 50", (gateway_id,)).fetchall()
+            return [self._request(r) for r in rows]
+
+    def answer_request(self, gateway_id, request_id, status, detail=None, now=None):
+        """What the gateway did with a request. It knows best, so this also replaces "expired"
+        (its answer was late); an earlier answer stays. None: no such request."""
+        now = float(time.time() if now is None else now)
+        with self._lock:
+            self.conn.execute(
+                "UPDATE valve_requests SET status = ?, detail = ?, updated_at_utc = ? "
+                "WHERE id = ? AND gateway_id = ? AND status IN ('pending', 'expired')",
+                (status, detail, now, request_id, gateway_id))
+            self.conn.commit()
+            row = self.conn.execute("SELECT * FROM valve_requests WHERE id = ? AND gateway_id = ?",
+                                    (request_id, gateway_id)).fetchone()
+            return self._request(row) if row else None
+
+    def latest_requests(self, gateway_id, now=None):
+        """node -> its newest request."""
+        now = float(time.time() if now is None else now)
+        with self._lock:
+            self._expire_requests(now)
+            rows = self.conn.execute(
+                "SELECT * FROM valve_requests WHERE gateway_id = ? ORDER BY requested_at_utc, rowid",
+                (gateway_id,)).fetchall()
+            return {r["node"]: self._request(r) for r in rows}
 
     def list_gateways(self):
         with self._lock:

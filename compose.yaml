@@ -71,6 +71,7 @@ services:
               "--timeout-graceful-shutdown", "3"]
     environment:
       AQUA_DASHBOARD_TOKEN: ${AQUA_DASHBOARD_TOKEN:?set it in .env}
+      AQUA_OPERATOR_TOKEN: ${AQUA_OPERATOR_TOKEN:-}          # empty: the valve reopen button is off
       AQUA_DASHBOARD_DB: /data/dashboard.db
       AQUA_TOPOLOGY_PATH: /run/config/tree.json
       AQUA_ENABLE_OUTAGE_SIM: ${AQUA_ENABLE_OUTAGE_SIM:-0}    # 1 for outage demos

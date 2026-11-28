@@ -10,6 +10,9 @@
 |---|---|---|
 | `POST` | `/api/v1/ingest` | Ingest 1 live frame or a bounded batch of up to 50 buffered frames |
 | `GET` | `/api/v1/health` | Lightweight health & backhaul reachability check (`200 OK`) |
+| `POST` | `/api/v1/valves/reopen` | The dashboard's **reopen valve button** ([section 7](#7-manual-valve-reopen)) |
+| `GET` | `/api/v1/valves` | Each valve's reported state and latest reopen request ([section 7](#7-manual-valve-reopen)) |
+| `GET`, `POST` | `/api/v1/gateway/commands`, `.../ack` | The gateway collects and answers reopen requests ([section 7](#7-manual-valve-reopen)) |
 
 ---
 
@@ -208,3 +211,84 @@ shipper = DashboardShipper(
 # After gw.step():
 shipper.publish(gw.snapshot(), new_events=new_events)
 ```
+
+---
+
+## 7. Manual valve reopen
+
+The button calls the dashboard server. The server never connects to the gateway: the gateway asks it for waiting requests about every 3 s.
+
+```
+button -> POST /valves/reopen          (status "pending")
+gateway -> GET /gateway/commands       collects it, sends the node a signed VALVE_OPEN order
+gateway -> POST /gateway/commands/ack  (status "sent" or "rejected")
+node -> gateway -> next snapshot       nodes[name].valve becomes "open"
+```
+
+**A reopen opens the valve even while an alert is still active.** The node's light stays red, and a new alert, or one confirmed again, can close the valve again. Ask the operator to confirm, and show the node's `light` and active incidents beside the button.
+
+### For the button
+
+`POST /api/v1/valves/reopen` with `Authorization: Bearer <AQUA_OPERATOR_TOKEN>`:
+
+```json
+{"gateway_id": "building-B", "node": "B-203"}
+```
+
+`202 Accepted`:
+
+```json
+{"ok": true, "request": {"id": "9f1c...", "gateway_id": "building-B", "node": "B-203", "status": "pending",
+  "detail": null, "requested_at_utc": 1764289200.5, "updated_at_utc": 1764289200.5, "expires_at_utc": 1764289320.5}}
+```
+
+Asking again while a request for that valve is `pending` returns the same request.
+
+| Status | Condition |
+|---|---|
+| `400` | Body is not `{"gateway_id": "...", "node": "..."}` |
+| `401` | Missing or wrong operator token |
+| `403` | Reopening is off: `AQUA_OPERATOR_TOKEN` is unset, or the same as the gateway's token |
+| `404` | The gateway has sent nothing, or its newest snapshot has no such node |
+
+**The operator token is separate from the gateway's**, which must never be put in a web page. Do not build it into the page's files: ask the operator for it.
+
+`GET /api/v1/valves?gateway_id=building-B` (no token, like other reads; without `gateway_id`, the gateway that sent last):
+
+```json
+{"ok": true, "gateway_id": "building-B", "reopen_enabled": true, "snapshot_received_at_utc": 1764289201.1,
+ "valves": {"B-203": {"state": "closed", "request": null}}}
+```
+
+`state` is what the node last reported: `"closed"`, `"open"`, `"fault"` or `null` (never reported).
+
+| Request status | Meaning |
+|---|---|
+| `pending` | Waiting for the gateway. It expires after 120 s |
+| `sent` | The gateway queued the order for the node. **Not proof the valve opened:** wait for `state` to become `"open"` |
+| `rejected` | The gateway refused it; `detail` says why |
+| `expired` | The gateway did not collect it in time. If its answer arrives late, the status becomes that answer |
+
+A `sent` order the node has not confirmed within 15 minutes of the click is dropped: the next snapshots carry an `ORDER_EXPIRED` event in `new_events`. A node ignores an order older than its last valve change, so a closing after the click wins. There is no "close" endpoint.
+
+### For the gateway
+
+Both use the gateway's token (`AQUA_DASHBOARD_TOKEN`), and answer `503` during a simulated outage.
+
+- `GET /api/v1/gateway/commands?gateway_id=` → `{"ok": true, "commands": [{"id": "9f1c...", "node": "B-203", "command": "VALVE_OPEN", "age_s": 1.4}]}`. `age_s` is how long ago it was asked for, so the two computers need not share a clock.
+- `POST /api/v1/gateway/commands/ack` with `{"gateway_id", "id", "result": "sent" | "rejected", "detail"?}`. The first answer stays. `404`: no such request.
+
+**Trust:** the gateway opens valves on this server's say, so point it only at a server you control, and use `https` across a network.
+
+---
+
+## 8. Flags added to the snapshot
+
+These follow [`../planning/valve_spec.md`](../planning/valve_spec.md). They are extra fields; the others are unchanged.
+
+| Field | Meaning |
+|---|---|
+| `level` on `maintenance_queue`, `active_incidents`, `incident_history` items and on events in `new_events` | `"ALERT"` (red), `"WARNING"` (yellow) or `"INFO"`. A silent node and a wrong clock are warnings |
+| `nodes[name].light` | `{"colour": "red", "blinks": 2, "pattern": "R2"}`; patterns `R1`, `R2`, `Y1`, `Y2`, `G`. `null` for a silent node. It is the light **expected** from what the gateway knows: it cannot see a node's own delivery or sensor warnings (so `G` may really be yellow, and `Y1` is never reported) |
+
+New events: `BAD_READING` (`node`, `fields`: readings left out because they could not be true) and `ORDER_EXPIRED` (`node`, `order`).
