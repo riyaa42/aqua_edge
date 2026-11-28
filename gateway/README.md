@@ -166,7 +166,7 @@ Nodes act by themselves on local anomalies (their own valve, buzzer and LED at o
 
 The spot is decided once, when the pipe leak is first raised. It is an estimate: if the real leak is just above the suspected junction, the floor above is not alerted, and isolating it may need the next valve up. When the spot is unknown, which in tests includes medium (0.5 L/s) pipe leaks, no flat gets the pipe leak alert; a flat with its own pressure alert is still told the likely cause (last row).
 
-Silent nodes, clock errors and new/repeat labels are only recorded. A node acts on each command once, even after a reboot. **These cross-node problems are red:** the node blinks R2, sounds the buzzer, **closes its valve** and calls `hal.on_gateway_alert(code, active)` ([rules](../edge/README.md#notification-levels-and-the-valve)). When the gateway ends a problem the light and buzzer follow, but **the valve stays shut** until it is [reopened by hand](#orders-to-a-node). A pipe leak that cannot be placed therefore shuts the tank valve, and so the whole building's water. A problem that started and ended before it could be delivered still arrives, marked over, and raises no continuing alarm. A node that is off cannot be reached until it returns.
+Silent nodes, clock errors and new/repeat labels are only recorded. A node acts on each command once, even after a reboot. **These cross-node problems are red:** the node blinks R2, sounds the buzzer, **closes its valve** and calls `hal.on_gateway_alert(code, active)` ([rules](../edge/README.md#notification-levels-and-the-valve)). When the gateway ends a problem the light and buzzer follow, and the valve [reopens after the node's tolerance period](../edge/README.md#when-the-valve-reopens) if nothing else holds it, or at once by an [operator's order](#orders-to-a-node). A flat with [trial reopening](../edge/README.md#trial-reopening-flats) on may also open while red for its own alerts, but not while a gateway problem is in force. A pipe leak that cannot be placed therefore shuts the tank valve, and so the whole building's water. A problem that started and ended before it could be delivered still arrives, marked over, and raises no continuing alarm. A node that is off cannot be reached until it returns.
 
 The beacon is signed with a building-wide key (`hal.key("GATEWAY")`). It only makes nodes send and never deletes data.
 
@@ -181,11 +181,11 @@ docker compose exec gateway python -m gateway.order B-203 valve-open --data /dat
 
 | Order | The node |
 |---|---|
-| `valve-close` | Closes its valve, red LED, buzzer |
-| `valve-open` | The reopen signal: opens its valve. Apart from a command at the node, the only way a closed valve reopens |
-| `led-on` / `led-off` | Turns the ordered red LED and buzzer on or off. Red closes the valve, so **`led-on` closes it too**, and `led-off` does not reopen it. `led-off` does not hide any other red condition |
+| `valve-close` | Closes its valve, red LED, buzzer. It stays shut until reopened by hand |
+| `valve-open` | The reopen signal: opens its valve at once, whatever the conditions |
+| `led-on` / `led-off` | Turns the ordered red LED and buzzer on or off. Red closes the valve, so **`led-on` closes it too**; after `led-off` it reopens once the [tolerance period](../edge/README.md#when-the-valve-reopens) has passed. `led-off` does not hide any other red condition |
 
-- The command only leaves a request in the gateway's data folder, so only someone who can write there can order anything. No port takes orders, and MQTT stays read-only. **The gateway sends these orders only when an operator asks**, and never reopens a valve itself. The problems it finds are [sent separately](#gateway-alerts-sent-to-nodes) and do close valves.
+- The command only leaves a request in the gateway's data folder, so only someone who can write there can order anything. No port takes orders, and MQTT stays read-only. **The gateway sends these orders only when an operator asks.** The problems it finds are [sent separately](#gateway-alerts-sent-to-nodes) and do close valves.
 - Orders are signed with the node's key, repeated until confirmed and kept across restarts. A newer order replaces an undelivered opposite one. A node ignores an order older than its last valve or LED change, including a reopening at the node.
 - Confirmation only means the node received it. What the valve did comes back as `VALVE_CLOSED`, `VALVE_OPENED` or `VALVE_FAULT` (an incident). `Gateway.snapshot()` shows each node's `valve`; the web page does not display it yet.
 - **Update the gateway before the nodes:** an older gateway rejects the new packet names.

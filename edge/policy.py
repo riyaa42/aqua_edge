@@ -2,7 +2,9 @@
 valve. THE ONE PLACE to change them; change the spec with it.
 
     ALERT    red: close the node's valve, intermittent buzzer. Whether the node or the gateway
-             found it. The valve is only ever REOPENED BY HAND (this overrides the spec's section 7)
+             found it. It reopens by hand, or by itself after a tolerance period of normal
+             readings once its conditions are over (aqua_edge.py, reopen_when_normal). A flat can also
+             be set to try reopening while still red (try_reopening; off by default)
     WARNING  yellow: valve left as it is, no buzzer
     INFO     does not light anything: green unless something else is going on
 

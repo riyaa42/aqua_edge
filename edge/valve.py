@@ -1,10 +1,11 @@
-"""Reopen a node's valve from the node itself, once the problem has been dealt with:
+"""Reopen a node's valve by hand, from the node itself:
 
     python3 -m edge.valve open --sd <the node's --sd folder>
     docker compose exec node-b203 python -m edge.valve open --sd /data      # in a container
 
 This leaves a request in that folder, which the running node carries out at once (or when it next
-starts). The gateway can order it too (gateway/order.py). These two are the only ways a valve reopens.
+starts). The gateway can order it too (gateway/order.py). A node also reopens by itself once its alerts have been over for the tolerance period,
+and a flat can be set to try reopening (aqua_edge.py); these two work at once.
 """
 import argparse
 import os

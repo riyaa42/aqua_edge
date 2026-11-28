@@ -16,7 +16,8 @@ import time
 
 from edge import policy
 from edge.actuators import BUZZER_PIN, LED_PINS, PATTERNS, STEP_S, VALVE_PIN, GpioActuators
-from edge.aqua_edge import (DAY, HOUR, MAX_SUMMARIES, STALE_S, STUCK_S, FlatNode, Store, TankNode,
+from edge.aqua_edge import (DAY, HOUR, MAX_SUMMARIES, REOPEN_AFTER_S, STALE_S, STUCK_S, TRIAL_AFTER_S,
+                            TRIAL_QUIET, TRIAL_RETRY_S, TRIAL_TRIES, TRIAL_WINDOW, FlatNode, Store, TankNode,
                             saved_sample_time)
 from edge.board import NodeBoard
 from edge.edge_based import prime, run
@@ -244,7 +245,7 @@ def check_every_local_alert_is_red_and_closes():
     for number, name in enumerate(SPEC_GATEWAY, 1):             # told by the gateway: the same
         node, hal = make("B-101")
         command(node, name, 100, number)
-        assert node.valve == {"closed": True, "why": name, "fault": False} and hal.is_closed, name
+        assert node.valve == {"closed": True, "why": name, "fault": False, "hold": [name]} and hal.is_closed, name
         assert light(node) == ("red", 2) and hal.buzzed == [name], (name, light(node), hal.buzzed)
     for name in ("SUPPLY_LOW", "VALVE_FAULT", "SOMETHING_NEW"):     # not in the spec: never closes
         node, hal = make("B-101")
@@ -379,10 +380,174 @@ def check_flat_valve():
     assert light(node) == ("green", 0), (node.active(), light(node))
 
 
+def shut_for_leak(folder=None, trials=True):
+    """A flat that has learned a quiet day and shut itself on a night leak."""
+    node, hal = make("B-101", folder)
+    node.trial_reopen = trials
+    replay(node, [(60 * i, {"flow_lps": 0.0, "pressure_m": 10.0}) for i in range(24 * 60)])
+    leaking(node, DAY + HOUR, 60)
+    assert node.valve["closed"] and node.valve["hold"] == ["LEAK_NIGHT_FLOW"]
+    return node, hal
+
+
+DRIP = 0.04       # a small leak: too little for the high-use check
+
+
+def until_open(node, flow=DRIP, limit=30 * 60):
+    """Readings, one a minute, until the valve opens. The (sample) time it did, or None."""
+    for _ in range(limit):
+        leaking(node, node.hal.t + 60, 1, flow=flow)
+        if not node.valve["closed"]:
+            return node.hal.t
+
+
+def flows(node, flow, n):
+    return leaking(node, node.hal.t + 60, n, flow=flow)
+
+
+def check_trial_reopening():
+    assert (TRIAL_AFTER_S, TRIAL_RETRY_S, TRIAL_TRIES, TRIAL_WINDOW, TRIAL_QUIET) == (6 * HOUR, 12 * HOUR, 2, 60, 10)
+    node, hal = shut_for_leak(trials=False)                     # off unless asked for
+    assert not FlatNode("B-102", Hal("B-102")).trial_reopen and until_open(node) is None
+
+    # fails: the water never stops. Twice, then only a person can reopen
+    node, hal = shut_for_leak()
+    shut_at = node.valve["shut_at"]
+    opened = until_open(node)
+    assert opened - shut_at == TRIAL_AFTER_S and node.trial["run"] and not hal.is_closed
+    assert light(node)[0] == "red", "open on trial, the problem not yet over"
+    got = flows(node, DRIP, TRIAL_WINDOW - 1)
+    assert not node.valve["closed"] and "VALVE_CLOSED" not in got
+    got = flows(node, DRIP, 1)
+    assert got == ["VALVE_CLOSED"] and node.valve["closed"] and hal.is_closed and node.trial == {"failed": 1, "run": None}
+    assert node.valve["hold"] == ["LEAK_NIGHT_FLOW"] and "LEAK_NIGHT_FLOW" in node.open and light(node)[0] == "red"
+    flows(node, DRIP, 1)
+    again = node.valve["shut_at"]
+    opened = until_open(node)
+    assert opened - again == TRIAL_RETRY_S, (opened - again) / HOUR
+    flows(node, DRIP, TRIAL_WINDOW)
+    assert node.valve["closed"] and node.trial["failed"] == 2
+    assert until_open(node, limit=48 * 60) is None and node.valve["closed"]
+    node.open_valve()                                           # by hand: a new series
+    assert not node.valve["closed"] and node.trial == {"failed": 0, "run": None}
+
+    # a usage alert confirmed again during the trial fails it too, and then it holds the valve as well
+    node, hal = shut_for_leak()
+    until_open(node)
+    got = flows(node, 0.2, TRIAL_WINDOW)
+    assert "ABNORMAL_CONSUMPTION" in got and node.valve["closed"] and node.trial == {"failed": 1, "run": None}
+    assert set(node.valve["hold"]) == {"LEAK_NIGHT_FLOW", "ABNORMAL_CONSUMPTION"}, node.valve
+
+    # nine quiet minutes are not ten: the last reading of the window decides
+    node, hal = shut_for_leak()
+    until_open(node)
+    for _ in range(6):
+        flows(node, 0.0, TRIAL_QUIET - 1)
+        flows(node, DRIP, 1)
+    assert node.valve["closed"] and node.trial["failed"] == 1
+
+    # passes: the water stops. Stays open, the leak is reported over, and a new one is caught
+    node, hal = shut_for_leak()
+    node.trial["failed"] = 1
+    until_open(node)
+    flows(node, DRIP, 15)
+    got = flows(node, 0.0, TRIAL_QUIET)
+    assert not node.valve["closed"] and node.trial == {"failed": 0, "run": None} and "FLAT_LEAK_CLEARED" in got, got
+    assert "VALVE_CLOSED" not in flows(node, 0.0, 5 * 60) and not node.valve["closed"]
+    got = leaking(node, 3 * DAY + HOUR, 40)
+    assert "VALVE_CLOSED" in got and node.valve["closed"] and node.trial == {"failed": 0, "run": None}, got
+
+    # a missing reading fails it
+    node, hal = shut_for_leak()
+    until_open(node)
+    replay(node, [(hal.t + 60, {"flow_lps": 0.0})])
+    assert node.valve["closed"] and node.trial["failed"] == 1
+
+    # so do readings that stop, noticed by the radio loop alone
+    node, hal = shut_for_leak()
+    until_open(node)
+    hal.t += STALE_S
+    node.radio_poll()
+    assert not node.valve["closed"]
+    hal.t += 1
+    node.radio_poll()
+    assert node.valve["closed"] and node.trial["failed"] == 1
+
+    # a restart: shut, never driven open on the way, and counted
+    folder = tempfile.mkdtemp()
+    node, hal = shut_for_leak(folder)
+    until_open(node)
+    flows(node, 0.0, 3)
+    node, hal = make("B-101", folder)                           # trials need not be on any more
+    assert node.valve["closed"] and hal.is_closed and all(hal.moves) and node.trial == {"failed": 1, "run": None}
+    assert node.valve["hold"] == ["LEAK_NIGHT_FLOW"] and "LEAK_NIGHT_FLOW" in node.open
+    node, hal = make("B-101", folder)                           # counted once, and remembered
+    assert node.trial["failed"] == 1
+
+    # the wait goes on across a restart
+    folder = tempfile.mkdtemp()
+    node, hal = shut_for_leak(folder)
+    shut_at, t = node.valve["shut_at"], node.hal.t
+    node, hal = make("B-101", folder)
+    node.trial_reopen, hal.t = True, t
+    assert until_open(node) - shut_at == TRIAL_AFTER_S
+
+    # the gateway during a trial: a problem or an order to close shuts it at once
+    for code in ("PIPE_LEAK", "ALERT_LED_ON", "VALVE_CLOSE"):
+        node, hal = shut_for_leak()
+        until_open(node)
+        command(node, code, hal.now(), 1)
+        assert node.valve["closed"] and node.trial == {"failed": 1, "run": None}, code
+        assert until_open(node) is None, code                   # excluded while that lasts
+    # its order to open during a trial is a person taking over: no more trial
+    node, hal = shut_for_leak()
+    node.trial["failed"] = 1
+    node.valve["shut_at"] -= DAY
+    until_open(node)
+    flows(node, DRIP, 40)
+    command(node, "VALVE_OPEN", hal.now() + 5, 1)
+    assert not node.valve["closed"] and node.trial == {"failed": 0, "run": None}
+    assert "VALVE_CLOSED" not in flows(node, DRIP, 25) and not node.valve["closed"]
+
+    # not tried: a gateway problem (until it ends), an operator's order, a stuck valve, missing readings
+    node, hal = shut_for_leak()
+    command(node, "PIPE_LEAK", node.valve_changed + 10, 1)
+    assert until_open(node) is None
+    command(node, "PIPE_LEAK_CLEARED", hal.now(), 2)
+    assert until_open(node, limit=2) is not None                # the six hours have long passed
+    node, hal = shut_for_leak()
+    command(node, "VALVE_CLOSE", node.valve_changed + 10, 1)
+    assert until_open(node) is None
+    node, hal = shut_for_leak()
+    node.valve["fault"] = hal.stuck = True
+    hal.is_closed = False                                       # it never shut: the water still runs
+    assert until_open(node) is None and node.valve["fault"] and not node.trial["run"]
+    node, hal = shut_for_leak()
+    replay(node, [(hal.t + 60 * i, {"flow_lps": DRIP}) for i in range(1, 8 * 60)])
+    assert node.valve["closed"] and not node.trial["run"]
+    node, hal = make("B-101")                                   # shut by the gateway alone
+    node.trial_reopen = True
+    command(node, "PIPE_LEAK", 100, 1)
+    assert until_open(node) is None
+
+    # nor the tank, even for an alert of a kind a flat could try
+    node, hal = shut_on_bad_water()
+    node.trial_reopen = True
+    spell(node, 600, BAD, 8 * 60)
+    assert node.valve["closed"] and not node.trial["run"]
+
+    # a valve that will not open for the trial
+    node, hal = shut_for_leak()
+    hal.stuck = True
+    node.valve["shut_at"] -= DAY
+    got = flows(node, DRIP, 1)
+    assert "VALVE_FAULT" in got and node.valve["closed"] and node.trial == {"failed": 1, "run": None}, got
+
+
 def check_gateway_orders_and_faults():
     node, hal = make("B-101")
     command(node, "VALVE_CLOSE", 100, 1)
-    assert node.valve == {"closed": True, "why": "gateway", "fault": False} and hal.buzzed == ["VALVE_CLOSE"]
+    assert node.valve == {"closed": True, "why": "gateway", "fault": False, "hold": []} and hal.buzzed == ["VALVE_CLOSE"]
     command(node, "VALVE_CLOSE", 100, 1)            # repeated until confirmed: acted on once
     assert hal.moves.count(True) == 1
     command(node, "VALVE_OPEN", 200, 2)
@@ -453,36 +618,162 @@ def check_tank_valve():
     assert node.valve["closed"] and names.count("QUALITY_LIMIT_VIOLATION") == 1, names
     replay(node, [(4200 + 60 * i, good) for i in range(15)])
     assert "QUALITY_CLEARED" in [a for _, a in raised] and node.valve["closed"]
-    # while shut, a still outflow is not judged
+    # while shut, a still outflow is not judged (a long tolerance keeps it shut for this)
+    node.reopen_after_s = DAY
     replay(node, [(DAY + 60 * i, {**good, "outflow_lps": 3.0}) for i in range(60)])
     assert "ABNORMAL_SUPPLY" not in [a for _, a in raised] and node.acc.get("vol_l", 0) == 0
 
 
-def check_only_a_hand_reopens():
-    good = {"outflow_lps": 0.1, "inflow_lps": 0.0, "level_m": 1.5, "ph": 7.2, "tds_ppm": 250.0,
-            "turbidity_ntu": 0.5, "temp_c": 25.0}
-    bad = {**good, "tds_ppm": 900.0, "ph": 9.4}
-    spell = lambda node, start, r, n=30: replay(node, [(start + 60 * i, r) for i in range(n)])
+GOOD = {"outflow_lps": 0.1, "inflow_lps": 0.0, "level_m": 1.5, "ph": 7.2, "tds_ppm": 250.0,
+        "turbidity_ntu": 0.5, "temp_c": 25.0}
+BAD = {**GOOD, "tds_ppm": 900.0, "ph": 9.4}
+
+
+def spell(node, start, r, n):
+    replay(node, [(start + 60 * i, r) for i in range(n)])
+
+
+def shut_on_bad_water(folder=None, tolerance=600):
+    node, hal = make("B-TANK", folder)
+    node.reopen_after_s = tolerance
+    spell(node, 0, BAD, 10)
+    assert node.valve["closed"] and node.valve["why"] in SPEC_R1 and node.valve["hold"]
+    return node, hal
+
+
+def check_reopens_after_the_tolerance():
+    assert REOPEN_AFTER_S == 1800
+    node, hal = shut_on_bad_water(tolerance=REOPEN_AFTER_S)
+    raised = events(node)
+    spell(node, 600, GOOD, 60)
+    at = {name: t for t, name in raised}
+    assert not node.valve["closed"] and not hal.is_closed and node.valve["why"] == "recovered", node.valve
+    # 30 normal readings, the one with the recovery message the first of them
+    assert at["VALVE_OPENED"] - at["QUALITY_CLEARED"] == REOPEN_AFTER_S - 60, at
+    assert [name for _, name in raised] == ["QUALITY_CLEARED", "VALVE_OPENED"]
+
+    # anything not normal starts the whole period again
+    for interruption in ({}, {k: v for k, v in GOOD.items() if k != "temp_c"}):      # readings missing
+        node, hal = shut_on_bad_water()
+        while node.valve["hold"]:
+            spell(node, hal.t + 60, GOOD, 1)
+        spell(node, hal.t + 60, GOOD, 7)
+        assert node.valve["closed"] and node.calm == 8
+        spell(node, hal.t + 60, interruption, 1)
+        assert node.calm == 0
+        spell(node, hal.t + 60, GOOD, 9)
+        assert node.valve["closed"]
+        spell(node, hal.t + 60, GOOD, 1)
+        assert not node.valve["closed"]
+
+    # the same reading again, or no reading at all, does not count: only new ones
+    node, hal = shut_on_bad_water()
+    while node.valve["hold"]:
+        spell(node, hal.t + 60, GOOD, 1)
+    calm = node.calm
+    for _ in range(30):
+        node.step()
+    hal.t += DAY
+    node.radio_poll()
+    assert node.valve["closed"] and node.calm == calm
+
+    # water bad again during the wait: held again, and a new period after that recovery
+    node, hal = shut_on_bad_water()
+    spell(node, 600, GOOD, 18)
+    assert node.valve["closed"] and not node.valve["hold"]
+    spell(node, hal.t + 60, BAD, 10)
+    assert node.valve["closed"] and node.valve["hold"] and node.calm == 0
+    spell(node, hal.t + 60, GOOD, 40)
+    assert not node.valve["closed"]
+
+    # a restart in the wait: the period starts again, and what holds the valve is remembered
+    folder = tempfile.mkdtemp()
+    node, hal = shut_on_bad_water(folder)
+    spell(node, 600, GOOD, 18)
+    node.save_state()
+    node, hal = make("B-TANK", folder)
+    node.reopen_after_s = 600
+    spell(node, 1700, GOOD, 9)
+    assert node.valve["closed"] and node.calm == 9
+    spell(node, hal.t + 60, GOOD, 1)
+    assert not node.valve["closed"]
+
+    # a second condition has to end too; here it cannot be judged while shut
+    node, hal = shut_on_bad_water()
+    node.alert("ABNORMAL_SUPPLY")
+    assert "ABNORMAL_SUPPLY" in node.valve["hold"]
+    spell(node, 600, GOOD, 90)
+    assert node.valve["closed"] and node.valve["hold"] == ["ABNORMAL_SUPPLY"]
+
+    # a gateway problem holds it until the gateway ends it, then the wait, also across a restart
     folder = tempfile.mkdtemp()
     node, hal = make("B-TANK", folder)
-    spell(node, 0, bad, 10)
-    assert node.valve["closed"] and node.valve["why"] in SPEC_R1
-    spell(node, 600, good)                              # recovered, and the gateway ends its problems
-    command(node, "SUPPLY_EVENT", node.valve_changed + 10, 1)
-    for number, ended in enumerate(("SUPPLY_CLEARED", "PIPE_LEAK_CLEARED", "PIPE_LEAK_CAUSE_CLEARED"), 2):
-        command(node, ended, node.valve_changed + 500, number)
-    hal.inbox.append(pack({"k": "ACK", "n": "B-TANK", "s": node.store.queue[0]["s"], "gt": 1}, sim_key("B-TANK")))
-    hal.t += 5 * DAY
-    node.radio_poll()
+    command(node, "SUPPLY_EVENT", 500, 1)
+    node.reopen_after_s = 600
+    spell(node, 600, GOOD, 60)
+    assert node.valve["closed"] and node.valve["hold"] == ["SUPPLY_EVENT"]
+    command(node, "SUPPLY_CLEARED", hal.t, 2)
     node.save_state()
-    node, hal = make("B-TANK", folder)                  # silence, a restart, lost learning
-    spell(node, 3000, good)
+    node, hal = make("B-TANK", folder)
+    node.reopen_after_s = 600
+    spell(node, 6000, GOOD, 9)
+    assert node.valve["closed"]
+    spell(node, 6540, GOOD, 1)
+    assert not node.valve["closed"]
+
+    # one supply state replacing another: only the one in force holds
+    node, hal = make("B-TANK")
+    command(node, "SUPPLY_UNCERTAIN", 100, 1)
+    command(node, "LEAK_TANK_DRAIN", 200, 2)
+    assert node.valve["hold"] == ["LEAK_TANK_DRAIN"]
+
+    # the alert-LED order is a red condition: ending it starts the wait
+    node, hal = make("B-101")
+    node.reopen_after_s = 300
+    command(node, "ALERT_LED_ON", 100, 1)
+    spell(node, 200, dict(FINE), 20)
+    assert node.valve["closed"]
+    command(node, "ALERT_LED_OFF", node.led_changed + 50, 2)
+    spell(node, 5000, dict(FINE), 5)
+    assert not node.valve["closed"]
+
+    # it reopened by itself: a gateway problem decided before that, heard late, still closes it,
+    # and so does an order to close sent before it
+    for number, code in ((3, "PIPE_LEAK"), (4, "VALVE_CLOSE")):
+        node, hal = shut_on_bad_water()
+        hal.t = 600
+        spell(node, 600, GOOD, 40)
+        assert not node.valve["closed"] and node.valve_changed > 700
+        command(node, code, 700, number)
+        assert node.valve["closed"], code
+
+    node, hal = shut_on_bad_water(tolerance=0)                # no tolerance: at the first normal reading
+    while node.valve.get("hold"):
+        spell(node, hal.t + 60, GOOD, 1)
+    assert not node.valve["closed"]
+
+
+def check_only_a_hand_reopens():
+    # no recovery message: never, however long, also when what was learned is lost
+    folder = tempfile.mkdtemp()
+    node, hal = shut_on_bad_water(folder)
     os.remove(os.path.join(folder, "B-TANK_state.json"))
     node, hal = make("B-TANK", folder)
-    spell(node, 9000, {}, 5)
-    assert node.valve["closed"] and hal.moves == [True] and not node.remote
-    command(node, "VALVE_OPEN", node.valve_changed + 10, 9)
+    node.reopen_after_s = 600
+    spell(node, 9000, GOOD, 120)
+    assert node.valve["closed"] and node.valve["hold"], "nothing said the water is good again"
+    command(node, "VALVE_OPEN", node.valve_changed + 10, 9)         # the gateway's reopen signal
     assert not node.valve["closed"] and hal.moves[-1] is False
+
+    # an operator's order to close: only a person undoes it, whether it came before or after an alert
+    for alert_first in (False, True):
+        node, hal = shut_on_bad_water() if alert_first else make("B-TANK")
+        node.reopen_after_s = 600
+        command(node, "VALVE_CLOSE", node.valve_changed + 10 if alert_first else 100, 1)
+        spell(node, 600, GOOD, 120)
+        assert node.valve["closed"] and node.valve["why"] == "gateway" and light(node)[0] == "red"
+        command(node, "VALVE_OPEN", node.valve_changed + 10, 2)
+        assert not node.valve["closed"]
 
     # the gateway's problem and its reopen signal, in either order
     node, hal = make("B-101")
@@ -608,7 +899,7 @@ def check_gateway_problem_closes_and_gateway_reopens():
     exchange(5)
     assert "VALVE_CLOSED" in [m["a"] for m in gw.log if m["k"] == "ALERT"]
     gw.end_pipe_leak(gw.hal.now())
-    exchange(5)
+    exchange(5)                                     # ended, and the tolerance has not run: still shut
     assert not node.remote and node.valve["closed"] and hal.colour != "red", (node.remote, hal.colour)
     gw.order("B-TANK", "VALVE_OPEN")
     exchange(10)
@@ -740,7 +1031,8 @@ def check_orders_on_the_gateway():
 if __name__ == "__main__":
     for check in (check_real_and_zero_clocks_agree, check_restarts_change_nothing, check_old_baseline_file,
                   check_priming_and_resume, check_queue_limit, check_every_local_alert_is_red_and_closes,
-                  check_lights_follow_the_spec, check_board_blinks_and_buzzer, check_only_a_hand_reopens, check_flat_valve,
+                  check_lights_follow_the_spec, check_board_blinks_and_buzzer, check_reopens_after_the_tolerance, check_only_a_hand_reopens,
+                  check_flat_valve, check_trial_reopening,
                   check_gateway_orders_and_faults, check_tank_valve, check_gpio_pins_and_failed_sensor,
                   check_orders_on_the_gateway, check_part_of_a_building_is_no_pipe_leak,
                   check_gateway_problem_closes_and_gateway_reopens, check_programs_over_the_network):

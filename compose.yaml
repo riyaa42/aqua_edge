@@ -16,6 +16,8 @@ x-node: &node
   environment:
     AQUA_PRIME_S: ${NODE_PRIME_S:-86400}      # learn from the first day of the data at once
     AQUA_STEP_S: ${NODE_STEP_S:-}             # empty: one reading a minute
+    AQUA_REOPEN_AFTER_S: ${NODE_REOPEN_AFTER_S:-1800}   # normal this long (data time) before a valve reopens
+    AQUA_TRIAL_REOPEN: ${NODE_TRIAL_REOPEN:-0}          # 1: shut flats reopen on trial (edge/README.md)
   depends_on: [gateway]
   restart: unless-stopped
   read_only: true

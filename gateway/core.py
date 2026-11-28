@@ -53,8 +53,8 @@ Same hardware layer as the nodes (hal.now / send / receive). Jobs:
      One that ended before it could be delivered still goes, marked "over".
      On by default; enable_commands=False keeps these results on the gateway only.
  12. Orders: an operator can have a node close or open its valve, or turn its alert LED on or
-     off (order.py). Only an operator's order reopens a valve; the problems in item 11 close the
-     valves of the nodes told about them. What a node's valve did comes back as VALVE_CLOSED,
+     off (order.py). The problems in item 11 close the valves of the nodes told about them; once
+     they are ended a node may reopen by itself, after its tolerance period. What a node's valve did comes back as VALVE_CLOSED,
      VALVE_OPENED or VALVE_FAULT.
 What the checks need is saved to one state file before any ACK is sent, so a restart keeps the
 open problems and pipe check, and does not reopen the door to replays. Not saved: the in-memory

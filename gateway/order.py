@@ -4,12 +4,12 @@
     docker compose exec gateway python -m gateway.order B-203 valve-open --data /data
 
 Orders: valve-close, valve-open (the reopen signal), led-on (red alert LED and buzzer; red also
-closes the valve), led-off (ends that red; reopens nothing).
+closes the valve), led-off (ends that red; the node may then reopen after its tolerance period).
 
 This leaves a request in the gateway's data folder; the gateway picks it up, signs it with the
 node's key and repeats it until the node confirms. So only someone who can write that folder can
 order anything: nothing listens on the network for orders, and MQTT stays read-only. The gateway
-never reopens a valve unasked; the problems it finds itself do close the valves of the nodes told
+never orders a reopening unasked (a node may reopen by itself: edge/aqua_edge.py); the problems it finds itself do close the valves of the nodes told
 about them (planning/valve_spec.md). A confirmation means the node received the order; what its valve
 did comes back as VALVE_CLOSED, VALVE_OPENED or VALVE_FAULT.
 """

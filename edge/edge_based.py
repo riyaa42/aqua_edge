@@ -18,7 +18,7 @@ import os
 import signal
 import threading
 
-from edge.aqua_edge import FlatNode, TankNode, saved_sample_time
+from edge.aqua_edge import REOPEN_AFTER_S, FlatNode, TankNode, saved_sample_time
 from edge.board import SAMPLE_S, NodeBoard
 from edge.sensors import DATASET, sensor_reader
 from edge.valve import take_request
@@ -109,6 +109,13 @@ def parse_args(argv=None):
                     help="first start only: learn from this much of the data at once (86400: the first day)")
     ap.add_argument("--step-s", type=float, default=float(env("AQUA_STEP_S")) if env("AQUA_STEP_S") else None,
                     help="one row every this many seconds instead of one a minute (single-node demos)")
+    ap.add_argument("--reopen-after-s", type=float, default=float(env("AQUA_REOPEN_AFTER_S") or REOPEN_AFTER_S),
+                    help="tolerance before a closed valve reopens by itself: this long normal once its "
+                         "alerts have cleared (default %(default)s)")
+    ap.add_argument("--trial-reopen", action="store_true",
+                    default=(env("AQUA_TRIAL_REOPEN") or "").lower() in ("1", "true", "yes", "on"),
+                    help="flats: after hours shut by their own alert, reopen to see whether the water "
+                         "stops, and shut again if not. Water may run through a leak meanwhile")
     ap.add_argument("--exit-at-end", action="store_true", help="stop when the data ends")
     return ap.parse_args(argv), ap
 
@@ -125,6 +132,8 @@ def main(argv=None):
         address = parse_address(a.gateway) if a.radio == "udp" else None
     except (OSError, ValueError) as e:
         ap.error(str(e))
+    if not 0 <= a.reopen_after_s < float("inf"):
+        ap.error("--reopen-after-s must be 0 or more")
     if a.name not in topology.devices:
         ap.error(f"{a.name} is not a tank or flat in {a.tree}")
     if a.name not in keys or "GATEWAY" not in keys:
@@ -143,6 +152,7 @@ def main(argv=None):
     board = NodeBoard(a.name, radio, get_readings, storage, keys,
                       slot=tuple(a.slot) if a.slot else None, step_s=a.step_s, gpio=a.actuators == "gpio")
     node = make_node(a.name, board, topology)
+    node.reopen_after_s, node.trial_reopen = a.reopen_after_s, a.trial_reopen
 
     stop = threading.Event()
     for sig in (signal.SIGINT, signal.SIGTERM):         # Ctrl-C and `docker stop`
@@ -156,8 +166,9 @@ def main(argv=None):
             print(f"{a.name}: end of the sensor data; still sending and taking orders")
             _wait_with_radio(node, board, None, stop, a.sd, poll_s)
     finally:
+        node.fail_trial("the node is stopping")          # nobody would be watching it
         node.save_state()
-        getattr(radio, "close", lambda: None)()         # the valve is left as it is
+        getattr(radio, "close", lambda: None)()         # apart from a trial, the valve is left as it is
         print(f"{a.name} stopped")
 
 

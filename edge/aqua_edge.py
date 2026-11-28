@@ -43,9 +43,11 @@ Detection rules (all thresholds are calibration knobs at the top):
 Two entry points: step() once a minute (sensors and checks), and radio_poll(), which the HAL
 calls as soon as a packet arrives and again at the time radio_poll() returns.
 Alerts, lights and valve: planning/valve_spec.md, with its table in policy.py. Every red condition,
-    found by the node or told by the gateway, turns the LED red and closes the valve. THE VALVE IS
-    ONLY REOPENED BY HAND: a local request (valve.py) or the gateway's VALVE_OPEN order. No
-    recovery reopens it (this overrides the spec's section 7).
+    found by the node or told by the gateway, turns the LED red and closes the valve. It reopens
+    by itself once every such condition is explicitly over and the readings then stay normal for a
+    tolerance period (reopen_when_normal). A shut flat cannot show that, so it can be told to try
+    reopening (try_reopening, off by default). A person can reopen it at any time: a local request
+    (valve.py) or the gateway's VALVE_OPEN order. Only a person undoes an order to close.
 Delivery: every message is timestamped and kept until the gateway acknowledges it (Mariadhason
 et al. [4], timestamped store-and-forward to SD card). Alerts and tank flags go the moment they
 are raised and are retried every few seconds. The gateway sends a beacon; when it comes back
@@ -82,6 +84,13 @@ MAX_SUMMARIES = 7 * 86400 // SUMMARY_S    # kept while unsent: 7 days, as far ba
 VALVE_ORDERS = {"VALVE_CLOSE": True, "VALVE_OPEN": False}
 LED_ORDERS = {"ALERT_LED_ON": True, "ALERT_LED_OFF": False}
 ORDER_SLACK_S = 1             # a command's time is sent in whole seconds
+REOPEN_AFTER_S = 1800         # tolerance: this long normal (readings in a row) before a valve reopens
+# Trial reopening (flats only, off unless asked for): a shut flat has no flow to show its problem is over
+TRIAL_AFTER_S = 6 * 3600      # shut this long before the first trial
+TRIAL_RETRY_S = 12 * 3600     # and this long before the next, after a failed one
+TRIAL_TRIES = 2               # failed trials before only a person can reopen
+TRIAL_WINDOW = 60             # readings (minutes) within which the water must stop ...
+TRIAL_QUIET = 10              # ... for this many in a row
 
 
 def iso_utc(utc_s):
@@ -104,7 +113,13 @@ QUALITY_MIN, QUALITY_CLEAR_MIN = 3, 10
 SUPPLY_SIGMAS, SUPPLY_MARGIN_LPS, SUPPLY_MIN = 4.0, 0.5, 15
 FLAT_LEAK_RULES = {"LEAK_NIGHT_FLOW", "LEAK_CONTINUOUS_FLOW", "LEAK_PRESSURE_DROP"}
 CONSUMPTION_RULES = {"ABNORMAL_CONSUMPTION", "UNUSUAL_NIGHT_CONSUMPTION", "SUDDEN_CONSUMPTION_CHANGE"}
+TRIAL_ALERTS = FLAT_LEAK_RULES | CONSUMPTION_RULES | {"PROLONGED_ZERO_FLOW"}   # a flat's own
 RECOVERABLE = FLAT_LEAK_RULES | CONSUMPTION_RULES | {"PROLONGED_ZERO_FLOW", "ABNORMAL_SUPPLY"}
+RECOVERY_ENDS = {             # a node's recovery message -> the conditions it says are over
+    "FLAT_LEAK_CLEARED": FLAT_LEAK_RULES, "CONSUMPTION_CLEARED": CONSUMPTION_RULES,
+    "ZERO_FLOW_CLEARED": {"PROLONGED_ZERO_FLOW"}, "SUPPLY_FLOW_CLEARED": {"ABNORMAL_SUPPLY"},
+    "QUALITY_CLEARED": {"QUALITY_LIMIT_VIOLATION", "QUALITY_CHEMICAL", "QUALITY_RUNOFF"},
+    "QUALITY_TEMPORAL_CLEARED": {"QUALITY_TEMPORAL_ANOMALY"}}
 
 PRIORITY = {"ALERT": 0, "FLAG": 1, "SUM": 2}       # FLAG: the tank's SUPPLY_LOW and SUPPLY_RECOVERED
 
@@ -288,6 +303,12 @@ class Node:
         self.has_valve = hasattr(hal, "set_valve")
         self.valve = {"closed": False, "why": None, "fault": False}
         self.valve_changed, self.led_order, self.led_changed = -1e18, False, -1e18
+        self.hand_changed = -1e18      # when a person last moved it: here, or by the gateway's order
+        # tolerance before reopening, and the normal readings in a row so far. Not saved: after a
+        # restart the whole period starts again
+        self.reopen_after_s, self.calm = REOPEN_AFTER_S, 0
+        # trial reopening: how many have failed, and the one now running (saved with the valve)
+        self.trial_reopen, self.trial = False, {"failed": 0, "run": None}
         self.open_path = beside and beside + "_open.json"
         if self.open_path and os.path.exists(self.open_path):    # restart after a power cut
             with open(self.open_path) as f:
@@ -299,6 +320,8 @@ class Node:
             self.missed, self.commands_done = saved.get("missed", []), saved.get("done", [])
             self.valve = saved.get("valve", self.valve)
             self.valve_changed = saved.get("valve_changed", self.valve_changed)
+            self.hand_changed = saved.get("hand_changed", self.hand_changed)
+            self.trial = saved.get("trial", self.trial)
             self.led_order = saved.get("led_order", False)
             self.led_changed = saved.get("led_changed", self.led_changed)
         slot = getattr(hal, "slot", None)
@@ -319,6 +342,7 @@ class Node:
         """Call once the whole node is built: load what was learned, set the valve as saved."""
         self.load_state()
         if self.has_valve:
+            self.fail_trial("the node restarted")     # nobody was watching: shut it, before driving it
             failed = not self.drive_valve()
             if failed != self.valve["fault"]:
                 self.valve["fault"] = failed
@@ -388,16 +412,34 @@ class Node:
 
     def set_valve(self, closed, why):
         """Close or open the valve and report it. What is wanted is saved first, so a power cut
-        in between cannot lose it."""
+        in between cannot lose it. why: a red condition's name, "gateway" or "local" (a person), or
+        "recovered" (by itself)."""
         if not self.has_valve:
             return
         self.valve_changed = self.hal.now()
+        by_hand = not closed and why in ("local", "gateway")
+        trial = self.trial["run"]
+        if by_hand:
+            self.hand_changed = self.valve_changed
+            self.trial = {"failed": 0, "run": None}
+        elif closed and trial:                      # anything that shuts it during a trial fails it
+            self.trial = {"failed": self.trial["failed"] + 1, "run": None}
         if self.valve["closed"] == closed and not self.valve["fault"]:
             if why == "gateway":                    # now an operator's order holds it: the light stays red
                 self.valve["why"] = why
+            if by_hand and trial:                   # the person takes over: detection starts afresh
+                self.after_reopen()
             self.save_open()
             return
+        # "hold": the red conditions keeping it shut, until each is explicitly said to be over.
+        # Saved with the valve, so lost learning cannot pass for a recovery
         self.valve = {"closed": closed, "why": why, "fault": False}
+        if closed:
+            self.valve["hold"] = [why] if policy.level(why) == policy.ALERT and why != "gateway" else []
+        self.calm = 0
+        if closed and trial and why != "gateway":   # what had closed it still stands
+            self.valve["hold"] += [c for c in trial["hold"] if c not in self.valve["hold"]]
+            self.open = self.open | set(trial["hold"])
         self.save_open()
         if self.drive_valve():
             self.emit("ALERT", a="VALVE_CLOSED" if closed else "VALVE_OPENED")
@@ -408,9 +450,92 @@ class Node:
             self.save_open()
             self.emit("ALERT", a="VALVE_FAULT")
 
+    def hold(self, code):
+        """Another red condition while the valve is shut: it too has to end."""
+        held = self.valve.get("hold")
+        if self.valve["closed"] and held is not None and code not in held:
+            held.append(code)
+            self.calm = 0
+            self.save_open()
+
+    def release(self, codes):
+        held = self.valve.get("hold")
+        if held and set(held) & set(codes):
+            self.valve["hold"] = [c for c in held if c not in codes]
+            self.save_open()
+
+    def reopen_when_normal(self, new_reading):
+        """Called once a step. A valve shut for red conditions reopens when every one of them has
+        been explicitly ended (a recovery message, or the gateway's end of its problem or LED
+        order) and, after that, reopen_after_s of new, complete readings in a row show nothing
+        red. Missing readings, silence or a restart are not "normal". An operator's order to
+        close is not a condition: only a person undoes it."""
+        v = self.valve
+        if not (self.has_valve and v["closed"] and v["why"] != "gateway" and "hold" in v):
+            self.calm = 0
+            return
+        if not new_reading:
+            return
+        normal = (not v["hold"] and not self.missing and not self.led_order
+                  and not any(policy.level(c) == policy.ALERT for c in self.active()))
+        self.calm = self.calm + 1 if normal else 0
+        if self.calm >= max(1, math.ceil(self.reopen_after_s / 60)):
+            self.note(f"valve: normal for {self.calm} readings, reopening")
+            self.set_valve(False, "recovered")
+
+    def try_reopening(self, td, r, new_reading):
+        """Called once a step, with trial_reopen on. A flat shut only by its own leak or usage
+        alerts has no flow to show they are over, so after a wait the valve opens to find out. The
+        trial passes if the water stops for TRIAL_QUIET readings in a row within TRIAL_WINDOW. A
+        pause proves no more than that: it is not proof there is no leak."""
+        run = self.trial["run"]
+        if run:
+            if not new_reading:
+                return
+            if self.missing:
+                return self.fail_trial("readings are missing")
+            run["readings"] += 1
+            run["quiet"] = run["quiet"] + 1 if r["flow_lps"] <= CONT_FLOW_LPS else 0
+            if run["quiet"] >= TRIAL_QUIET:
+                self.trial = {"failed": 0, "run": None}
+                self.note("valve: trial passed, the water stops: staying open")
+            elif run["readings"] >= TRIAL_WINDOW:
+                return self.fail_trial("the water did not stop")
+            self.save_open()
+            return
+        v = self.valve
+        if not (self.trial_reopen and self.flat_checks and not self.tank_checks and self.has_valve
+                and v["closed"]):
+            return
+        if "shut_at" not in v:
+            v["shut_at"] = td
+            self.save_open()
+        held = set(v.get("hold") or ())
+        wait = TRIAL_RETRY_S if self.trial["failed"] else TRIAL_AFTER_S
+        if (new_reading and held and held <= TRIAL_ALERTS and v["why"] != "gateway" and not v["fault"]
+                and not (self.remote or self.led_order or self.missing)
+                and self.trial["failed"] < TRIAL_TRIES and td - v["shut_at"] >= wait):
+            self.note(f"valve: trial reopening ({self.trial['failed'] + 1} of {TRIAL_TRIES})")
+            self.trial["run"] = {"why": v["why"], "hold": sorted(held), "readings": 0, "quiet": 0}
+            self.set_valve(False, "trial")
+            if self.valve["fault"]:
+                self.fail_trial("the valve did not open")
+
+    def fail_trial(self, reason):
+        """Shut the valve again, if a trial is running."""
+        run = self.trial["run"]
+        if run:
+            self.note(f"valve: trial failed, {reason}")
+            self.set_valve(True, run["why"])
+
+    def check_trial_watched(self, now):
+        """No readings, no trial: nothing would ever shut the valve again."""
+        if self.trial["run"] and self.reading_at is not None and now - self.reading_at > STALE_S:
+            self.fail_trial("the readings stopped")
+
     def open_valve(self):
-        """Reopen at the node itself (a local request, edge/valve.py). With the gateway's
-        VALVE_OPEN order, the only ways a valve ever reopens."""
+        """Reopen by hand, at the node itself (a local request, edge/valve.py). The gateway's
+        VALVE_OPEN order does the same from there. Both work whatever the conditions are."""
         self.set_valve(False, "local")
 
     def after_reopen(self):
@@ -430,6 +555,8 @@ class Node:
         self.store.add(
             {"n": self.id, "t": sim_t, "ts_utc": round(utc_s), "ts_iso": iso_utc(utc_s), "rtc_ok": bool(rtc_ok), "k": kind, **payload}
         )
+        if kind == "ALERT" and payload.get("a") in RECOVERY_ENDS:
+            self.release(RECOVERY_ENDS[payload["a"]])      # after the message is queued
         if kind == "SUM" and slot:      # summaries start in this node's own slot (TDMA)
             self.store.next_try[self.store.seq] = sim_t + slot[0] * 60 / slot[1] + SLOT_GUARD_S
 
@@ -444,6 +571,7 @@ class Node:
             if policy.level(kind) == policy.ALERT:
                 self.buzz(kind)                    # the local alarm never waits for the gateway
                 self.set_valve(True, kind)
+                self.hold(kind)
 
     def buzz(self, code):
         buzzer = getattr(self.hal, "buzzer", None)
@@ -460,7 +588,8 @@ class Node:
             save_atomic(self.open_path, json.dumps({
                 "open": sorted(self.open), "remote": self.remote, "ended": self.remote_ended,
                 "missed": self.missed, "done": self.commands_done, "valve": self.valve,
-                "valve_changed": self.valve_changed, "led_order": self.led_order, "led_changed": self.led_changed}))
+                "valve_changed": self.valve_changed, "hand_changed": self.hand_changed,
+                "led_order": self.led_order, "led_changed": self.led_changed, "trial": self.trial}))
 
     def recover(self, message, rules, looks_over):
         """Called every minute. Sends `message` once the open problems among `rules` have looked
@@ -515,14 +644,19 @@ class Node:
         def end(name):
             if self.remote.pop(name, None) is not None:
                 hook(name, False)
+                self.release({name})
 
         if code in VALVE_ORDERS:
-            if not over and t >= self.valve_changed - ORDER_SLACK_S:
+            # An order to open must be newer than any change. One to close only has to be newer
+            # than the last move by hand: the valve reopening by itself does not outrank it
+            since = self.hand_changed if VALVE_ORDERS[code] else self.valve_changed
+            if not over and t >= since - ORDER_SLACK_S:
                 if VALVE_ORDERS[code]:
                     self.buzz(code)
                 if self.has_valve:
                     self.set_valve(VALVE_ORDERS[code], "gateway")
                     self.valve_changed = max(self.valve_changed, t)
+                    self.hand_changed = max(self.hand_changed, t)
                 else:
                     self.emit("ALERT", a="VALVE_FAULT")     # there is none to move
         elif code in LED_ORDERS:
@@ -530,6 +664,8 @@ class Node:
                 self.led_order, self.led_changed = LED_ORDERS[code], t
                 if self.led_order:
                     self.red_from_gateway(code, t)
+                else:
+                    self.release({"ALERT_LED_ON"})
         elif code in COMMAND_ENDS:
             for name in COMMAND_ENDS[code]:
                 self.remote_ended[name] = max(t, self.remote_ended.get(name, t))
@@ -550,11 +686,12 @@ class Node:
 
     def red_from_gateway(self, code, t):
         """A red condition from the gateway (planning/valve_spec.md, section 7): buzzer, and close
-        the valve. Not if it dates from before the valve was last reopened: that was decided
-        knowing less. Its end never reopens the valve."""
+        the valve. Not if it dates from before a person last reopened it: they knew more. One that
+        is still in force closes a valve that reopened by itself, even if it arrives late."""
         self.buzz(code)
-        if t >= self.valve_changed - ORDER_SLACK_S:
+        if t >= self.hand_changed - ORDER_SLACK_S:
             self.set_valve(True, code)
+            self.hold(code)
             self.valve_changed = max(self.valve_changed, t)     # an older reopen signal cannot undo this
 
     def transmit(self, now):
@@ -603,17 +740,21 @@ class Node:
     def radio_poll(self):
         """Call when a packet arrives, and at the time this returns. Never touches the sensors."""
         now = self.hal.now()
+        self.check_trial_watched(now)
         self.receive(now)
         return self.transmit(now)
 
     # --- main loop, called once per minute ---
     def step(self):
         now, td, r = self.hal.now(), self.sample_time(), self.hal.read()
-        if td != self.reading_t:
+        new_reading = td != self.reading_t
+        if new_reading:
             self.reading_t, self.reading_at = td, now
         self.missing = any(not _finite(r.get(k)) for k in self.expected)
         self.receive(now)
         self.observe(td, r)
+        self.reopen_when_normal(new_reading)
+        self.try_reopening(td, r, new_reading)
         summary = self.interval
         self.summarise(now, r)
         # Save every 15 minutes of readings, with each summary, and whenever something changed,
@@ -648,7 +789,7 @@ class Node:
         self.alerts = {k: seen for k, seen in self.alerts.items() if td - seen < ALERT_CLEAR_S}
         # ponytail: minutes before an alert fires (up to 3 h for continuous flow) still count
         # as clean; at EWMA_A = 1/14 that moves the baseline a few percent at most
-        self.clean = self.clean and not self.alerts and not self.shut
+        self.clean = self.clean and not self.alerts and not self.shut and not self.trial["run"]
         self.last_sample = td
 
     def prime(self, r):

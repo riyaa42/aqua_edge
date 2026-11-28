@@ -24,7 +24,7 @@ Water-quality model, data and test results: [`../detection/quality/README.md`](.
 
 ## Notification levels and the valve
 
-The rules come from [`../planning/valve_spec.md`](../planning/valve_spec.md), with one override: **valves are only reopened by hand.** The code's one table of them is `policy.py`.
+The rules come from [`../planning/valve_spec.md`](../planning/valve_spec.md), with a [tolerance period](#when-the-valve-reopens) added before a valve reopens. The code's one table of them is `policy.py`.
 
 | Light | Pattern (2 s cycle) | When | Valve and buzzer |
 |---|---|---|---|
@@ -38,25 +38,61 @@ Only one is shown: red before yellow before green, R1 before R2, Y1 before Y2. A
 
 **The valve** closes on every red condition, found by the node or told by the gateway.
 
-- **It only reopens by hand.** No recovery message, gateway "cleared" message, silence, acknowledgement or restart reopens it. There are two ways, and both work even while a condition is still active (the light then stays red):
-  - the gateway's reopen signal, the [`valve-open` order](../gateway/README.md#orders-to-a-node);
-  - at the node:
-    ```sh
-    python3 -m edge.valve open --sd <the node's --sd folder>
-    ```
-- After reopening, a local problem must be confirmed again before it closes the valve again. `QUALITY_TEMPORAL_ANOMALY` raises only when it starts, so one still active does not close it again until it has cleared and returned. A new gateway problem closes it; one dated before the reopening does not.
-- A node ignores a reopen signal that is older than the last time its valve was closed or opened, or that the gateway marks as no longer meant.
+
+#### When the valve reopens
+
+**By itself,** once all of these hold:
+
+1. Every red condition that held it shut has been **explicitly ended**: the node's own recovery message, the gateway's "cleared" for its problem, or `led-off` for the alert-LED order. The node saves this list with the valve.
+2. After that, the readings stay normal for the **tolerance period**: by default **30 minutes** of new readings in a row (`--reopen-after-s`, or `NODE_REOPEN_AFTER_S` with Docker Compose; in the data's time, `0` for the first normal reading). Normal means every expected reading is there and nothing red is in force. Yellow conditions do not count against it.
+
+A red condition or a missing reading starts the period again, and so does a restart. Silence, an acknowledgement or the same reading twice count for nothing. A recovery message itself already needs the problem to look over for a while (10 minutes for flows), so the wait comes on top of that.
+
+**By hand,** at any time, even while a condition is still active (the light then stays red):
+- the gateway's reopen signal, the [`valve-open` order](../gateway/README.md#orders-to-a-node);
+- at the node:
+  ```sh
+  python3 -m edge.valve open --sd <the node's --sd folder>
+  ```
+
+**A `valve-close` order is not a condition:** a valve under that order only reopens by hand.
+
+- After a reopening by hand, a local problem must be confirmed again before it closes the valve again. `QUALITY_TEMPORAL_ANOMALY` raises only when it starts, so one still active does not close it again until it has cleared and returned.
+- A gateway problem or close order dated before the last reopening **by hand** is ignored. One heard late after the valve reopened **by itself** still closes it. A reopen signal older than the last time the valve was closed or opened, or marked by the gateway as no longer meant, is ignored.
 - While a flat is shut, its flow, pressure and consumption checks pause, nothing is learned, and the zero flow does not count as a recovery, so its light stays red. While the tank is shut, only its outflow checks pause.
+- **So a valve shut for a leak, consumption or outflow alert of its own does not reopen by itself:** with the water off, nothing can show the problem is over, and zero flow proves nothing. It needs a reopening by hand, or [trial reopening](#trial-reopening-flats) switched on for a flat. What can reopen by itself without trials: a tank shut for water quality, and any valve shut only for gateway problems or the alert-LED order.
 - The node saves what the valve should be before moving it, and drives it again after a restart. It reports `VALVE_CLOSED`, `VALVE_OPENED` or `VALVE_FAULT` (the valve could not be driven, or the node has none).
 - Nothing reads back whether the valve really moved. **Closing the tank valve cuts water to the whole building.**
 
+#### Trial reopening (flats)
+
+A shut flat can only show whether its problem is over by letting water through. **This is off by default.** Turn it on with `--trial-reopen`, or `NODE_TRIAL_REOPEN=1` with Docker Compose.
+
+| Point | Rule |
+|---|---|
+| Which valves | Flats shut only by their own leak or usage alerts. Never the tank. No trial with a gateway problem or LED order in force, an operator's close order, a valve fault or a missing reading |
+| First wait | 6 hours shut |
+| Pass | The water stops (0.005 L/s or less) for 10 readings in a row within 60 readings. The valve stays open |
+| Fail | No such stop, a new red condition, a missing reading, no readings for 3 minutes, the valve not opening, or the node stopping or restarting. The valve shuts |
+| Retries | One more trial 12 hours after a failure. After two failures, only a reopening by hand. A pass or a reopening by hand resets the count |
+
+The light stays red until the alert clears by its usual recovery rule, even while the valve is open. The gateway gets the usual `VALVE_OPENED` and `VALVE_CLOSED` reports. If power is lost during a trial, the valve is shut as soon as the node starts again; until then it is wherever the unpowered valve rests. The times are constants in `aqua_edge.py` (`TRIAL_*`).
+
+**Risks:**
+- **A pause is not proof there is no leak.** A leak that stops and starts can pass. The usual checks go on, but they take time to confirm (up to 3 hours for continuous flow).
+- **Water runs through a leak** for up to about an hour in each failed trial.
+- **An empty flat** shut for `PROLONGED_ZERO_FLOW` can pass, because it uses no water. Its light stays red until water is used.
+- **No overall limit:** every new closing starts a new count, so a flat that passes and closes again can repeat this for as long as it runs.
+
 **Where this differs from the spec:**
 
-- **Reopening.** Section 7 reopens the valve when the red conditions clear. Here it is only reopened by hand. The spec has not been edited.
+- **Reopening.** Section 7 reopens the valve when the red conditions clear. Here it also waits for the tolerance period, and an operator can reopen it earlier. With trial reopening on, a flat's valve also opens **while still red**, with nothing yet saying the problem is over. The spec has not been edited.
 - `SUPPLY_LOW` and `VALVE_FAULT` are not in the spec. They show Y2 and close nothing. The gateway may answer `SUPPLY_LOW` with a supply problem, which does close the tank's valve.
 - The drinking-water limit check also runs on the first, learning day, because it needs nothing learned.
 
-**Effect on the 48 h replay,** each node on its own: all 21 close their valves. 19 flats close on `LEAK_CONTINUOUS_FLOW`, although only one flat has a planted leak; `B-203` closes on `LEAK_NIGHT_FLOW` (flats between hours 26.5 and 33). The tank closes at about hour 24.3 on `QUALITY_TEMPORAL_ANOMALY`. With a gateway, its problems close valves too. The thresholds are unchanged.
+**Effect on the 48 h replay,** each node on its own: all 21 close their valves, and **none reopens by itself.** 19 flats close on `LEAK_CONTINUOUS_FLOW`, although only one flat has a planted leak; `B-203` closes on `LEAK_NIGHT_FLOW` (flats between hours 26.5 and 33). The tank closes at about hour 24.3 on `QUALITY_TEMPORAL_ANOMALY`, which gets no clearing message in this data. With a gateway, its problems close valves too. The thresholds are unchanged.
+
+**With trial reopening on:** 21 trials start. `B-203`, the flat with the planted leak, fails both of its two and stays shut. The other 19 flats pass, and **all 19 shut again 5 to 6 hours later on `LEAK_CONTINUOUS_FLOW`.** The replay ends before they could be tried again, so no valve is open at the end. Trials do not fix that rule's frequent alarms. The recorded data does not react to a shut valve, so this does not show how real homes would behave.
 
 ## Clocks and what the node stores
 
@@ -127,7 +163,7 @@ A problem is closed only by an explicit recovery, never by silence. Each rule ne
 | Low tank | level is no longer low | `SUPPLY_RECOVERED` flag |
 | Water quality | existing quality rules | `QUALITY_CLEARED`, `QUALITY_TEMPORAL_CLEARED` |
 
-The gateway closes the pipe leak (2 tight blocks in a row), silence (`NODE_BACK`) and clock errors (`CLOCK_OK`) itself. A flat leak that never lets the water stop stays open. A node saves its open problems and valve (`<node>_open.json`) and its learned trends, consumption detector, tank minimum level and water-quality history (`<node>_state.json`), so it can report recovery after a restart. A recovery never [reopens a valve](#notification-levels-and-the-valve). An old `<node>_baseline.json` is read once.
+The gateway closes the pipe leak (2 tight blocks in a row), silence (`NODE_BACK`) and clock errors (`CLOCK_OK`) itself. A flat leak that never lets the water stop stays open. A node saves its open problems and valve (`<node>_open.json`) and its learned trends, consumption detector, tank minimum level and water-quality history (`<node>_state.json`), so it can report recovery after a restart. A recovery lets the valve [reopen after the tolerance period](#when-the-valve-reopens). An old `<node>_baseline.json` is read once.
 
 What the gateway saves is described in [`../gateway/README.md`](../gateway/README.md#recovery-and-restarts).
 
