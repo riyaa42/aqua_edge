@@ -10,7 +10,7 @@ Aqua Edge (CSD457 Internet of Things): an offline-first IoT node that detects un
 | `simulation/` | Simulation and network design: water network, live simulation, LoRa radio model, ns-3, Webots |
 | `docs/` | Components and connections list (`components.md`); presentations (`presentations/first/`: slides, speaking script, Q&A prep, reference list) |
 
-What it detects: leaks inside a flat (flow checks on each flat's node), leaks on the shared down pipe, named by floor (flow meters above each floor and a per-floor water balance at the gateway), and unsafe tank water (runoff or chemical from a small model on the tank node, water above 35 °C from a plain limit). Everything is shown on a live dashboard (`python3 simulation/live/dashboard.py`, then localhost:8080).
+What it detects: leaks inside a flat (flow checks on each flat's node), leaks on the shared down pipe, named by floor (flow meters above each floor and a per-floor water balance at the gateway), and unsafe tank water (the drinking water limits of IS 10500 for pH, TDS and turbidity; runoff or chemical from a small model on the tank node, as a cause guess; water above 35 °C from a plain limit). Bad water shuts a valve on the pipe leaving the tank until a person tests it and presses reopen. Everything is shown on a live dashboard (`python3 simulation/live/dashboard.py`, then localhost:8080) with two pages: **Control room** (run tests: add leaks, cut the radio, water events) and **Building health** (what a caretaker checks: status, water against the limits, the valve, problems ranked by urgency, pipe and tank charts, water use, sensor network, past problems).
 
 **New to the project? Start with [`HANDOVER.md`](HANDOVER.md)**: what exists, why, current results, open decisions and next steps.
 

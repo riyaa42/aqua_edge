@@ -54,6 +54,121 @@ def node_of(where):
     return "B-TANK" if where.startswith("B-D") else where       # downtake leaks are seen by the tank
 
 
+FLAT_LEAKS = {"LEAK_NIGHT_FLOW", "LEAK_CONTINUOUS_FLOW", "LEAK_PRESSURE_DROP"}
+QUALITY_KINDS = {"QUALITY_LIMIT_VIOLATION", "QUALITY_RUNOFF", "QUALITY_CHEMICAL", "QUALITY_HOT"}
+# A node's message that a problem is over -> (the problems it closes, why they ended)
+CLEARS = {"FLAT_LEAK_CLEARED": (FLAT_LEAKS, "water seen off for 10 min"),
+          "CONSUMPTION_CLEARED": ({"ABNORMAL_CONSUMPTION"}, "use back to normal"),
+          "SUPPLY_FLOW_CLEARED": ({"ABNORMAL_SUPPLY"}, "tank outflow back to normal"),
+          "QUALITY_CLEARED": (QUALITY_KINDS, "water clean again"),
+          "VALVE_OPENED": ({"VALVE_CLOSED"}, "valve reopened after a water test")}
+# Fix first: the team's risk score idea (gateway/analytics.py on their communication branch), our weights.
+# score = weight + 20 x share of flats affected + size (litres or flow) + how long it has lasted, at most 100
+WEIGHTS = {"QUALITY_CHEMICAL": 55, "QUALITY_LIMIT_VIOLATION": 52, "QUALITY_RUNOFF": 45, "PIPE_LEAK": 42,
+           "QUALITY_HOT": 40, "VALVE_CLOSED": 38, "LEAK_PRESSURE_DROP": 34, "LEAK_NIGHT_FLOW": 32,
+           "LEAK_CONTINUOUS_FLOW": 32, "ABNORMAL_SUPPLY": 30, "ABNORMAL_CONSUMPTION": 16, "NODE_SILENT": 10}
+LEVELS = ((70, "Critical"), (45, "High"), (25, "Medium"), (0, "Low"))
+IS_10500 = {"ph": (6.5, 8.5), "tds": (0, 500), "turb": (0, 5), "temp": (0, 35)}   # temp: our 35 C limit
+LIVE_S = 300                    # an alert at the gateway within 5 min of being made counts as live
+
+
+def problems(log, gw, applied, nodes):
+    """Every problem in the run, from what the gateway knows: opened by an alert (or the gateway's own
+    pipe check, or a silent node), closed by the node's recovery message, a clean night, the valve
+    reopening, or a fix in the simulation. Returns (open, closed)."""
+    timeline = [(m["rx"], 0, "alert", m) for m in log if m["k"] == "ALERT"] + \
+               [(e["t"], 1, "gw", e) for e in gw] + [(e["t"], 2, "applied", e) for e in applied]
+    opened, closed = {}, []
+
+    def close(key, t, why):
+        if key in opened:
+            closed.append({**opened.pop(key), "end": t, "why": why})
+
+    for t, _, src, e in sorted(timeline, key=lambda x: x[:2]):
+        if src == "alert":
+            if e["a"] in CLEARS:
+                kinds, why = CLEARS[e["a"]]
+                for k in kinds:
+                    close((e["n"], k), t, why)
+            elif (e["n"], e["a"]) not in opened:
+                opened[e["n"], e["a"]] = {"n": e["n"], "a": e["a"], "t": e["t"], "rx": t,
+                                         **{k: e[k] for k in ("flow", "ph", "tds", "turb", "temp", "viol") if k in e}}
+        elif src == "gw" and e["event"] == "PIPE_LEAK":
+            where = e.get("where", "PIPE")
+            opened.setdefault((where, "PIPE_LEAK"), {"n": where, "a": "PIPE_LEAK", "t": e["t"], "rx": e["t"],
+                                                     "missing_l": e.get("missing_l"), "check": e.get("check", "night")})
+        elif src == "gw" and e["event"] == "PIPE_LEAK_CLEARED":
+            close((e.get("where", "PIPE"), "PIPE_LEAK"), t, "clean night check")
+        elif src == "gw" and e["event"] == "NODE_SILENT" and e["node"] in nodes:
+            opened[e["node"], "NODE_SILENT"] = {"n": e["node"], "a": "NODE_SILENT", "t": t, "rx": t}
+        elif src == "gw" and e["event"] == "NODE_BACK":
+            close((e["node"], "NODE_SILENT"), t, "heard again")
+        elif src == "applied" and e["do"] == "fix":
+            w = e["where"]
+            keys = [(w, k) for k in FLAT_LEAKS | {"ABNORMAL_CONSUMPTION"}] if not w.startswith("B-D") else \
+                [(w, "PIPE_LEAK"), ("PIPE", "PIPE_LEAK"), ("B-TANK", "ABNORMAL_SUPPLY")]
+            for key in keys:
+                close(key, t, "fixed")
+    return sorted(opened.values(), key=lambda m: -m["rx"]), closed[::-1]
+
+
+def score(p, now, flats):
+    """Fix first: how urgent one open problem is, 0-100, and its level."""
+    n = p["n"]
+    if n == "B-TANK" or n == "PIPE":
+        share = 1.0                                   # the tank feeds every flat
+    elif n.startswith("B-D"):                         # this stretch and every floor below it
+        f = "G" if n[3] == "0" else n[3]
+        order = ["G", "1", "2", "3", "4"]
+        share = sum(x[2] in order[:order.index(f) + 1] for x in flats) / max(len(flats), 1)
+    else:
+        share = 1 / max(len(flats), 1)
+    size = min(20, (p.get("missing_l") or 0) / 10) + min(15, 100 * (p.get("flow") or 0))
+    lasted = min(15, 1.5 * max(now - p["rx"], 0) / 3600)
+    value = round(min(100, WEIGHTS.get(p["a"], 10) + 20 * share + size + lasted))
+    return value, next(name for lo, name in LEVELS if value >= lo), round(share * len(flats))
+
+
+def health(log, gw, open_p, closed_p, clock, nodes, running):
+    """Numbers for the Building health tab."""
+    now = clock["t"] if clock else 0
+    flats = [n for n in nodes if n != "B-TANK"]
+    ranked = sorted(({**p, "score": v, "level": lv, "flats": k} for p in open_p for v, lv, k in [score(p, now, flats)]),
+                    key=lambda p: -p["score"])
+    tank = [m for m in log if m["n"] == "B-TANK" and m["k"] == "SUM"]
+    last = tank[-1] if tank else {}
+    dp = {"ph": 2, "tds": 0, "turb": 1, "temp": 1}             # packets carry 4-byte decimals: 6.3984...
+    water = {k: round(last[k], dp[k]) for k in dp if k in last}
+    broken = [k for k, v in water.items() if not IS_10500[k][0] <= v <= IS_10500[k][1]]
+    cause = next((p["a"] for p in open_p if p["a"] in ("QUALITY_RUNOFF", "QUALITY_CHEMICAL")), None)
+    valve = [m for m in log if m["k"] == "ALERT" and m["a"] in ("VALVE_CLOSED", "VALVE_OPENED")]
+    sums_by_flat = {}
+    for m in log:
+        if m["k"] == "SUM" and m["n"] in flats and m["i"] * 900 > now - 86400:
+            sums_by_flat[m["n"]] = sums_by_flat.get(m["n"], 0) + m["vol_l"]
+    delays = [m["rx"] - m["t"] for m in log]
+    alert_delays = [m["rx"] - m["t"] for m in log if m["k"] == "ALERT"]
+    balance = [[e["i"], e["lost"]] for e in gw if e["event"] == "BALANCE"][-96:]
+    return {
+        "status": ranked[0]["level"] if ranked else "Normal",
+        "freshness": "Live" if running and not clock.get("paused") else "Paused" if running else "Stale" if clock else "No run",
+        "fix_first": ranked,
+        "water": water, "broken": broken, "cause": cause,
+        "valve_open": valve[-1]["a"] == "VALVE_OPENED" if valve else True,
+        "valve_since": valve[-1]["rx"] if valve else None,
+        "water_series": [[m["t"], *(m.get(k) and round(m[k], 2) for k in dp)] for m in tank if "ph" in m][-96:],
+        "tank_series": [[m["t"], m.get("level_m"), round(m.get("in_l", 0) / 900, 3)] for m in tank][-96:],
+        "balance": balance,
+        "usage": sorted(([n, round(v)] for n, v in sums_by_flat.items()), key=lambda x: -x[1]),
+        "flat_problems": [p for p in open_p if p["n"] in flats and p["a"] != "NODE_SILENT"],
+        "network": {"alerts_live": sum(d <= LIVE_S for d in alert_delays), "alerts_late": sum(d > LIVE_S for d in alert_delays),
+                    "saved_sent_later": sum(d > LIVE_S for d in delays), "messages": len(delays),
+                    "mean_delay_s": round(statistics.mean(delays)) if delays else None,
+                    "max_delay_s": round(max(delays)) if delays else None},
+        "past": closed_p[:30],
+    }
+
+
 def state(run=RUN, radio=False):
     """Everything the page shows, from the run's files. Status is what the gateway knows."""
     path = os.path.join(run, "clock.json")
@@ -66,36 +181,20 @@ def state(run=RUN, radio=False):
     nodes, log = lines(run, "nodes.txt"), jsonl(run, "gateway_log.jsonl")
     gw, applied = jsonl(run, "gateway_events.jsonl"), jsonl(run, "events_applied.jsonl")
 
-    # Status per node: "alert" if the gateway got an alert from it since the problem was last
-    # fixed (for the tank: since its water was reported clean again), "silent" if not heard.
-    # Kept per kind of problem: fixing a leak does not clear the tank's water quality alarm.
-    kind = lambda a: "quality" if a.startswith("QUALITY") else "flow"
-    calm_since = {}
-    for e in applied:
-        if e["do"] == "fix":
-            calm_since[node_of(e["where"]), "flow"] = e["t"]
-    alerts = [m for m in log if m["k"] == "ALERT"]
-    for m in alerts:
-        if m["a"] == "QUALITY_CLEARED":
-            calm_since[m["n"], "quality"] = m["rx"]
-    alerts = [m for m in alerts if m["a"] != "QUALITY_CLEARED"]
-    status, latest = {n: "ok" for n in nodes}, {}
-    for e in gw:
-        if e["event"] in ("NODE_SILENT", "NODE_BACK") and e["node"] in status:
-            status[e["node"]] = "silent" if e["event"] == "NODE_SILENT" else "ok"
-    for m in alerts:
-        if m["rx"] > calm_since.get((m["n"], kind(m["a"])), -1):
-            status[m["n"]], latest[m["n"], kind(m["a"])] = "alert", m
-    # The gateway's own down pipe checks (no node sends these): n is the floor's pipe spot ("B-D3"),
-    # or "PIPE" when the gateway could only check the whole pipe
+    # Status per node: "alert" while it has an open problem the gateway knows about (closed by the
+    # node's recovery message or a fix), "silent" if not heard. The alarm banner lists the open problems.
+    alerts = [m for m in log if m["k"] == "ALERT" and m["a"] not in CLEARS]
+    open_p, closed_p = problems(log, gw, applied, nodes)
+    status = {n: "ok" for n in nodes}
+    for p in open_p[::-1]:
+        if p["n"] in status:
+            status[p["n"]] = "silent" if p["a"] == "NODE_SILENT" else "alert"
+    for p in open_p:                          # an alert outranks silence
+        if p["n"] in status and p["a"] != "NODE_SILENT":
+            status[p["n"]] = "alert"
     pipe = [{"n": e.get("where", "PIPE"), "a": "PIPE_LEAK", "t": e["t"], "rx": e["t"], "missing_l": e.get("missing_l"),
              "check": e.get("check", "night")} for e in gw if e["event"] == "PIPE_LEAK"]
-    fixed = lambda n: max((e["t"] for e in applied if e["do"] == "fix" and e["where"].startswith("B-D")
-                           and n in ("PIPE", e["where"])), default=-1)
-    # Problems the gateway knows about and nobody has fixed yet, newest first (the alarm banner)
-    open_pipe = {m["n"]: m for m in pipe if m["rx"] > fixed(m["n"])}
-    active = [{k: m[k] for k in ("n", "a", "t", "rx")} for m in latest.values()] + list(open_pipe.values())
-    active.sort(key=lambda m: -m["rx"])
+    active = [{k: p[k] for k in ("n", "a", "t", "rx", "missing_l", "check") if k in p} for p in open_p if p["a"] != "NODE_SILENT"]
     led = {e["n"]: e["led"] for e in jsonl(run, "leds.jsonl")}   # each node's own LED (red = buzzer on)
 
     # Every leak in this run, newest first: when it started, which check caught it, when the
@@ -123,24 +222,28 @@ def state(run=RUN, radio=False):
     tank = [m for m in log if m["n"] == "B-TANK"]
     levels = [[m["t"], m["level_m"]] for m in tank if m["k"] == "SUM" and "level_m" in m]
     qalerts = [m for m in tank if m["k"] == "ALERT" and m["a"].startswith("QUALITY")]
-    quality = qalerts[-1]["a"] if qalerts else "QUALITY_CLEARED"
+    # the worst open water problem (the limit check outranks the cause guess), else the latest word
+    qopen = [p["a"] for p in open_p if p["a"] in QUALITY_KINDS]
+    quality = min(qopen, key=lambda a: -WEIGHTS[a]) if qopen else "QUALITY_CLEARED"
     # Water quality card: the tank node only sends readings with a bad-water alert (it judges the
     # water itself), so show the last bad reading, and the latest runoff/chemical test with when it was caught
     bad = [m for m in qalerts if m["a"] != "QUALITY_CLEARED"]
     qtests = [e for e in applied if e["do"] == "quality"]
     qtest = qtests[-1] if qtests else None
     if qtest:
-        hit = next((m for m in bad if m["a"] == "QUALITY_" + qtest["kind"].upper() and m["t"] >= qtest["t"]), None)
+        hit = next((m for m in bad if m["a"] in ("QUALITY_" + qtest["kind"].upper(), "QUALITY_LIMIT_VIOLATION")
+                    and m["t"] >= qtest["t"]), None)
         clean = hit and next((m for m in qalerts if m["a"] == "QUALITY_CLEARED" and m["t"] > hit["t"]), None)
         qtest = {"kind": qtest["kind"], "start": qtest["t"], "end": qtest["t"] + 60 * qtest["minutes"],
                  "alert": hit and {k: hit[k] for k in ("a", "t", "rx")}, "clean": clean and clean["rx"]}
-    feed = [e for e in gw if e["event"] not in ("BALANCE_PAUSED",)][-40:][::-1]
+    feed = [e for e in gw if e["event"] not in ("BALANCE_PAUSED", "BALANCE")][-40:][::-1]
 
     out = {"running": running, "clock": clock, "nodes": nodes, "sites": lines(run, "leak_sites.txt"),
            "status": status, "active": active, "led": led, "leaks": leaks[::-1], "later": later, "feed": feed, "levels": levels[-96:], "quality": quality,
            "quality_since": qalerts[-1]["rx"] if qalerts else None,
            "quality_bad": bad and {k: bad[-1].get(k) for k in ("a", "ph", "tds", "temp", "t", "rx")}, "quality_test": qtest,
-           "messages": len(log)}
+           "messages": len(log), "health": health(log, gw, open_p, closed_p, clock, nodes, running)}
+    out["valve_open"] = out["health"]["valve_open"]
     if radio:
         out["radio"] = radio_stats(run, log)
     return out
@@ -167,7 +270,9 @@ def radio_stats(run, log):
     return {"up": count(up), "down": count(down), "waits": sum(int(r["backoffs"] or 0) > 0 for r in up),
             "per_node": {n: round(ok / k, 4) for n, (ok, k) in sorted(per.items())},
             "median_delay_s": statistics.median(delays) if delays else None,
-            "resends": len(up) - len({(r["src"], r["seq"]) for r in up})}
+            "resends": sum(r["kind"] != "GOT" for r in up) - len({(r["src"], r["seq"]) for r in up if r["kind"] != "GOT"}),
+            # last time each node got something from the gateway (a beacon or an ACK): "gateway heard"
+            "heard": {r["dst"]: float(r["t_s"]) for r in down if r["result"].strip() == "ok" and r["kind"] in ("BEACON", "ACK")}}
 
 
 def valid(c, sites, nodes):
@@ -180,6 +285,7 @@ def valid(c, sites, nodes):
              "radio_cut": lambda: (c.get("who") == "all" or c.get("who") in nodes) and num("minutes", 1, 600),
              "speed": lambda: num("delay_s", 0, 60),
              "until_alert": lambda: c.get("node") in nodes and num("from_s", 0, 1e8),
+             "valve_reopen": lambda: True,
              "pause": lambda: True, "resume": lambda: True, "stop": lambda: True}
     return isinstance(c, dict) and c.get("do") in rules and rules[c["do"]]() and when()
 
@@ -319,6 +425,38 @@ def check():
         f.write(json.dumps({"k": "ALERT", "n": "B-TANK", "s": 11, "t": 106200, "a": "QUALITY_CLEARED", "rx": 106260}) + "\n")
     s = state(run)
     assert s["quality"] == "QUALITY_CLEARED" and s["quality_test"]["clean"] == 106260 and not any(m["n"] == "B-TANK" for m in s["active"])
+    # Building health: tank valve shut by runoff (limit + cause), a pipe leak and a flat leak open:
+    # Fix first ranks the water first; the valve reopens, the flat reports its leak over
+    add = lambda name, rows: open(os.path.join(run, name), "a").write("".join(json.dumps(r) + "\n" for r in rows))
+    add("gateway_log.jsonl", [
+        {"k": "ALERT", "n": "B-TANK", "s": 12, "t": 110000, "a": "QUALITY_LIMIT_VIOLATION", "ph": 6.2, "tds": 60, "turb": 20, "viol": 5, "rx": 110060},
+        {"k": "ALERT", "n": "B-TANK", "s": 13, "t": 110000, "a": "QUALITY_RUNOFF", "rx": 110060},
+        {"k": "ALERT", "n": "B-TANK", "s": 14, "t": 110000, "a": "VALVE_CLOSED", "valve": 0, "rx": 110060},
+        {"k": "SUM", "n": "B-TANK", "s": 15, "t": 110700, "i": 123, "vol_l": 0, "in_l": 900, "level_m": 1.6, "valve": 0,
+         "ph": 6.3, "tds": 70, "turb": 18, "temp": 26, "rx": 110760},
+        {"k": "SUM", "n": "B-203", "s": 16, "t": 110700, "i": 123, "vol_l": 40, "p_min": 9, "rx": 110760},
+        {"k": "ALERT", "n": "B-203", "s": 17, "t": 110000, "a": "LEAK_NIGHT_FLOW", "flow": 0.05, "rx": 110100}])
+    add("gateway_events.jsonl", [{"t": 110100, "event": "BALANCE", "i": 122, "lost": {"2": 1.0, "1": 0.5}}])
+    s = state(run)
+    h = s["health"]
+    order = [p["a"] for p in h["fix_first"]]
+    assert order[0] == "QUALITY_LIMIT_VIOLATION" and h["status"] == "Critical", order
+    assert order.index("QUALITY_RUNOFF") < order.index("LEAK_NIGHT_FLOW") < order.index("NODE_SILENT"), order
+    assert not h["valve_open"] and not s["valve_open"] and h["cause"] == "QUALITY_RUNOFF" and h["broken"] == ["ph", "turb"], h
+    assert s["quality"] == "QUALITY_LIMIT_VIOLATION" and s["status"]["B-TANK"] == "alert"
+    assert h["balance"] == [[122, {"2": 1.0, "1": 0.5}]] and not any(e["event"] == "BALANCE" for e in s["feed"])
+    assert h["usage"] == [["B-203", 40]] and h["tank_series"][-1] == [110700, 1.6, 1.0]
+    add("gateway_log.jsonl", [
+        {"k": "ALERT", "n": "B-TANK", "s": 18, "t": 111000, "a": "QUALITY_CLEARED", "rx": 111060},
+        {"k": "ALERT", "n": "B-TANK", "s": 19, "t": 111500, "a": "VALVE_OPENED", "valve": 1, "rx": 111560},
+        {"k": "ALERT", "n": "B-203", "s": 20, "t": 111600, "a": "FLAT_LEAK_CLEARED", "rx": 111660}])
+    s = state(run)
+    h = s["health"]
+    assert h["valve_open"] and s["status"]["B-203"] == "ok" and s["quality"] == "QUALITY_CLEARED"
+    assert [(p["a"], p["why"]) for p in h["past"][:2]] == [("LEAK_NIGHT_FLOW", "water seen off for 10 min"),
+                                                            ("VALVE_CLOSED", "valve reopened after a water test")], h["past"][:2]
+    assert [p["a"] for p in h["fix_first"]] == ["PIPE_LEAK", "NODE_SILENT"], h["fix_first"]   # floor 3 pipe, silent B-204 left
+    assert valid({"do": "valve_reopen"}, s["sites"], s["nodes"])
     # Only sensible commands get through
     sites, nodes = s["sites"], s["nodes"]
     good = [{"do": "leak", "where": "B-203", "size": 0.3, "at_s": 100000}, {"do": "leak", "where": "B-D1", "size": "large"},

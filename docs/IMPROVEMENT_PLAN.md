@@ -9,7 +9,7 @@ It comes from two reviews:
 
 ## 0. Ground rules
 
-- **No valves.** The response to any problem is the buzzer, the LED and an alert to the gateway.
+- **One tank valve, for bad water only (since 2026-11-28; was "no valves").** It shuts on a broken IS 10500 limit, runoff or chemical; a person reopens it. Leaks get the buzzer, the LED and an alert to the gateway.
 - **Sensors are simulated and ideal.** On the real hardware, each node Pi reads recorded sensor readings **row by row from a file** (one row per minute), in place of real sensors. Real sensor limits (accuracy, smallest flow a sensor can see) are therefore out of scope. A note about them is kept in section 7.
 - **The radio stays plain LoRa.** We borrow three ideas from LoRaWAN: signatures, counters and binary messages.
 - **Every step:**
@@ -70,7 +70,7 @@ In `simulation/webots/run_offline.py`, replace the "no false valve closures" tes
 
 ### 2.4 Continuous-flow check
 
-**Status: done (2026-11-21).** `LEAK_CONTINUOUS_FLOW`: flow above 0.005 L/s for **8 h** (not 6 h: normal simulated flats run up to 6 h 1 min nonstop, because simulated use is smooth). Self-check: a 0.01 L/s daytime leak is caught, a normal flat raises nothing.
+**Status: done (2026-11-21).** `LEAK_CONTINUOUS_FLOW`: flow above 0.005 L/s for **8 h** (not 6 h: normal simulated flats run up to 6 h 1 min nonstop, because simulated use is smooth). **Changed 2026-11-28 to 3 h** with bursty simulated use (no normal flat runs water more than 15 min nonstop). Self-check: a 0.01 L/s daytime leak is caught, a normal flat raises nothing.
 
 - **Problem.** A small leak that starts in the daytime is only caught by the night check, up to about 20 h later.
 - **Fix.** Raise an alert if flow **never drops to zero for N hours**. Commercial ultrasonic meters do the same: Ultrimis raises a leak alarm after 720 minutes of steady low flow.
@@ -208,7 +208,7 @@ Set `RuntimeWatchdogSec=15` in systemd. If the node software freezes, the Pi reb
 - **Real flow sensor limits.** A common hobby sensor (YF-S201) only counts flow above about 1 L/min (0.017 L/s), with about 10% error. Our night threshold is 0.02 L/s, right at that limit. Ultrasonic meters start at about 1 L/hour (look for an ISO 4064 rating of R400 or higher). Since 2026-11-27 the simulated meters have a starting flow and a low-flow error (`simulation/live/water.py`).
 - **Full LoRaWAN with ChirpStack.** Not chosen: a proper LoRaWAN gateway needs an 8-channel radio, and our ESP32 with one LoRa module is not one. We borrow its ideas instead (Phase 2).
 - **Mesh radio (Meshtastic, Reticulum) and Wi-Fi HaLow.** Not needed unless some flats cannot reach the gateway directly.
-- **Pressure-hold leak tests (as in Moen Flo).** These need a shutoff valve. No valves in this project, so they are ruled out.
+- **Pressure-hold leak tests (as in Moen Flo).** These need a shutoff valve in each flat. Our only valve is at the tank, so they are ruled out.
 - **Wi-Fi instead of LoRa.** The Pi Zero 2 W has Wi-Fi built in. We keep LoRa so that alerts still reach the gateway when the building's router or internet is down. Be ready to explain this choice.
 
 ## 8. Order of work

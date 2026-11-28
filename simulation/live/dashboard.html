@@ -39,11 +39,12 @@ button, select, input { font: inherit; color: inherit; }
 .clay { background: var(--clay); border-radius: 32px; box-shadow: var(--clay-shadow); }
 
 /* Top bar */
-.top { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; margin-bottom: 16px; }
+.top { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 14px; margin-bottom: 16px; }
 .brand { display: flex; align-items: center; gap: 14px; margin-right: auto; }
 .brand svg { width: 46px; height: 46px; filter: drop-shadow(5px 6px 8px rgba(var(--shade), .25)); }
 .brand h1 { font-size: 1.7rem; line-height: 1; }
 .brand p { color: var(--ink-soft); font-size: .95rem; }
+@media (min-width: 761px) and (max-width: 2100px) { .brand p { display: none; } }   /* one row of controls at 1920 px */
 .clock { display: flex; align-items: center; gap: 12px; padding: 10px 12px 10px 22px; border-radius: 999px; }
 .clock #clock { font-family: var(--display); font-size: 1.4rem; font-weight: 500; font-variant-numeric: tabular-nums; }
 .chip { display: inline-block; padding: 4px 12px; border-radius: 999px; font-size: .85rem; font-weight: 700; background: var(--slab); box-shadow: var(--well-shadow); }
@@ -278,6 +279,66 @@ input[type=range]::-moz-range-thumb { width: 30px; height: 30px; border: 0; bord
 .toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); padding: 12px 22px; border-radius: 20px; font-weight: 800; background: var(--ink); color: #fff; opacity: 0; transition: opacity .3s; pointer-events: none; }
 .toast.show { opacity: 1; }
 
+/* Two pages: Control room (run the tests) and Building health (what a caretaker checks) */
+.tabs { display: flex; gap: 6px; padding: 5px; border-radius: 22px; background: var(--slab); box-shadow: var(--well-shadow); }
+.tabs button { border: 0; cursor: pointer; padding: 7px 13px; border-radius: 17px; font-weight: 800; background: transparent; color: var(--ink-soft); }
+.tabs button[aria-selected="true"] { background: var(--clay); color: var(--ink); box-shadow: 4px 5px 10px rgba(var(--shade), .16), inset 3px 4px 8px rgba(255, 255, 255, .9); }
+body[data-tab="health"] .cockpit, body[data-tab="health"] .below, body[data-tab="control"] #health { display: none; }
+body[data-tab="health"] .screen { height: auto; min-height: 100vh; }
+
+/* Tank valve: in the drawing, on the water card and the health page */
+.dg-valve path { fill: var(--calm-deep); stroke: var(--ink); stroke-width: .06; }
+.dg-valve.shut path { fill: var(--alert-deep); }
+.valve-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin: 0 0 12px; }
+.valve-row .btn { padding: 9px 16px; border-radius: 16px; }
+.dg-led.blue { fill: #6f8ff0; }
+
+/* Building health page */
+.health { display: flex; flex-direction: column; gap: 22px; }
+.h-status { display: flex; flex-wrap: wrap; align-items: center; gap: 14px 28px; padding: 16px 26px; border-radius: 30px; }
+.h-status .h-word { font-family: var(--display); font-weight: 600; font-size: 2.4rem; line-height: 1; padding: 10px 22px; border-radius: 22px;
+  background: var(--calm); box-shadow: inset -4px -5px 10px color-mix(in srgb, var(--calm-deep) 30%, transparent), inset 4px 5px 10px rgba(255, 255, 255, .55); }
+.h-status[data-level="Critical"] .h-word, .lvl[data-level="Critical"] { background: var(--alert-deep); color: #fff; }
+.h-status[data-level="High"] .h-word, .lvl[data-level="High"] { background: var(--alert); }
+.h-status[data-level="Medium"] .h-word, .lvl[data-level="Medium"] { background: var(--watch); }
+.h-status[data-level="Low"] .h-word, .lvl[data-level="Low"] { background: var(--slab); }
+.h-status .h-sub { flex: 1 1 320px; color: var(--ink-soft); font-weight: 700; }
+.h-status .h-sub b { color: var(--ink); }
+.h-facts { display: flex; flex-wrap: wrap; gap: 8px; }
+.h-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 22px; height: calc(100vh - 205px); min-height: 600px; }
+.h-grid .col > .grow { min-height: 180px; }
+.h-list { list-style: none; padding: 0 4px 4px 0; margin: 10px 0 0; display: grid; align-content: start; gap: 10px; flex: 1; min-height: 0; overflow: auto; }
+.h-list li { padding: 10px 14px; border-radius: 18px; background: var(--slab); box-shadow: var(--well-shadow); font-size: .92rem; }
+.h-list li b { font-weight: 800; }
+.h-list li p { color: var(--ink-soft); }
+.fix li { display: grid; grid-template-columns: 30px 1fr auto; gap: 4px 12px; align-items: start; }
+.fix .rank { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; font-family: var(--display); font-weight: 600; background: var(--clay); }
+.fix .lvl { padding: 3px 10px; border-radius: 999px; font-size: .8rem; font-weight: 800; white-space: nowrap; }
+.fix p { grid-column: 2 / -1; }
+.readings { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin: 10px 0 12px; }
+.reading { padding: 10px 12px; border-radius: 18px; background: var(--slab); box-shadow: var(--well-shadow); }
+.reading small { display: block; font-weight: 800; color: var(--ink-soft); font-size: .78rem; }
+.reading b { font-family: var(--display); font-weight: 600; font-size: 1.45rem; font-variant-numeric: tabular-nums; }
+.reading span { display: block; font-size: .78rem; color: var(--ink-soft); font-weight: 700; }
+.reading.out { background: var(--alert); box-shadow: inset -3px -4px 8px color-mix(in srgb, var(--alert-deep) 30%, transparent), inset 3px 4px 8px rgba(255, 255, 255, .5); }
+.reading.out span { color: var(--ink); }
+.charts { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 14px; }
+.chart small { font-weight: 800; color: var(--ink-soft); font-size: .8rem; }
+.chart svg { display: block; width: 100%; height: 54px; }
+.strip { display: grid; grid-template-columns: 52px 1fr; gap: 4px 8px; align-items: center; margin-top: 8px; font-size: .82rem; font-weight: 800; color: var(--ink-soft); }
+.strip svg { width: 100%; height: 14px; display: block; border-radius: 6px; }
+.bars { display: grid; gap: 6px; margin-top: 10px; }
+.bars div { display: grid; grid-template-columns: 52px 1fr 64px; gap: 10px; align-items: center; font-size: .88rem; font-weight: 700; }
+.bars .bar { margin: 0; height: 12px; }
+.bars span:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+.bars .hot i { background: var(--alert); }
+.heard { display: grid; grid-template-columns: repeat(auto-fill, minmax(62px, 1fr)); gap: 6px; margin-top: 10px; }
+.heard span { display: flex; align-items: center; gap: 6px; font-size: .82rem; font-weight: 800; }
+.tiles.small { grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 10px; }
+.tiles.small .tile { padding: 8px 12px; }
+.tiles.small .big { font-size: 1.35rem; }
+.tiles.small p { font-size: .8rem; }
+
 /* Smaller or shorter screens: the page scrolls normally instead of fitting the window */
 @media (max-width: 1250px), (max-height: 820px) {
   .screen { height: auto; min-height: 0; }
@@ -287,11 +348,17 @@ input[type=range]::-moz-range-thumb { width: 30px; height: 30px; border: 0; bord
   .cockpit > .col:last-child > .alarm { grid-column: 1 / -1; max-height: none; }
   .diagram svg { height: auto; flex: none; }
   .leaks, .feed { max-height: 520px; }
+  .h-grid { height: auto; grid-template-columns: 1fr 1fr; }
+  .h-list { max-height: 420px; flex: none; }
+  .h-grid .col > .grow { flex: none; }
 }
 @media (max-width: 760px) {
   .radio-strip span { flex: 1; padding: 3px 8px; }
   .cockpit, .cockpit > .col:last-child, .below, .sensors ul { grid-template-columns: 1fr; }
   .tiles { grid-template-columns: 1fr 1fr; }
+  .h-grid, .readings { grid-template-columns: 1fr 1fr; }
+  .h-grid { grid-template-columns: 1fr; }
+  .h-status .h-word { font-size: 1.8rem; }
 }
 @media (max-width: 520px) {
   .page { padding: 16px 16px 40px; }
@@ -304,7 +371,7 @@ input[type=range]::-moz-range-thumb { width: 30px; height: 30px; border: 0; bord
 @media (prefers-reduced-motion: reduce) { .drip svg, .dg-drip, .dg-buzz path, .alarm.fresh .alarm-head svg { animation: none; } * { transition: none !important; } }
 </style>
 </head>
-<body>
+<body data-tab="control">
 <div class="page">
  <div class="screen">
   <header class="top">
@@ -312,16 +379,20 @@ input[type=range]::-moz-range-thumb { width: 30px; height: 30px; border: 0; bord
       <svg viewBox="0 0 48 48" aria-hidden="true"><path d="M24 4C24 4 9 21 9 30a15 15 0 0 0 30 0C39 21 24 4 24 4z" fill="#8ccbe8"/><ellipse cx="18" cy="29" rx="4" ry="6" fill="#fff" opacity=".55"/></svg>
       <div><h1>Building B</h1><p>Aqua Edge water monitor</p></div>
     </div>
+    <nav class="tabs" role="tablist" aria-label="Pages">
+      <button role="tab" id="tab-control" data-tab="control" aria-selected="true" aria-controls="cockpit">Control room</button>
+      <button role="tab" id="tab-health" data-tab="health" aria-selected="false" aria-controls="health">Building health</button>
+    </nav>
     <div class="clock clay"><span id="clock">No simulation</span><span id="mode" class="chip">Stopped</span></div>
     <a class="radio-strip" href="#radio" title="Radio details at the bottom of the page">
       <span><small>Radio: through first time</small><b id="rs-ok">-</b></span>
       <span><small>Lost to collisions</small><b id="rs-col">-</b></span>
       <span><small>Usual delay</small><b id="rs-delay">-</b></span>
     </a>
-    <button class="btn" data-cmd='{"do":"radio_cut","who":"all","minutes":60}' title="Test: every node's radio goes silent for an hour">Cut every radio, 1 h</button>
+    <button class="btn" data-cmd='{"do":"radio_cut","who":"all","minutes":60}' title="Test: every node's radio goes silent for an hour">Cut radios, 1 h</button>
     <div class="controls">
       <select id="speed" aria-label="Simulation speed">
-        <option value="0">As fast as possible</option>
+        <option value="0">Fastest</option>
         <option value="0.05">Fast</option>
         <option value="0.25">Watchable</option>
         <option value="1">1 second per minute</option>
@@ -334,7 +405,7 @@ input[type=range]::-moz-range-thumb { width: 30px; height: 30px; border: 0; bord
     </div>
   </header>
 
-  <main class="cockpit">
+  <main class="cockpit" id="cockpit" role="tabpanel" aria-labelledby="tab-control">
     <section class="col">
       <div class="diagram clay only-wide">
         <svg id="dg" aria-label="Building B cut open: click a node label, or a white dot on the down pipe, to pick where a leak goes"></svg>
@@ -391,6 +462,8 @@ input[type=range]::-moz-range-thumb { width: 30px; height: 30px; border: 0; bord
       <article class="card clay water" id="water-card">
         <div class="card-head"><h2>Water quality</h2><span class="chip" id="tank-quality">Clean</span></div>
         <div class="verdict" id="verdict"><b id="verdict-text">No report yet</b><span id="verdict-sub"></span></div>
+        <div class="valve-row"><span class="chip" id="valve-chip">Valve open</span><span class="hint" id="valve-text"></span>
+          <button class="btn" id="reopen" hidden>Reopen valve</button></div>
         <ol class="moments" id="q-test" hidden></ol>
         <p class="hint q-reading" id="q-reading"></p>
         <div class="events">
@@ -424,15 +497,67 @@ input[type=range]::-moz-range-thumb { width: 30px; height: 30px; border: 0; bord
       </article>
     </section>
   </main>
+
+  <section class="health" id="health" role="tabpanel" aria-labelledby="tab-health">
+    <div class="h-status clay" id="h-status" data-level="Normal">
+      <p class="h-word" id="h-word">No run</p>
+      <p class="h-sub" id="h-sub">Start the simulation on the Control room page.</p>
+      <div class="h-facts" id="h-facts"></div>
+    </div>
+    <div class="h-grid">
+      <div class="col">
+        <article class="card clay">
+          <div class="card-head"><h2>Water check</h2><span class="chip" id="h-valve">Valve open</span></div>
+          <p class="hint">Average of the last 15 minutes from the tank node, against the drinking water limits (IS 10500) and our 35 &deg;C limit.</p>
+          <div class="readings" id="h-readings"></div>
+          <p id="h-cause"></p>
+        </article>
+        <article class="card clay">
+          <h2>Water over the last day</h2>
+          <div class="charts" id="h-charts"></div>
+        </article>
+        <article class="card clay">
+          <h2>Sensor network</h2>
+          <div class="tiles small" id="h-net"></div>
+          <div class="heard" id="h-heard"></div>
+        </article>
+      </div>
+      <div class="col">
+        <article class="card clay grow">
+          <h2>Fix first</h2>
+          <p class="hint">Open problems, most urgent first: how serious the kind is, how many flats it reaches, its size and how long it has lasted.</p>
+          <ol class="h-list fix" id="h-fix"></ol>
+        </article>
+        <article class="card clay">
+          <h2>Tank and down pipe</h2>
+          <div class="charts" id="h-tank"></div>
+          <p class="hint" style="margin-top:10px">Litres lost in each floor's stretch of down pipe, one square per 15 minutes (the gateway's water balance; red is over 30 L).</p>
+          <div class="strip" id="h-strip"></div>
+        </article>
+      </div>
+      <div class="col">
+        <article class="card clay grow">
+          <h2>Flats</h2>
+          <ul class="h-list" id="h-flats" style="flex:none;max-height:150px"></ul>
+          <h3 style="font-size:1rem;margin-top:12px">Water used in the last 24 hours</h3>
+          <div class="bars h-list" id="h-usage" style="gap:6px"></div>
+        </article>
+        <article class="card clay grow">
+          <h2>Past problems</h2>
+          <ol class="h-list" id="h-past"></ol>
+        </article>
+      </div>
+    </div>
+  </section>
  </div>
 
   <div class="below">
     <article class="card clay sensors">
       <h2>What each node measures</h2>
       <ul>
-        <li><b>Flat node<small>20, one per flat</small></b><p>Water flow meter and pressure sensor. Flats 301, 201, 101 and G01 also read the down pipe meter above their floor. <span>Raises: water running at night, water never stopped for 8 hours, much more water than usual.</span></p></li>
-        <li><b>Tank node<small>1, on the roof tank</small></b><p>Inflow and outflow meters, water level, pH, TDS (dissolved salts), turbidity (cloudiness) and temperature. <span>Raises: water leaving the tank much faster than usual, runoff or chemical in the water (small model on the node), water above 35 &deg;C, supply running low.</span></p></li>
-        <li><b>Gateway<small>1, outside</small></b><p>No sensors. <span>Receives every message, notices nodes that go quiet, and for each floor's stretch of down pipe compares the water in, the water on to the next floor and what the 4 flats used: more than 30 L missing in 15 minutes, or 20 L between 2 and 4 am, is a leak on that floor.</span></p></li>
+        <li><b>Flat node<small>20, one per flat</small></b><p>Water flow meter and pressure sensor. Flats 301, 201, 101 and G01 also read the down pipe meter above their floor. <span>Raises: water running at night, water never stopped for 3 hours, much more water than usual, high flow with the flat's pressure dropping. Says when each problem is over.</span></p></li>
+        <li><b>Tank node<small>1, on the roof tank</small></b><p>Inflow and outflow meters, water level, pH, TDS (dissolved salts), turbidity (cloudiness) and temperature. <span>Raises: water breaking the drinking water limits (pH, TDS, turbidity), what the bad water looks like (runoff or chemical, small model on the node), water above 35 &deg;C, water leaving the tank much faster than usual, supply running low. Shuts the tank valve on bad water; a person reopens it after testing.</span></p></li>
+        <li><b>Gateway<small>1, outside</small></b><p>No sensors. <span>Receives every message, notices nodes that go quiet, and for each floor's stretch of down pipe compares the water in, the water on to the next floor and what the 4 flats used: more than 30 L missing in 15 minutes, or 20 L between 2 and 4 am, is a leak on that floor. Sends a beacon every minute, and warns flats when the tank valve shuts or their floor's pipe leaks.</span></p></li>
       </ul>
     </article>
     <article class="card clay" id="key">
@@ -444,6 +569,8 @@ input[type=range]::-moz-range-thumb { width: 30px; height: 30px; border: 0; bord
         <li><svg viewBox="0 0 12 16" aria-hidden="true"><path d="M6 1C6 1 1 7 1 10.5a5 5 0 0 0 10 0C11 7 6 1 6 1z" fill="#4a90c8"/></svg>Leak running (the system still has to find it)</li>
         <li><span class="dot" style="background:#e0475f"></span>Red light on a node: its own alarm, buzzer beeping, works even with the radio down</li>
         <li><span class="dot" style="background:#e8b84a"></span>Yellow light: the node's messages are waiting for the gateway's reply</li>
+        <li><span class="dot" style="background:#6f8ff0"></span>Blue light: a warning from the gateway (tank valve shut, or a leak on this floor's pipe)</li>
+        <li><span class="dot" style="background:#4f9d91;border-radius:3px"></span>Tank valve on the pipe leaving the tank: green open, red shut</li>
         <li><span class="dot" style="background:#fff;box-shadow:inset 0 0 0 2px #3a76a8"></span>Spot on the down pipe where you can start a leak; red once the leak is found</li>
         <li><span class="dot" style="background:#3a76a8"></span>Rising pipe, pump to tank</li>
         <li><span class="dot" style="background:#79b4d8"></span>Down pipe, tank to flats</li>
@@ -476,22 +603,30 @@ const mins = s => s < 90 * 60 ? `${Math.round(s / 60)} min` : `${(s / 3600).toFi
 const flatName = n => n === "B-TANK" ? "Tank" : n === "PIPE" ? "Down pipe" : n.startsWith("B-D") ? `Down pipe, ${n[3] === "0" ? "ground floor" : "floor " + n[3]}` : "Flat " + n.slice(2);
 const nodeOf = n => n.startsWith("B-D") ? "B-TANK" : n;     // the down pipe is watched by the tank node
 const ALERTS = {
-  LEAK_NIGHT_FLOW: "Water running at night", LEAK_CONTINUOUS_FLOW: "Water never stopped for 8 hours",
+  LEAK_NIGHT_FLOW: "Water running at night", LEAK_CONTINUOUS_FLOW: "Water never stopped for 3 hours",
+  LEAK_PRESSURE_DROP: "High flow and the flat's pressure dropping", NODE_SILENT: "Node not heard for 45 min",
+  QUALITY_LIMIT_VIOLATION: "Tank water breaks the drinking water limits", VALVE_CLOSED: "Tank valve shut, no water to the flats",
+  VALVE_OPENED: "Tank valve open again",
   ABNORMAL_CONSUMPTION: "Much more water than usual", ABNORMAL_SUPPLY: "Water leaving the tank much faster than usual",
   PIPE_LEAK: "Water going missing from the down pipe",
   QUALITY_RUNOFF: "Runoff in the tank water", QUALITY_CHEMICAL: "Chemical in the tank water", QUALITY_HOT: "Tank water too warm", QUALITY_CLEARED: "Tank water clean again"};
-const QUALITY = {QUALITY_CLEARED: "Clean", QUALITY_RUNOFF: "Runoff in the water", QUALITY_CHEMICAL: "Chemical in the water", QUALITY_HOT: "Water too warm"};
-const QCOLOR = {QUALITY_RUNOFF: "var(--runoff)", QUALITY_CHEMICAL: "var(--chemical)", QUALITY_HOT: "var(--hot)"};
+const QUALITY = {QUALITY_CLEARED: "Clean", QUALITY_RUNOFF: "Runoff in the water", QUALITY_CHEMICAL: "Chemical in the water", QUALITY_HOT: "Water too warm",
+  QUALITY_LIMIT_VIOLATION: "Limits broken"};
+const QCOLOR = {QUALITY_RUNOFF: "var(--runoff)", QUALITY_CHEMICAL: "var(--chemical)", QUALITY_HOT: "var(--hot)", QUALITY_LIMIT_VIOLATION: "var(--alert)"};
 const SIZES = {small: 0.05, medium: 0.5, large: 1.5};
 const ADVICE = {
   LEAK_NIGHT_FLOW: "Check the flat's taps, toilet and pipes.", LEAK_CONTINUOUS_FLOW: "Check the flat's taps, toilet and pipes.",
-  ABNORMAL_CONSUMPTION: "Check the flat's taps, toilet and pipes.",
+  ABNORMAL_CONSUMPTION: "Check the flat's taps, toilet and pipes.", LEAK_PRESSURE_DROP: "A big leak in the flat is likely: close its stop tap and check the pipes.",
+  QUALITY_LIMIT_VIOLATION: "Tell residents not to drink or cook with tap water. The tank valve has shut; test the water before reopening it.",
+  VALVE_CLOSED: "Flats have no tank water. Test the water by hand; once it reads clean, press Reopen valve (the tank node only opens it if its own readings are clean too).",
+  NODE_SILENT: "Check the node's power and antenna. Its readings are kept on its SD card and sent when it is heard again.",
   ABNORMAL_SUPPLY: "Look for a burst on the main down pipe or in a flat.",
   PIPE_LEAK: "Check this stretch of down pipe and its joints, and the branch pipes before each flat's meter.",
   QUALITY_RUNOFF: "Tell residents not to drink or cook with tap water. Check the tank lid and overflow for rainwater getting in.",
   QUALITY_CHEMICAL: "Tell residents not to drink or cook with tap water until the tank node reports it clean. Find what got into the tank.",
   QUALITY_HOT: "Tell residents not to drink tap water: bacteria such as Legionella grow fast in stored water this warm. Shade the tank and flush it once it cools."};
 const LEARN_S = 86400;
+const ORDER = {Critical: 0, High: 1, Medium: 2, Low: 3};
 let S = null, R = null, polls = 0, picked = null, size = "small", lps = 0.05, startAt = "now", tiles = {}, dg = null;
 
 function describe(v) {
@@ -580,6 +715,9 @@ function buildDiagram(flats) {
   // Tank on the roof: glass walls, the water inside shows the level and the water quality
   g += `<path class="dg-pipe" d="M${xy(P(TANK.x - 1, 0, 15))}L${xy(P(TANK.x - 1, 0, TANK.z))}M${xy(P(TANK.x + 1, 0, 15))}L${xy(P(TANK.x + 1, 0, TANK.z))}" style="stroke:#9fb3c1"/>`;
   g += `<g id="dg-water"></g>` + tankShape("dg-tank-glass", TANK.z + TANK.h);
+  // Tank valve on the down pipe just below the tank: shuts on bad water
+  const [vx, vy] = P(...DOWN, 15.55);
+  g += `<g class="dg-valve" id="dg-valve"><title>Tank valve</title><path d="M${vx - .7} ${vy - .5}L${vx + .7} ${vy + .5}L${vx + .7} ${vy - .5}L${vx - .7} ${vy + .5}Z"/></g>`;
   // Leak spots on the down pipe, one per floor (where each floor's branch pipes split off)
   for (let f = 4; f >= 0; f--) {
     const [sx, sy] = P(...DOWN, 3 * f + .3);
@@ -631,6 +769,9 @@ function renderDiagram() {
     el.querySelector(".dg-buzz").toggleAttribute("hidden", led !== "red");
     el.querySelector(".dg-drip").toggleAttribute("hidden", !(n in leaks));
   });
+  const shut = live && S.valve_open === false;
+  $("#dg-valve").setAttribute("class", `dg-valve${shut ? " shut" : ""}`);
+  $("#dg-valve title").textContent = shut ? "Tank valve: shut" : "Tank valve: open";
   const lv = S.levels.length ? S.levels[S.levels.length - 1][1] : 0;
   $("#dg-water").innerHTML = lv ? tankShape("dg-tank-water", TANK.z + Math.min(TANK.h, lv)) : "";
   $("#dg-water").querySelectorAll("path, ellipse").forEach(e => e.style.fill = QCOLOR[S.quality] || "");
@@ -704,6 +845,7 @@ function render() {
   renderDiagram(); renderAlarm();
   renderTank(); renderControls(); renderResult(); renderFeed();
   if (R) renderRadio();
+  if (document.body.dataset.tab === "health") renderHealth();
 }
 
 function renderTank() {
@@ -723,21 +865,28 @@ function renderTank() {
 
 /* Water quality: the tank node's small model judges pH, dissolved salts and cloudiness every minute and only
    radios when the water turns bad or clean again, so the readings shown are the ones sent with the last bad-water alert */
-const LIMITS = {ph: [6.5, 8.5], tds: [0, 500], temp: [0, 35]};   // IS 10500 (the model's limits); temperature: the node's plain limit
+const LIMITS = {ph: [6.5, 8.5], tds: [0, 500], turb: [0, 5], temp: [0, 35]};   // IS 10500; temperature: the node's plain limit
 function renderWater() {
   const live = S.running && S.clock, bad = S.quality !== "QUALITY_CLEARED", heard = S.levels.length || S.quality_since != null;
   $("#tank-quality").textContent = QUALITY[S.quality]; $("#tank-quality").classList.toggle("bad", bad);
   $("#verdict").className = "verdict " + (!heard ? "none" : bad ? "bad" : "");
   $("#verdict-text").textContent = !heard ? "No report yet" : bad ? `${QUALITY[S.quality]}: not safe to drink` : "Clean, safe to drink";
+  const shut = S.valve_open === false, H = S.health;
+  $("#valve-chip").textContent = shut ? "Valve shut" : "Valve open"; $("#valve-chip").classList.toggle("bad", shut);
+  $("#valve-text").textContent = shut ? `Shut ${when(H.valve_since)}: flats get no tank water until someone tests it and reopens.`
+    : "The tank node shuts it at once if the water breaks a limit or looks like runoff or a chemical.";
+  $("#reopen").hidden = !(live && shut);
   $("#verdict-sub").textContent = bad ? `Raised by the tank node, gateway heard it ${when(S.quality_since)}. What to do is under Needs attention.`
     : S.quality_since != null ? `Reported clean again ${when(S.quality_since)}. Checked every minute on the tank node.`
     : "Checked every minute on the tank node: pH, dissolved salts (TDS), cloudiness and temperature.";
   const b = S.quality_bad, val = (k, v, unit) => {
     const [lo, hi] = LIMITS[k], out = v < lo || v > hi;
-    return `<b class="${out ? "out" : ""}">${{ph: "pH ", tds: "TDS ", temp: ""}[k]}${v}${unit}</b>${out ? (v < lo ? " (too low)" : " (too high)") : ""}`;
+    return `<b class="${out ? "out" : ""}">${{ph: "pH ", tds: "TDS ", turb: "turbidity ", temp: ""}[k]}${v}${unit}</b>${out ? (v < lo ? " (too low)" : " (too high)") : ""}`;
   };
-  $("#q-reading").innerHTML = (b && b.ph != null ? `Readings sent with the ${bad ? "" : "last "}alert: ${val("ph", b.ph, "")}, ${val("tds", b.tds, " ppm")}`
-      + (b.temp != null ? `, ${val("temp", b.temp, " &deg;C")}` : "") + ". " : "")
+  const w = H.water;
+  $("#q-reading").innerHTML = (w.ph != null ? `Last 15 minutes: ${val("ph", w.ph, "")}, ${val("tds", w.tds, " ppm")}, ${val("turb", w.turb, " NTU")}`
+      + (w.temp != null ? `, ${val("temp", w.temp, " &deg;C")}` : "") + ". " :
+      b && b.ph != null ? `Readings sent with the ${bad ? "" : "last "}alert: ${val("ph", b.ph, "")}, ${val("tds", b.tds, " ppm")}. ` : "")
     + "Safe: pH 6.5 to 8.5, TDS up to 500 ppm, cloudiness up to 5 NTU (IS 10500), up to 35 &deg;C.";
   const q = S.quality_test, box = $("#q-test"), t = S.clock ? S.clock.t : 0;
   box.hidden = !q;
@@ -801,6 +950,9 @@ function feedText(e) {
     case "NODE_SILENT": return ["silent", `${flatName(e.node)} not heard for ${e.last_heard_min} min`];
     case "NODE_BACK": return ["ok", `${flatName(e.node)} heard again after ${e.silent_min} min`];
     case "SUPPLY_EVENT": return ["silent", "Water supply problem: the tank is running low"];
+    case "PIPE_LEAK_CLEARED": return ["ok", `Night check clean again on the ${flatName(e.where || "PIPE").toLowerCase()}`];
+    case "VALVE_CLOSED": return ["alert", "Tank valve shut: every flat warned not to use tap water"];
+    case "VALVE_OPENED": return ["ok", "Tank valve open again: flats told the water is back"];
     case "CLOCK_SKEW": return ["silent", `${flatName(e.node)}'s clock is ${e.ahead_s} s ahead`];
     case "BAD_PACKET": return ["action", `Rejected ${e.count} fake or damaged packet${e.count > 1 ? "s" : ""}`];
     default: return ["ok", e.event];
@@ -822,6 +974,82 @@ function renderRadio() {
   $("#nodes").innerHTML = Object.entries(r.per_node).map(([n, v]) =>
     `<div class="node-row"><span>${n.slice(2)}</span><span class="bar"><i style="width:${(v * 100).toFixed(1)}%;${v < .95 ? "background:var(--watch)" : ""}"></i></span><span>${(v * 100).toFixed(1)}%</span></div>`).join("");
 }
+
+/* Building health page */
+function chart(points, lo, hi, band, color) {
+  // points: [[t, v]], band: [low, high] safe range drawn as a pale strip
+  const ok = points.filter(p => p[1] != null);
+  if (ok.length < 2) return `<svg viewBox="0 0 300 60" preserveAspectRatio="none"><text x="150" y="34" font-size="13" text-anchor="middle" fill="#587184">waiting for summaries</text></svg>`;
+  const t0 = ok[0][0], t1 = ok[ok.length - 1][0], vals = ok.map(p => p[1]);
+  lo = Math.min(lo, ...vals); hi = Math.max(hi, ...vals);
+  const y = v => (56 - (v - lo) / (hi - lo || 1) * 52).toFixed(1), x = t => ((t - t0) / (t1 - t0 || 1) * 296 + 2).toFixed(1);
+  const strip = band ? `<rect x="0" width="300" y="${y(Math.min(band[1], hi))}" height="${Math.max(0, y(Math.max(band[0], lo)) - y(Math.min(band[1], hi)))}" fill="var(--calm)" opacity=".45"/>` : "";
+  return `<svg viewBox="0 0 300 60" preserveAspectRatio="none">${strip}<polyline points="${ok.map(p => x(p[0]) + "," + y(p[1])).join(" ")}" fill="none" stroke="${color}" stroke-width="2.5" stroke-linejoin="round" vector-effect="non-scaling-stroke"/></svg>`;
+}
+const READ = [["ph", "pH", "", "6.5 to 8.5"], ["tds", "TDS", " ppm", "up to 500"], ["turb", "Turbidity", " NTU", "up to 5"], ["temp", "Temperature", " &deg;C", "up to 35"]];
+function renderHealth() {
+  const H = S.health, c = S.clock, now = c ? c.t : 0, ago = t => mins(Math.max(0, now - t));
+  const box = $("#h-status"), level = S.running || c ? H.status : "Normal";
+  box.dataset.level = level;
+  $("#h-word").textContent = !c ? "No run" : level === "Normal" ? "All normal" : `${level} problem`;
+  const top = H.fix_first[0];
+  $("#h-sub").innerHTML = !c ? "Start the simulation on the Control room page." : top
+    ? `<b>${flatName(top.n)}: ${ALERTS[top.a] || top.a}.</b> ${H.fix_first.length} open problem${H.fix_first.length > 1 ? "s" : ""}, worst first under Fix first.`
+    : "No open problems. Every node checks its own water every minute.";
+  const fresh = {Live: "", Paused: "", Stale: "bad", "No run": ""}[H.freshness];
+  $("#h-facts").innerHTML = `<span class="chip ${fresh}">${H.freshness === "Stale" ? "Stale: simulation stopped" : H.freshness}</span>` +
+    (c ? `<span class="chip">${when(now)}</span>` : "") + `<span class="chip ${H.valve_open ? "" : "bad"}">Tank valve ${H.valve_open ? "open" : "shut"}</span>` +
+    `<span class="chip ${S.quality === "QUALITY_CLEARED" ? "" : "bad"}">Water ${S.quality === "QUALITY_CLEARED" ? "clean" : "not safe"}</span>`;
+  // Water check
+  $("#h-valve").textContent = H.valve_open ? "Valve open" : "Valve shut"; $("#h-valve").classList.toggle("bad", !H.valve_open);
+  $("#h-readings").innerHTML = READ.map(([k, name, unit, safe]) => { const v = H.water[k], out = H.broken.includes(k);
+    return `<div class="reading ${out ? "out" : ""}"><small>${name}</small><b>${v == null ? "-" : v + unit}</b><span>${out ? "outside the limit" : "safe " + safe}</span></div>`; }).join("");
+  const limits = H.broken.map(k => READ.find(r => r[0] === k)[1]);
+  $("#h-cause").innerHTML = (limits.length ? `<b>Limits broken: ${limits.join(", ")}.</b> ` : H.water.ph != null ? "<b>Every limit met.</b> " : "") +
+    (H.cause ? `What it looks like (model on the node): <b>${H.cause === "QUALITY_RUNOFF" ? "runoff" : "chemical"}</b>.` : "") +
+    (!H.valve_open ? ` Valve shut ${when(H.valve_since)}.` : "");
+  const ws = H.water_series;
+  $("#h-charts").innerHTML = [["pH", 1, 6.5, 8.5, [6.5, 8.5]], ["TDS, ppm", 2, 0, 500, [0, 500]], ["Turbidity, NTU", 3, 0, 5, [0, 5]], ["Temperature, &deg;C", 4, 20, 35, [0, 35]]]
+    .map(([name, i, lo, hi, band]) => `<div class="chart"><small>${name}</small>${chart(ws.map(r => [r[0], r[i]]), lo, hi, band, "#4a5fc4")}</div>`).join("");
+  // Fix first
+  $("#h-fix").innerHTML = H.fix_first.map((p, i) => `<li><span class="rank">${i + 1}</span><b>${flatName(p.n)}: ${ALERTS[p.a] || p.a}</b>` +
+    `<span class="lvl" data-level="${p.level}">${p.level} ${p.score}</span>` +
+    `<p>${p.flats} flat${p.flats === 1 ? "" : "s"} affected, open ${ago(p.rx)}${p.missing_l ? `, ${p.missing_l} L lost` : ""}${p.flow ? `, ${p.flow} L/s` : ""}. ${ADVICE[p.a] || ""}</p></li>`).join("")
+    || `<li class="empty" style="background:none;box-shadow:none">Nothing to fix. New problems appear here, most urgent first.</li>`;
+  // Tank and down pipe
+  const ts = H.tank_series;
+  $("#h-tank").innerHTML = `<div class="chart"><small>Tank level, m</small>${chart(ts.map(r => [r[0], r[1]]), 0, 2, null, "#4a90c8")}</div>` +
+    `<div class="chart"><small>Water pumped in, L/s</small>${chart(ts.map(r => [r[0], r[2]]), 0, 2.5, null, "#3a76a8")}</div>`;
+  const bal = H.balance, floors = ["4", "3", "2", "1", "G"], n = Math.max(bal.length, 1);
+  const cell = v => v == null ? "#e0e9ef" : v > 30 ? "#e0475f" : v > 10 ? "#e8b84a" : "#a6dcd3";
+  $("#h-strip").innerHTML = bal.length ? floors.map(f => `<span>${f === "G" ? "Ground" : "Floor " + f}</span><svg viewBox="0 0 ${n} 1" preserveAspectRatio="none">` +
+    bal.map(([i, lost], k) => `<rect x="${k}" width="1.02" height="1" fill="${cell(lost[f])}"><title>${when(i * 900)}: ${lost[f] == null ? "no number" : lost[f] + " L"}</title></rect>`).join("") + "</svg>").join("")
+    : `<span></span><p class="hint">Waiting for the first complete 15 minutes from every node.</p>`;
+  // Flats: open leaks and use
+  $("#h-flats").innerHTML = H.flat_problems.map(p => `<li><b>${flatName(p.n)}: ${ALERTS[p.a] || p.a}</b><p>Open ${ago(p.rx)}${p.flow ? `, ${p.flow} L/s` : ""}</p></li>`).join("")
+    || `<li style="background:none;box-shadow:none;padding:4px 0" class="hint">No leaks open in any flat.</li>`;
+  const most = Math.max(1, ...H.usage.map(u => u[1])), unusual = new Set(H.flat_problems.filter(p => p.a === "ABNORMAL_CONSUMPTION").map(p => p.n));
+  $("#h-usage").innerHTML = H.usage.map(([f, l]) => `<div class="${unusual.has(f) ? "hot" : ""}" title="${unusual.has(f) ? "Much more water than usual" : ""}"><span>${f.slice(2)}</span><span class="bar"><i style="width:${(l / most * 100).toFixed(1)}%"></i></span><span>${l.toLocaleString()} L</span></div>`).join("")
+    || `<p class="hint">Waiting for the flats' summaries.</p>`;
+  // Sensor network
+  const N = H.network, nodes = S.nodes, heardAt = (R && R.heard) || {};
+  const hearing = nodes.filter(x => now - (heardAt[x] ?? -1e9) <= 120);
+  $("#h-net").innerHTML = [["Alerts live (under 5 min)", N.alerts_live], ["Alerts that waited", N.alerts_late], ["Saved, sent later", N.saved_sent_later],
+    ["Average delay", N.mean_delay_s == null ? "-" : mins(N.mean_delay_s)], ["Longest delay", N.max_delay_s == null ? "-" : mins(N.max_delay_s)],
+    ["Hear the gateway", R ? `${hearing.length} of ${nodes.length}` : "-"]].map(([k, v]) => `<div class="tile"><p>${k}</p><p class="big">${v}</p></div>`).join("");
+  $("#h-heard").innerHTML = R ? nodes.map(x => `<span title="${x in heardAt ? "last beacon or reply " + when(heardAt[x]) : "nothing from the gateway yet"}"><i class="dot ${hearing.includes(x) ? "" : "silent"}"></i>${x === "B-TANK" ? "Tank" : x.slice(2)}</span>`).join("") : "";
+  // Past problems
+  $("#h-past").innerHTML = H.past.map(p => `<li><b>${flatName(p.n)}: ${ALERTS[p.a] || p.a}</b><p>${when(p.rx)} to ${when(p.end).split(", ")[1]}${Math.floor(p.end / 86400) !== Math.floor(p.rx / 86400) ? " (" + when(p.end).split(", ")[0] + ")" : ""}, ${mins(p.end - p.rx)}. Ended: ${p.why}.</p></li>`).join("")
+    || `<li style="background:none;box-shadow:none;padding:4px 0" class="hint">Problems move here once they are over, with why they ended.</li>`;
+}
+function showTab(tab) {
+  document.body.dataset.tab = tab;
+  document.querySelectorAll("[role=tab]").forEach(b => b.setAttribute("aria-selected", String(b.dataset.tab === tab)));
+  try { localStorage.setItem("aqua-tab", tab); } catch {}
+  if (S) render();
+}
+document.querySelectorAll("[role=tab]").forEach(b => b.onclick = () => showTab(b.dataset.tab));
+try { if (location.search === "?health" || localStorage.getItem("aqua-tab") === "health") showTab("health"); } catch {}
 
 async function poll() {
   try {
@@ -867,6 +1095,7 @@ $("#sound").onclick = () => {
   if (sound) beep();
 };
 $("#sound").textContent = sound ? "Sound on" : "Sound off"; $("#sound").setAttribute("aria-pressed", String(sound));
+$("#reopen").onclick = () => send({do: "valve_reopen"}).then(ok => ok && toast("Reopen pressed: the tank node opens the valve if its readings are clean"));
 $("#start").onclick = () => post("/api/start").then(ok => ok && toast("Starting the simulation"));
 $("#playpause").onclick = () => send({do: S.clock.paused ? "resume" : "pause"});
 $("#speed").onchange = e => send({do: "speed", delay_s: +e.target.value});

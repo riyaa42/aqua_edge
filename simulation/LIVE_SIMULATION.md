@@ -42,12 +42,14 @@ The timekeeper waits for every node before moving on (this is called *lockstep*)
 - **Leaks.** Leaks are added while the model runs, with three fixed sizes: small 0.05 L/s (a running toilet), medium 0.5 L/s and large 1.5 L/s. The leak hole size comes from the orifice formula `A = Q / (Cd * sqrt(2gP))`.
 - **Leak locations.** Leaks can go in any flat or on any downtake pipe (`B-D*`).
 - **Water quality.** Runoff (rainwater-like: low TDS, lower pH) and chemical contamination (high TDS, high pH) are switched on for a set number of minutes. Normal and event values are kept in one table in `webots/make_scenario.py`.
-- **Not included for now.** Power outages. (The project has no valves.)
+- **Bursty water use.** Each flat uses water in short spurts (tap, shower, flush) with zero flow between, its own size (0.7 to 1.4 x 540 L a day) and routine shifted up to an hour, a fixed random seed per flat so runs repeat (`make_bursty_pattern` in `scripts/build_society.py`, from the team's communication branch).
+- **Tank valve.** The valve on B-DT4 (the pipe leaving the tank) is closed or opened in the water model each minute from the tank node's reply. To let flats get no water while it is shut, the model uses pressure-driven demand (PDD: a flat only gets water if there is pressure); on a normal day it gives the same water use as before (10,102 L). Reopen it with the scenario command `{"at_s": ..., "do": "valve_reopen"}` or the dashboard's Reopen valve button (this is the tank node's button; the node opens only if its own readings are clean).
+- **Not included for now.** Power outages of the nodes.
 
 ## 4. Detection and alerts (firmware)
 
-- Flat nodes detect leaks with flow only: continuous night flow and abnormal consumption (the pressure rule was removed; see `../leak_detection/README.md` section 6).
-- The tank node detects abnormal supply and water-quality events.
+- Flat nodes detect leaks with flow: night flow, water never off for 3 hours, abnormal consumption, and high flow together with a pressure drop (`LEAK_PRESSURE_DROP`, 10 minutes). They also say when a problem is over (`FLAT_LEAK_CLEARED`, `CONSUMPTION_CLEARED`).
+- The tank node detects abnormal supply and checks the water: IS 10500 limits first (`QUALITY_LIMIT_VIOLATION`), the model's cause guess (runoff, chemical), and temperature. A broken limit, runoff or chemical shuts the tank valve; the gateway then tells every flat (CMD, confirmed by GOT) and pauses its pipe checks.
 - The down pipe has a flow meter above each lower floor, read by flats 301, 201, 101 and G01 (`pipe_l` in their summaries). The gateway checks each floor's stretch of pipe (water in, minus water on to the next floor, minus the 4 flats) [Ali et al. [6], for comparing the tank supply against the flats to find pipe leaks]: more than 30 L lost in one 15-minute block (fast check) or 20 L from 02:00 to 04:00 (night check) gives `PIPE_LEAK` with the floor (`where`). Without the pipe meters' numbers it falls back to the whole pipe, at night.
 - The tank node also raises `QUALITY_HOT` when the water is above 35 C (dashboard button: heat the tank water to 38 C for 30 minutes).
 - Flow meters behave like real ones (`live/water.py`, ISO 4064 accuracy zones): nothing counted below the starting flow (flat meter about 2 L/hour, tank meters about 18 L/hour), up to 5% off at low flows, 2% above.
@@ -58,13 +60,16 @@ The timekeeper waits for every node before moving on (this is called *lockstep*)
 
 | Method | What it is used for |
 |---|---|
-| **TDMA** (own time slot per node) | Summaries and flags: each node sends only in its own 2.86 s slot of every minute |
+| **TDMA** (own time slot per node) | Summaries and flags: each node sends only in its own 2.73 s slot of every minute (22 slots: 21 nodes and the gateway) |
+| **Beacon** | Once a minute in the gateway's slot, signed, with the gateway time. A node that heard no beacon, ACK or command for 2 minutes treats the gateway as away |
+| **Commands** (CMD, confirmed by GOT) | The gateway tells flats about the tank valve or a leak on their floor, in its own slot, repeating until the node confirms |
 | **Guard time** | 0.2 s at the start of each slot, in case a clock is slightly off |
 | **Time sync by piggybacking** | Every gateway ACK carries the gateway's time; nodes reset their clocks from it |
 | **Replies in the sender's slot** (from LoRaWAN Class A) | The gateway sends each ACK 1.5 s into the sender's own slot, after the sender's packets, so a reply never lands in another node's slot |
 | **CSMA/CA** (listen before talk, LoRa CAD) | Alerts: they go out straight away, after checking the channel is free |
 | **Random backoff** | A busy channel means waiting a random 0.1 to 1 s and listening again, up to 5 times |
-| **ARQ** (re-send if no ACK) | Any message not acknowledged within 2 minutes is sent again |
+| **ARQ** (re-send if no ACK) | Any message not acknowledged within 2 minutes is sent again; while the gateway is away, alerts every 5 minutes and other messages every 15 |
+| **Flush in turns** | First beacon after a silence: stored messages go out at node number x 0.15 s into the minute, alerts first |
 | **Store-and-forward** | Unsent messages wait on the node's SD card, for example during a radio cut |
 | **Rate limiting** | At most 4 messages per node per minute |
 | **Turnaround gap** | 10 ms between a node's own back-to-back packets |
@@ -79,13 +84,13 @@ Real clocks run slightly fast or slow. The DS3231 clock is rated at ±2 ppm, whi
 
 ### Does a node's traffic fit its slot?
 
-At SF7, four back-to-back packets plus the guard time take about 0.8 s, well inside the 2.86 s slot. The worst minute in a real run used 0.91 s. The gateway's replies follow at 1.5 s and end by about 1.7 s at SF7. Packets and replies together fit up to SF8; four packets alone still fit up to SF9. At SF10 and above they would spill into the next node's slot. Nothing in the firmware prevents that yet (see Next steps).
+At SF7, four back-to-back packets plus the guard time take about 0.8 s, well inside the 2.73 s slot. The worst minute in a real run used 0.91 s. The gateway's replies follow at 1.5 s and end by about 1.7 s at SF7. Packets and replies together fit up to SF8; four packets alone still fit up to SF9. At SF10 and above they would spill into the next node's slot. Nothing in the firmware prevents that yet (see Next steps).
 
 ## 6. Radio model and ns-3
 
 ### Python radio model (`live/radio.py`)
 
-- **Airtime** follows the Semtech LoRa formula (our signed binary packets are 14 to 34 bytes: 46 to 77 ms at SF7, 1.2 to 1.8 s at SF12; the old 75-byte JSON took 133 ms at SF7) [Semtech AN1200.13, for the time-on-air formula].
+- **Airtime** follows the Semtech LoRa formula (our packets are 14 bytes for a beacon, 27 for an ACK and up to about 69 for a summary with AES-SIV: 46 to 128 ms at SF7, 1.2 to 1.8 s at SF12; the old 75-byte JSON took 133 ms at SF7) [Semtech AN1200.13, for the time-on-air formula].
 - **One shared channel.** Our gateway is one SX1278 chip, like the nodes, so it listens on one channel and one spreading factor. Its replies use that same channel.
 - **Collision rule:** two packets that overlap in time at the same spreading factor are both lost. This covers uplinks at the gateway and replies at a node.
 - **Half-duplex rule:** a radio cannot hear while it is sending. An uplink that arrives while the gateway is sending a reply is lost (`half_duplex`), and so is a reply that arrives while its node is sending.

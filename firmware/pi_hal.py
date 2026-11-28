@@ -5,7 +5,7 @@ The sensors are simulated: readings come row by row from a CSV with one column p
 sensor ("B-203:flow_lps"), the format simulation/webots/make_scenario.py writes. Radio, clock,
 SD card, LEDs and buzzer are real. Wiring and setup: firmware/README.md, "Running on the Pi".
 
-    python3 pi_hal.py B-203 --keys aqua_keys.json --sd /home/pi/aqua --slot 5 20   # real time
+    python3 pi_hal.py B-203 --keys aqua_keys.json --sd /home/pi/aqua --slot 5 22   # real time (21 nodes + the gateway)
     python3 pi_hal.py B-203 --keys aqua_keys.json --sd /home/pi/aqua --step-s 1     # fast demo
     python3 pi_hal.py --radio-test      # is the LoRa module wired right?
     python3 pi_hal.py --check           # self-check on any computer, no hardware needed
@@ -38,8 +38,11 @@ RX_POLL_S = 0.01                      # how often the receive thread checks the 
 
 # Pins (BCM numbers). SPI0 is fixed: MOSI 10, MISO 9, SCK 11, NSS = CE0 (8).
 RESET_PIN = 22
-LED_PINS = {"green": 17, "yellow": 27, "red": 5}
+LED_PINS = {"green": 17, "yellow": 27, "red": 5, "blue": 6}
 BUZZER_PIN = 18
+VALVE_PIN = 23                        # tank node: relay board input; relay on = valve shut (normally open valve,
+                                      # so a dead Pi leaves the water on)
+REOPEN_PIN = 24                       # tank node: push button to ground, "water tested, reopen the valve"
 
 # SX1278 registers and modes (SX1276/77/78/79 datasheet, section 6.4: same registers for the whole family)
 REG_FIFO, REG_OPMODE, REG_FRF, REG_PA, REG_LNA = 0x00, 0x01, 0x06, 0x09, 0x0C
@@ -162,6 +165,8 @@ class PiHAL:
         self.lock, self.inbox = threading.Lock(), []
         self.sleep, self.log = time.sleep, print
         self.colour, self.leds, self.buzzer = None, {}, None
+        self.relay = self.button = None
+        self.valve_open, self.pressed = True, False
         self.rows = csv.reader(open(csv_path))
         header = next(self.rows)
         prefix = name + ":"
@@ -173,6 +178,10 @@ class PiHAL:
             from gpiozero import LED, Buzzer
             self.leds = {c: LED(p) for c, p in LED_PINS.items()}
             self.buzzer = Buzzer(BUZZER_PIN)
+            if name == "B-TANK":
+                from gpiozero import Button, OutputDevice
+                self.relay, self.button = OutputDevice(VALVE_PIN), Button(REOPEN_PIN)
+                self.button.when_pressed = lambda: setattr(self, "pressed", True)
         if listen:
             threading.Thread(target=self._listen, daemon=True).start()
 
@@ -192,7 +201,7 @@ class PiHAL:
         return self.t_csv if self.step_s is not None else time.time() + self.clock_fix
 
     def key(self, name):
-        return self.keys[name]
+        return self.keys.get(name)            # None: no such key (an old key file without GATEWAY)
 
     # --- radio ---
     def send(self, raw, at_s=None, cad=False):
@@ -224,10 +233,21 @@ class PiHAL:
         with self.lock:
             got, self.inbox = self.inbox, []
         for arrived, raw in got:
-            m = unpack(raw, lambda n: self.keys.get(n) if n == self.name else None)
-            if m and m["k"] == "ACK" and self.step_s is None:
-                self.clock_fix = m["gt"] - arrived      # trust the gateway time only from a signed ACK
+            m = unpack(raw, lambda n: self.keys.get(n) if n in (self.name, "GATEWAY") else None)
+            if m and m["k"] in ("ACK", "BEACON") and self.step_s is None:
+                self.clock_fix = m["gt"] - arrived      # trust the gateway time only from a signed ACK or beacon
         return [raw for _, raw in got]
+
+    # --- tank valve ---
+    def valve(self, is_open):
+        self.valve_open = is_open
+        if self.relay:
+            self.relay.value = not is_open
+        self.log(f"{self.now():.0f} {self.name} valve {'open' if is_open else 'SHUT'}")
+
+    def reopen_pressed(self):
+        p, self.pressed = self.pressed, False
+        return p
 
     # --- LEDs and buzzer ---
     def led(self, colour):
@@ -291,7 +311,7 @@ def check():
 
     def hal_for(name, step_s, storage=None):
         radio = FakeRadio()
-        hal = PiHAL(name, radio, DEFAULT_CSV, storage, {name: sim_key(name)}, slot=(5, 20),
+        hal = PiHAL(name, radio, DEFAULT_CSV, storage, {name: sim_key(name), "GATEWAY": sim_key("GATEWAY")}, slot=(5, 20),
                     step_s=step_s, gpio=False, listen=False)
         hal.log, slept = (lambda *a: None), []
         hal.sleep = slept.append
@@ -345,7 +365,7 @@ if __name__ == "__main__":
     ap.add_argument("--csv", default=DEFAULT_CSV, help="sensor readings, one row per minute")
     ap.add_argument("--keys", help="key file (see load_keys in packet.py)")
     ap.add_argument("--sd", default=os.path.join(HERE, "sd"), help="folder for the queue and baseline")
-    ap.add_argument("--slot", nargs=2, type=int, metavar=("INDEX", "COUNT"), help="time slot, e.g. 5 20")
+    ap.add_argument("--slot", nargs=2, type=int, metavar=("INDEX", "COUNT"), help="time slot, e.g. 5 22 (21 nodes, the last slot is the gateway's)")
     ap.add_argument("--step-s", type=float, help="fast mode: one step every this many seconds, CSV time")
     ap.add_argument("--radio-test", action="store_true", help="check the LoRa module and exit")
     ap.add_argument("--check", action="store_true", help="self-check without hardware")

@@ -41,6 +41,7 @@ class NetHAL:
             self.drift = 0.0                 # the gateway's clock is the one every node sets itself by
         self.synced_at = 0.0
         self.colour = "green"
+        self.valve_open, self.pressed = True, False     # tank node: valve relay and "reopen" button
 
     def now(self):
         return self.t
@@ -58,7 +59,7 @@ class NetHAL:
     def receive(self):
         msgs, self.inbox = self.inbox, []
         # ponytail: the simulated RTC trusts the ACK header; the firmware itself only acts on checked packets
-        if any(peek(m)["k"] == "ACK" and peek(m)["n"] == self.name for m in msgs):
+        if any(peek(m)["k"] in ("ACK", "BEACON") and peek(m)["n"] in (self.name, "GATEWAY") for m in msgs):
             self.synced_at = self.t                  # set the RTC from the gateway's time
         return msgs
 
@@ -69,6 +70,14 @@ class NetHAL:
             with open(os.path.join(RUN, "leds.jsonl"), "a") as f:
                 f.write(json.dumps({"t": self.t, "n": self.name, "led": colour}) + "\n")
         self.colour = colour
+
+
+    def valve(self, is_open):
+        self.valve_open = is_open                    # told to the timekeeper, which opens or shuts B-DT4
+
+    def reopen_pressed(self):
+        p, self.pressed = self.pressed, False
+        return p
 
 
 def connect():
@@ -95,8 +104,9 @@ def main(name):
     logged = events_logged = 0
     while (tick := conn.recv()) is not None:
         hal.t, hal.r, hal.inbox = tick["t"], tick["r"], tick["inbox"]
+        hal.pressed = hal.pressed or tick.get("reopen", False)
         fw.step()
-        conn.send(hal.outbox)
+        conn.send({"out": hal.outbox, "valve": hal.valve_open})
         hal.outbox = []
         if name == "GATEWAY":                # what the gateway knows, as it learns it
             with open(os.path.join(RUN, "gateway_log.jsonl"), "a") as f:

@@ -16,24 +16,25 @@
 10. 8-channel ADC (Analog-to-Digital Converter)
 11. RTC (Real-Time Clock) module
 12. microSD card
-13. Buzzer module for local alerts
-14. Mains socket near each node (one per flat, one at the tank)
-15. USB cables, jumper wires, and compatible connectors
+13. Buzzer module and four LEDs (green, yellow, red, blue) for local alerts
+14. Tank node only: a normally open valve on the pipe leaving the tank (for example a 12 V motorised ball valve, so water stays on if the node loses power), its 12 V supply, a relay module driven by the Pi, and a push button to reopen the valve after the water is tested
+15. Mains socket near each node (one per flat, one at the tank)
+16. USB cables, jumper wires, and compatible connectors
 
 ### B. Gateway Node
 
-16. LoRa transceiver module 2 with compatible antenna
-17. ESP32 development board
-18. USB cable to connect the ESP32 to the laptop
-19. Laptop for gateway processing, cross-node analysis, maintenance prioritization, and dashboard
+17. LoRa transceiver module 2 with compatible antenna
+18. ESP32 development board
+19. USB cable to connect the ESP32 to the laptop
+20. Laptop for gateway processing, cross-node analysis, maintenance prioritization, and dashboard
 
 ### C. Additional Requirements
 
-20. Sensor signal-conditioning circuits or voltage-level converters, if required by the selected hardware.
+21. Sensor signal-conditioning circuits or voltage-level converters, if required by the selected hardware.
 
 ## 2. Component Connections and Data Flow
 
-The pH, TDS, turbidity, temperature, flow, and pressure sensors are connected to the monitoring node built around the Raspberry Pi Zero 2 W. The analog-output sensors connect to the 8-channel ADC, which converts their analog signals into digital readings for processing by the Pi. The ADC communicates with the Raspberry Pi through the I²C interface. Flow sensors that produce pulse outputs may require a GPIO input rather than an ADC channel, depending on the selected sensor model. The RTC is used to timestamp sensor readings and detected events; its connection interface will be determined after the RTC model is finalized (I²C or direct). The microSD card holds the operating system, the TinyML model used for local inference, and a timestamped log of sensor readings and detected events, which are kept locally and re-sent when the LoRa link becomes available. The buzzer connects directly to the Raspberry Pi to provide audible alerts when a configured anomaly is detected. Each monitoring node runs on mains power through a 5 V USB power supply; no battery is used.
+The pH, TDS, turbidity, temperature, flow, and pressure sensors are connected to the monitoring node built around the Raspberry Pi Zero 2 W. The analog-output sensors connect to the 8-channel ADC, which converts their analog signals into digital readings for processing by the Pi. The ADC communicates with the Raspberry Pi through the I²C interface. Flow sensors that produce pulse outputs may require a GPIO input rather than an ADC channel, depending on the selected sensor model. The RTC is used to timestamp sensor readings and detected events; its connection interface will be determined after the RTC model is finalized (I²C or direct). The microSD card holds the operating system, the TinyML model used for local inference, and a timestamped log of sensor readings and detected events, which are kept locally and re-sent when the LoRa link becomes available. The buzzer and LEDs connect directly to the Raspberry Pi to provide audible and visible alerts when a configured anomaly is detected. At the tank node, a relay on a GPIO pin drives the tank valve: the node shuts it when the water breaks an IS 10500 limit or looks like runoff or a chemical, and opens it again only when a person presses the reopen button and the readings are clean. Each monitoring node runs on mains power through a 5 V USB power supply; no battery is used.
 
 The Raspberry Pi processes sensor readings locally and runs the configured detection logic for water-quality anomalies, pipeline leakage, and abnormal consumption. It can continue detecting anomalies and generating local buzzer alerts without Internet connectivity, while locally storing readings and relevant event information for later use. The Pi transmits sensor readings, detected events, and node status through LoRa transceiver module 1. At the gateway, LoRa transceiver module 2 receives these messages and passes them to the ESP32, which relays the data to the laptop over USB serial. The laptop runs the gateway application and performs cross-node analysis by combining information received from monitoring nodes, assessing risk, and prioritizing maintenance. It also displays the collected data and analysis results. When Internet connectivity is available, the laptop can optionally synchronize data with a cloud service for remote monitoring and historical analysis. When Internet access is unavailable, local detection and alerts at the monitoring node continue, and gateway-level analysis can continue on the laptop as long as the LoRa link and local gateway hardware remain operational.
 

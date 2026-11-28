@@ -31,6 +31,29 @@ BURST_AT, BURST_LPS, BURST_START_H = "C-D1", 1.5, 6   # pipe burst on building C
 PATTERN = np.array([0.2, 0.15, 0.1, 0.1, 0.3, 1.0, 2.4, 2.8, 2.5, 1.6, 1.0, 0.8,
                     0.9, 0.8, 0.6, 0.6, 0.8, 1.3, 1.9, 2.1, 1.6, 1.0, 0.6, 0.3])
 PATTERN = PATTERN / PATTERN.mean()
+# Bursty use (from the team's communication branch): each flat uses water in spurts of 5-15 min (tap,
+# shower, flush) with real zero flow between, its own size (0.7-1.4x) and routine (shifted up to 1 h),
+# rare night flushes. BURSTY = False gives the old smooth curve shared by every flat (older results).
+BURSTY = True
+BURSTY_DAYS, BURSTY_STEP_MIN, BURSTY_SEED = 7, 5, 42     # a week of pattern, then it repeats
+
+
+def make_bursty_pattern(rng, days=BURSTY_DAYS, step_min=BURSTY_STEP_MIN):
+    """One flat's use, as multipliers of its average, one value per step_min minutes."""
+    steps_per_day = 24 * 60 // step_min
+    arr = np.zeros(days * steps_per_day)
+    scale, shift = rng.uniform(0.7, 1.4), int(rng.integers(-12, 13))
+    i = 0
+    while i < len(arr):
+        hour = ((i + shift) % steps_per_day) * step_min // 60
+        prob = 0.008 if hour in (1, 2, 3, 4) else 0.015 + 0.14 * PATTERN[hour] / PATTERN.max()
+        if rng.random() < prob:
+            dur = int(rng.choice([1, 1, 2, 3], p=[0.45, 0.25, 0.20, 0.10]))
+            arr[i:i + dur] += rng.uniform(1.8, 5.5)
+            i += dur + int(rng.integers(1, 4))
+        else:
+            i += 1
+    return (arr / arr.mean() * scale).tolist()
 
 ROOF = FLOORS * FLOOR_HEIGHT_M
 
@@ -39,14 +62,16 @@ def flat_name(b, f, k):
     return f"{b}-{'G' if f == 0 else f}0{k}"
 
 
-def build(leak=False):
+def build(leak=False, bursty=None):
+    bursty = BURSTY if bursty is None else bursty
+    rng = np.random.default_rng(BURSTY_SEED)
     wn = wntr.network.WaterNetworkModel()
     wn.options.hydraulic.inpfile_units = "LPS"      # litres/second, pressure in metres
     wn.options.time.duration = 24 * 3600
     wn.options.time.hydraulic_timestep = 300
     wn.options.time.report_timestep = 900
-    wn.options.time.pattern_timestep = 3600
-    wn.add_pattern("household", PATTERN.tolist())
+    wn.options.time.pattern_timestep = BURSTY_STEP_MIN * 60 if bursty else 3600
+    wn.add_pattern("household", np.repeat(PATTERN, 60 // BURSTY_STEP_MIN).tolist() if bursty else PATTERN.tolist())
     wn.add_curve("pump", "HEAD", [(PUMP_FLOW_LPS / 1000, PUMP_HEAD_M)])
     base_demand = LITRES_PER_FLAT_DAY / 1000 / 86400          # m3/s
 
@@ -69,7 +94,9 @@ def build(leak=False):
                         diameter=0.05, roughness=130)
             for k in range(1, FLATS_PER_FLOOR + 1):
                 n = flat_name(b, f, k)
-                wn.add_junction(n, base_demand=base_demand, demand_pattern="household",
+                if bursty:
+                    wn.add_pattern(n, make_bursty_pattern(rng))
+                wn.add_junction(n, base_demand=base_demand, demand_pattern=n if bursty else "household",
                                 elevation=f * FLOOR_HEIGHT_M + TAP_HEIGHT_M,
                                 coordinates=(x0 + (k - 2.5) * 8, f * 10 + 5 + (2 if k % 2 else -2)))
                 wn.add_pipe(f"{n}-P", d, n, length=8, diameter=0.025, roughness=130)

@@ -27,9 +27,17 @@ METERS = {"flat": (0.0005, 0.007),    # 15 mm home meter: starts at ~2 L/hour, Q
           "stretch": (0.0015, 0.007)} # 25 mm ultrasonic meter (R400: Q1 = Q3/400 = 0.0044 L/s) on each lower stretch:
                                       # at night only a few floors draw through it, below what a 50 mm meter counts
 LOW_FLOW_ERR = 0.05
+VALVE_LINK = "B-DT4"     # the tank valve sits on the pipe leaving the tank (driven by the tank node)
+# Pressure-driven demand: with the valve shut the flats can get no water, which a plain demand-driven
+# solve cannot express. Full demand at 1 m and above (top floor taps see ~3.5 m normally), none at 0.
 # Down pipe meters, one on each stretch between floors (the tank node's outflow meter is the top one):
 # each is wired to the node of the flat just below it, which adds its litres to its summary
 PIPE_METERS = {"B-301": "B-DT3", "B-201": "B-DT2", "B-101": "B-DT1", "B-G01": "B-DT0"}
+
+
+def use_pdd(wn):
+    wn.options.hydraulic.demand_model = "PDD"
+    wn.options.hydraulic.required_pressure, wn.options.hydraulic.minimum_pressure = 1.0, 0.0
 
 
 def read_meter(lps, start, q2, gain_low, gain_high, noise):
@@ -43,6 +51,8 @@ class Water:
     def __init__(self, seed=M.SEED):
         self.wn = M.base_network()
         self.wn.options.time.duration = 0
+        use_pdd(self.wn)
+        self.valve_open = True
         self.sim = wntr.sim.WNTRSimulator(self.wn)
         self.rng = np.random.default_rng(seed)
         self.flats = [n for n in self.wn.junction_name_list if n[-1].isdigit() and n[-2] == "0"]
@@ -90,6 +100,10 @@ class Water:
         self.wn.get_node(where)._leak_status = False
         self.leaks.pop(where, None)
 
+    def set_valve(self, is_open):
+        self.wn.get_link(VALVE_LINK).initial_status = wntr.network.LinkStatus.Open if is_open else wntr.network.LinkStatus.Closed
+        self.valve_open = is_open
+
     def set_quality(self, kind, minutes):
         self.water_quality, self.quality_until = kind, self.t + 60 * minutes
 
@@ -125,16 +139,29 @@ if __name__ == "__main__":
     #    minute apart; that is the solver, not the stepping.)
     hours = 24
     wn = M.base_network()
+    use_pdd(wn)
     wn.options.time.duration = hours * 3600
+    dd = M.base_network()                                    # PDD must not change a normal day
+    dd.options.time.duration = hours * 3600
+    gap = float((wntr.sim.WNTRSimulator(dd).run_sim().node["demand"][w_flats := [n for n in dd.junction_name_list
+                 if n[-1].isdigit() and n[-2] == "0"]].sum().sum()))
     ref = wntr.sim.WNTRSimulator(wn).run_sim().node["pressure"]
-    w, start, worst = Water(), time.time(), 0.0
+    w, start, worst, pdd, off = Water(), time.time(), 0.0, 0.0, 0
     while w.t < hours * 3600:
         w.step()
+        pdd += float(w.res.node["demand"][w_flats].iloc[-1].sum())
+        off += w._last("node", "demand", "B-203") == 0
         p = w.res.node["pressure"].iloc[-1]
         worst = max(worst, float((p[w.flats] - ref.loc[w.t, w.flats]).abs().max()))
     speed = hours * 60 / (time.time() - start)
     print(f"{hours} h no events: worst flat pressure difference vs one WNTR run {worst:.2g} m; {speed:.0f} sim minutes per second")
     assert worst < 1e-6, "stepping changed the result"
+    print(f"water used in {hours} h: pressure-driven {pdd * 60000:.0f} L vs demand-driven {gap * 60000:.0f} L")
+    assert abs(pdd / gap - 1) < 0.01, "pressure-driven demand must not starve flats on a normal day"
+    # 1b. Bursty use: real zero flow between spurts (most minutes of the day for a flat)
+    off /= hours * 60
+    print(f"B-203 uses no water in {off:.0%} of minutes")
+    assert off > 0.5
     # 2. A small leak must give about the requested flow
     w.start_leak("B-203", "small")
     for _ in range(5):
@@ -161,4 +188,15 @@ if __name__ == "__main__":
     assert w.readings()["B-TANK"]["tds_ppm"] < 400
     w.set_quality("hot", 1)
     assert w.readings()["B-TANK"]["temp_c"] > 37 and w.readings()["B-TANK"]["tds_ppm"] < 400
+    # 5. Tank valve shut: no water leaves the tank, flats get none; opening brings it back
+    w.set_valve(False)
+    for _ in range(3):
+        w.step()
+    out = 1000 * w._last("link", "flowrate", VALVE_LINK)
+    flats = 1000 * sum(w._last("node", "demand", f) for f in w.flats)
+    print(f"valve shut: tank outflow {out:.4f} L/s, flats {flats:.4f} L/s")
+    assert abs(out) < 1e-4 and flats < 1e-3
+    w.set_valve(True)
+    for _ in range(3):
+        w.step()
     print("water self-check passed")

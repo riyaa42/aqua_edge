@@ -169,7 +169,7 @@ lost on floor 2 = meter above floor 2 - meter above floor 1 - (flats 201 + 202 +
 
 ---
 
-## 6. Pressure: removed from leak detection
+## 6. Pressure: only together with high flow
 
 Earlier firmware had a rule from Alghamdi et al. [2, for the pressure-drop leak rule]: if a flat's pressure stayed low for 10 minutes and its flow was also high, raise `LEAK_PRESSURE_DROP`. Pressure worked like a smoke alarm saying "look now", and flow confirmed it. It caught a medium leak about 40 minutes sooner than the too-much check.
 
@@ -179,7 +179,9 @@ Earlier firmware had a rule from Alghamdi et al. [2, for the pressure-drop leak 
 - Flow already catches every leak; the only gain from pressure was speed on big leaks, and that can be had by shortening the too-much check's 60-minute wait if needed.
 - Fewer rules means fewer things to tune and explain.
 
-Pressure is **still read, learned and sent in every summary** (lowest pressure in the block), so the laptop can show it and we can bring a pressure rule back later if real data says so.
+Pressure is **still read, learned and sent in every summary** (lowest pressure in the block).
+
+**Brought back in a safer form (2026-11-28, from the team's communication branch):** `LEAK_PRESSURE_DROP` now needs the flat's own flow to be high (above max(3 x hourly mean, mean + 3 x spread, 0.20 L/s)) **and** its pressure to be below normal by more than max(3 x spread, 0.35 m), both for 10 minutes. Because the flat's own meter must show the big flow, a drop caused by a neighbour or the down pipe does not blame this flat. In the flow-leak test it caught the medium leak in B-402 after 10 minutes (the too-much check needs 60), and the clean 3-day bursty run had 0 false alarms. Pressure alone still raises nothing.
 
 ### The supply-event rule (gateway)
 
@@ -212,14 +214,14 @@ This follows common practice for LoRa networks: track when each device was last 
 
 ### 5.5 Continuous-flow check (flat node)
 
-> **Rule:** if flow stays above **0.005 L/s** for **8 hours in a row**, at any time of day, raise `LEAK_CONTINUOUS_FLOW`.
+> **Rule:** if flow stays above **0.005 L/s** for **3 hours in a row**, at any time of day, raise `LEAK_CONTINUOUS_FLOW`.
 
 - **Idea:** in a normal home the water is off now and then (nobody runs a tap all day). A leak never stops. Commercial ultrasonic meters use the same idea (Ultrimis: steady low flow for 720 minutes).
 - **What it adds:**
   - a small leak that starts in the daytime is caught hours before the night check sees it
   - leaks between 0.005 and 0.02 L/s, which the night check never sees, are caught
-- **Example (self-check in `aqua_edge.py`):** a 0.01 L/s leak starts at 10:00, right after morning use (07:00 to 10:00). The water has not stopped since 07:00, so the alarm goes off at 14:59. The night check never fires because 0.01 is below its 0.02 limit.
-- **Why 8 hours:** in our simulation, normal flats keep a trickle running for up to **6 h 1 min** in a row, because the simulated use is smooth. 8 hours leaves a safe gap. Real use comes in bursts with zero flow in between, so this can probably be shorter; retune it on real household data.
+- **Example (self-check in `aqua_edge.py`):** a 0.01 L/s leak starts at 10:00 on a flat that uses water in bursts. From then on the water never stops, so the alarm goes off at 12:59. The night check never fires because 0.01 is below its 0.02 limit.
+- **Why 3 hours (2026-11-28):** the simulated use is now bursty (each flat uses water in short spurts with zero flow between). In 3 clean days no flat ran water for more than **15 minutes** non-stop, so 3 hours leaves a wide gap. It was 8 hours while the simulated use was one smooth curve (normal flats then ran a trickle for up to 6 h 1 min). Retune on real household data.
 - **Good to know:** like the night check, it uses fixed numbers, not the learned baseline. A leak that was already there on day 1 is still caught.
 
 ---
@@ -231,10 +233,11 @@ This follows common practice for LoRa networks: track when each device was last 
 | Check | Runs every | Fires after |
 |---|---|---|
 | Night check (flat) | 1 min | 30 min |
-| Continuous-flow check (flat) | 1 min | 8 h |
+| Continuous-flow check (flat) | 1 min | 3 h |
+| Pressure-drop check (flat) | 1 min | 10 min |
 | Too-much check (flat) | 1 min | 60 min |
 | Tank outflow (tank) | 1 min | 15 min |
-| Water quality (tank) | 1 min | 3 min |
+| Water quality (tank): limits, cause, temperature | 1 min | 3 min (3-reading average); the valve shuts at once |
 | Building check (gateway) | every 15 min | 2 blocks (30 min) |
 | Silent node (gateway) | 1 min | 45 min with nothing heard |
 
@@ -269,12 +272,13 @@ The whole system ran for 48 simulated hours: real firmware on 22 nodes, the real
 
 | Leak added | Caught by | Reached gateway |
 |---|---|---|
-| Small leak in flat B-203 at 02:00 | Night check on B-203, 02:30 (30 min); continuous-flow check 10:00 (8 h) | 02:33 |
-| Medium leak in flat B-402 at 10:00 | Too-much check on B-402, 11:00 (60 min) | 11:01 |
-| Large burst on downtake B-D1 at 18:00 | Tank outflow check 18:15; gateway building check 18:31 (67% missing) | 18:16 / 18:31 |
+| Small leak on down pipe B-D3 at 00:30 | Gateway fast check, 00:46 (43 L missing on that floor's stretch) | 00:46 |
+| Small leak in flat B-203 at 02:00 | Night check on B-203, 02:30 (30 min) | 02:31 |
+| Medium leak on down pipe B-D1 at 08:00 | Gateway fast check, 08:16 (425 L missing) | 08:16 |
+| Medium leak in flat B-402 at 10:00 | Pressure-drop check on B-402, 10:10 (10 min) | 10:11 |
 
-- 4,021 of 4,023 radio messages got through (signed binary packets). The 2 collisions were re-sent automatically.
-- No message was lost.
+Run on 28 November 2026 with bursty water use, the beacon and the tank valve (`sh simulation/check_all.sh`).
+- 100% of radio attempts got through while the radio was up; no message was lost.
 - No alarms from flats without a leak.
 
 ### 8.2 Flow vs pressure comparison
@@ -306,7 +310,8 @@ See section 2. Flow caught every leak with no false alarms. Its detection times 
 | Learning period | 24 h | All checks |
 | Night window | 1 am to 5 am | Night check |
 | Night flow limit | 0.02 L/s for 30 min | Night check |
-| Continuous flow limit | above 0.005 L/s for 8 h, any time of day | Continuous-flow check |
+| Continuous flow limit | above 0.005 L/s for 3 h, any time of day | Continuous-flow check |
+| Pressure drop | flow above max(3 x mean, mean + 3 x spread, 0.20 L/s) and pressure below normal by max(3 x spread, 0.35 m), for 10 min | Pressure-drop check |
 | Too-much limit | max(3 x hourly average, 0.05 L/s) for 60 min | Too-much check |
 | Tank outflow limit | average + max(4 x spread, 0.5 L/s) for 15 min | Tank outflow check |
 | Missing water limit | more than 20 L missing from 02:00 to 04:00 | Building check (night) |

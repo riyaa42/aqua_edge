@@ -10,6 +10,7 @@ Commands are lines of JSON appended to run/commands.jsonl, e.g.
     {"do": "fix", "where": "B-203"}
     {"do": "quality", "kind": "runoff", "minutes": 60}          kind: runoff | chemical | hot
     {"do": "radio_cut", "who": "all", "minutes": 210}           who: a node name or "all"
+    {"do": "valve_reopen"}      someone tested the water and pressed the tank node's reopen button
     {"do": "speed", "delay_s": 0.5}     {"do": "pause"}     {"do": "resume"}     {"do": "stop"}
     {"do": "until_alert", "node": "B-203", "from_s": 93600}
         run as fast as possible until an alert from B-203 made at or after from_s reaches the
@@ -101,12 +102,15 @@ def main(args):
             c = listener.accept()
             conns[c.recv()] = c
     for c in conns.values():
-        c.send({"flats": water.flats, "tank": "B-TANK", "slots": {n: (i, len(names)) for i, n in enumerate(names)}})
+        # one time slot per node, and the last one for the gateway's beacon and commands
+        c.send({"flats": water.flats, "tank": "B-TANK",
+                "slots": {n: (i, len(names) + 1) for i, n in enumerate(names + [GATEWAY])}})
     print("all connected, running")
 
     readings_of = lambda name, r: r.get(name, {}) if name != GATEWAY else {}
     inbox, delay, paused, end = {}, args.delay, False, args.hours * 3600
     watch = pause_at = None              # until_alert: {"node", "from_s", "delay"}; minute to pause at
+    reopen = False
     start = time.time()
     while water.t < end:
         t = water.t
@@ -117,6 +121,10 @@ def main(args):
                 paused = c["do"] == "pause"
             elif c["do"] == "stop":
                 end = t
+            elif c["do"] == "valve_reopen":
+                reopen = True
+                applied.write(json.dumps({"t": t, **c}) + "\n")
+                applied.flush()
             elif c["do"] == "until_alert":
                 watch = {"node": c["node"], "from_s": c.get("from_s", t), "delay": delay}
                 delay, paused, pause_at = 0, False, None
@@ -124,15 +132,19 @@ def main(args):
                 apply(c, t, water, radio, applied)
         with open(os.path.join(RUN, "clock.json"), "w") as f:      # for the dashboard
             json.dump({"t": t, "end": end, "paused": paused, "delay_s": delay, "leaks": water.leaks,
-                       "quality": water.water_quality, "watching": watch and {k: watch[k] for k in ("node", "from_s")}}, f)
+                       "quality": water.water_quality, "valve_open": water.valve_open, "watching": watch and {k: watch[k] for k in ("node", "from_s")}}, f)
         if paused:
             time.sleep(0.2)
             continue
         r = water.readings()
         for name, c in conns.items():
-            c.send({"t": t, "r": readings_of(name, r), "inbox": inbox.get(name, [])})
-        outs = {name: c.recv() for name, c in conns.items()}
-        inbox = radio.transmit(t, outs)
+            c.send({"t": t, "r": readings_of(name, r), "inbox": inbox.get(name, []),
+                    **({"reopen": True} if reopen and name == "B-TANK" else {})})
+        reopen = False
+        replies = {name: c.recv() for name, c in conns.items()}
+        if replies["B-TANK"]["valve"] != water.valve_open:    # the tank node opened or shut its valve
+            water.set_valve(replies["B-TANK"]["valve"])
+        inbox = radio.transmit(t, {name: x["out"] for name, x in replies.items()})
         if watch:
             heard = any(h["k"] == "ALERT" and h["n"] == watch["node"] and h["t"] >= watch["from_s"]
                         for h in map(peek, inbox.get(GATEWAY, [])))

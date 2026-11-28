@@ -35,7 +35,7 @@ The first firmware version closed a flat's valve whenever its pressure dropped a
 1. A flat closed its valve on a pressure drop only if its own flow was also abnormally high (a real leak raises flow; a supply drop does not).
 2. The tank node reports an abnormally low tank, which tells the gateway directly that it is a supply problem.
 
-Valves were later removed from the project altogether (the response is now buzzer, LED and alert only). The pressure rule was also **removed completely**: a flow vs pressure comparison showed pressure blames the wrong flat and misses small leaks, while flow caught every leak (see `../../leak_detection/README.md`). Flat nodes now use flow only, and the supply event comes from the tank alone (change 2 above).
+Flat valves were later removed from the project altogether (the response to a leak is buzzer, LED and alert only; since 2026-11-28 there is one valve, at the tank, for bad water only, and `run_offline.py` presses its reopen button 30 minutes after each water event ends). The pressure-only rule was also **removed**: a flow vs pressure comparison showed pressure blames the wrong flat and misses small leaks, while flow caught every leak (see `../../leak_detection/README.md`). Flat nodes now use flow only, and the supply event comes from the tank alone (change 2 above).
 
 ## Run it
 

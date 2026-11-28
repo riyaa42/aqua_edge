@@ -19,6 +19,12 @@ from simlink import SensorFeed, load_outages, link_up, STEP_S  # noqa: E402
 from packet import sim_key  # noqa: E402
 
 GATEWAY = "GATEWAY"
+REOPEN_AFTER_S = 1800    # the caretaker tests the water and presses "reopen" 30 min after a water event ends
+
+
+def water_event_ends():
+    with open(os.path.join(HERE, "data", "events.csv")) as f:
+        return [float(r["end_s"]) for r in csv.DictReader(f) if r["kind"].startswith("quality")]
 
 
 class Radio:
@@ -43,6 +49,13 @@ class OfflineHAL:
         self.storage_path = os.path.join(storage_dir, f"{name}_sd.jsonl")
         radio.inbox[name] = []
         self.colour = "green"
+        self.reopen_at = water_event_ends() if name == "B-TANK" else []
+
+    def valve(self, is_open):     # the recorded readings cannot change, so the valve only shows in the log
+        pass
+
+    def reopen_pressed(self):
+        return any(e + REOPEN_AFTER_S <= self.now() < e + REOPEN_AFTER_S + STEP_S for e in self.reopen_at)
 
     def now(self):
         return self.clock[0]
@@ -125,9 +138,15 @@ def score(gw, nodes):
     _, cut_start, cut_end, _ = events["E2"]
     sup = gw_first("SUPPLY_EVENT", cut_start)
     lines.append(f"E2 power cut: gateway supply event {'at ' + hhmm(sup['t']) if sup else 'NOT raised'}")
+    valve = [(m["a"], hhmm(m["t"])) for m in sorted(alerts, key=lambda m: m["t"]) if m["a"].startswith("VALVE_")]
+    lines.append("Tank valve: " + ", ".join(f"{a.split('_')[1].lower()} {t}" for a, t in valve))
+    checks["valve"] = [a for a, _ in valve] == ["VALVE_CLOSED", "VALVE_OPENED"] * 2
     unexplained = [m for m in alerts if (m["n"], m["a"]) not in {
         ("B-203", "LEAK_NIGHT_FLOW"), ("B-203", "LEAK_CONTINUOUS_FLOW"), ("B-203", "ABNORMAL_CONSUMPTION"), ("B-TANK", "ABNORMAL_SUPPLY"),
-        ("B-TANK", "QUALITY_RUNOFF"), ("B-TANK", "QUALITY_CHEMICAL"), ("B-TANK", "QUALITY_CLEARED")}]
+        ("B-TANK", "QUALITY_RUNOFF"), ("B-TANK", "QUALITY_CHEMICAL"), ("B-TANK", "QUALITY_CLEARED"),
+        ("B-203", "LEAK_PRESSURE_DROP"), ("B-203", "FLAT_LEAK_CLEARED"), ("B-203", "CONSUMPTION_CLEARED"),
+        ("B-TANK", "SUPPLY_FLOW_CLEARED"), ("B-TANK", "QUALITY_LIMIT_VIOLATION"),
+        ("B-TANK", "VALVE_CLOSED"), ("B-TANK", "VALVE_OPENED")}]
     lines.append(f"Alerts not explained by a planted event: {len(unexplained)}")
     for m in unexplained:
         lines.append(f"   {m['n']} {m['a']} at {hhmm(m['t'])}")

@@ -27,7 +27,7 @@ EXPECTED = {                 # event -> (node that should alert, alert kinds); d
     "runoff": ("B-TANK", {"QUALITY_RUNOFF"}),
     "chemical": ("B-TANK", {"QUALITY_CHEMICAL"}),
 }
-FLAT_LEAK_ALERTS = {"LEAK_NIGHT_FLOW", "LEAK_CONTINUOUS_FLOW", "ABNORMAL_CONSUMPTION"}   # flow only (leak_detection/README.md)
+FLAT_LEAK_ALERTS = {"LEAK_NIGHT_FLOW", "LEAK_CONTINUOUS_FLOW", "ABNORMAL_CONSUMPTION", "LEAK_PRESSURE_DROP"}
 
 
 def jsonl(name):
@@ -77,14 +77,14 @@ def main():
          f"attempts that got through while radio up: {100 * ok / max(len(live), 1):.1f}% "
          f"(worst node {worst_node} {100 * w_ok / w_n:.1f}%), pass mark {100 * MIN_ATTEMPT_OK:.0f}%")
     down = [r for r in tx if r["src"] == GATEWAY]
-    lines.append(f"Downlinks (ACKs): {len(down)} ({results(down)})")
+    lines.append(f"Downlinks (ACKs, beacons, commands): {len(down)} ({results(down)})")
 
     # 2. Messages: created vs delivered (store-and-forward)
-    sent = {(r["src"], int(r["seq"])) for r in up}
+    sent = {(r["src"], int(r["seq"])) for r in up if r["kind"] != "GOT"}   # GOT: not stored, numbered by the gateway
     waiting = {(m["n"], m["s"]) for n in os.listdir(os.path.join(RUN, "sd")) if n.endswith(".jsonl") for m in jsonl(os.path.join("sd", n)) if "k" in m}
     received = {(m["n"], m["s"]) for m in got}
     lost = (sent | waiting) - received
-    resends = len(up) - len(sent)
+    resends = sum(r["kind"] != "GOT" for r in up) - len(sent)
     lines.append(f"Messages created: {len(sent | waiting)}, delivered: {len(received)}, re-sends: {resends}, "
                  f"still on SD cards at the end: {len(waiting)}")
     mark(len(lost) <= MAX_LOST, f"messages never delivered: {len(lost)} (pass mark {MAX_LOST})")

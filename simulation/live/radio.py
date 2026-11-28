@@ -71,7 +71,7 @@ class Radio:
             free_at = t
             for offset, msg, cad in sorted(((*s, False)[:3] for s in sends), key=lambda s: s[0]):
                 h = peek(msg)                                   # packets are signed binary (firmware/packet.py)
-                dsts = [h["n"]] if src == GATEWAY and h["k"] == "ACK" else \
+                dsts = [h["n"]] if src == GATEWAY and h["k"] in ("ACK", "CMD") else \
                     [n for n in outs if n != GATEWAY] if src == GATEWAY else [GATEWAY]
                 sf = self.link(src)["sf"] if src != GATEWAY else max(self.link(d)["sf"] for d in dsts)
                 x = {"src": src, "dsts": dsts, "msg": msg, "h": h, "bytes": len(msg), "air": airtime_s(len(msg), sf),

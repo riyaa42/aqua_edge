@@ -1,5 +1,7 @@
 # Aqua Edge: TinyML (water quality)
 
+**Since 2026-11-28 the safety rule is a plain limit check, and this model only guesses the cause.** Once a minute the tank node averages its last 3 readings and checks them against the drinking water limits of IS 10500: pH 6.5 to 8.5, TDS up to 500 ppm, turbidity up to 5 NTU (`check_standards` in `../firmware/quality_model.py`, from the team's communication branch). Three bad averages in a row raise `QUALITY_LIMIT_VIOLATION` and shut the tank valve. The limits need no training and a model result can never hide a broken limit. The model below runs alongside as a separate track to say what the bad water looks like, so the caretaker knows where to look (rain getting in, or a chemical). Runoff and chemical also shut the valve.
+
 The water-quality model for the tank node. Once a minute it reads pH, TDS (total dissolved solids, in ppm) and turbidity (cloudiness, in NTU) and decides: **NORMAL**, **RUNOFF** (rain or surface water got in) or **CHEMICAL** (a cleaning chemical got in). Three bad readings in a row raise `QUALITY_RUNOFF` or `QUALITY_CHEMICAL`. The idea comes from Sharma et al. [1, for the small 8-bit neural network that classifies water quality on the device].
 
 Only water quality uses a model. Leaks and abnormal usage use simple statistics (see `../leak_detection/`), because they need no training data and are easy to explain.

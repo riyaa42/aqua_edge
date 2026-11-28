@@ -4,6 +4,9 @@ Inputs pH, TDS (ppm) and turbidity (NTU); classes NORMAL / RUNOFF / CHEMICAL (Sh
 for the small 8-bit network that classifies water on the device). Trained, quantized and tested
 by tinyml/train_quality.py, which writes quality_model.json next to this file.
 
+The plain IS 10500 limit check (check_standards) is the main safety rule; the network only says
+what the bad water looks like (runoff or chemical).
+
 Integer-only like TensorFlow Lite Micro: int8 inputs and weights, int32 sums, one multiplier per
 layer to bring the sum back to int8. Plain Python, no libraries: about 200 multiplications.
 """
@@ -12,6 +15,23 @@ import math
 import os
 
 PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "quality_model.json")
+
+
+# IS 10500:2012 drinking-water limits (pH range, TDS acceptable limit, turbidity permissible limit)
+IS_10500 = {"ph": (6.5, 8.5), "tds_max": 500.0, "turb_max": 5.0}
+
+
+def check_standards(ph, tds_ppm, turbidity_ntu, lim=IS_10500):
+    """The main safety rule: which IS 10500 limits a reading breaks, [] if none. A plain if/else,
+    never overridden by the network (the team's communication branch, detection/quality)."""
+    broken = []
+    if not lim["ph"][0] <= ph <= lim["ph"][1]:
+        broken.append("pH")
+    if tds_ppm > lim["tds_max"]:
+        broken.append("TDS")
+    if turbidity_ntu > lim["turb_max"]:
+        broken.append("TURBIDITY")
+    return broken
 
 
 def features(ph, tds_ppm, turbidity_ntu):
@@ -49,4 +69,6 @@ if __name__ == "__main__":
     for (ph, tds, turb), want in cases:
         got = model.classify(ph, tds, turb)
         assert got == want, (ph, tds, turb, got, want)
+    assert check_standards(7.2, 250, 0.5) == [] and check_standards(8.5, 500, 5.0) == []
+    assert check_standards(8.6, 900, 12) == ["pH", "TDS", "TURBIDITY"] and check_standards(6.4, 100, 1) == ["pH"]
     print("quality model self-check passed")

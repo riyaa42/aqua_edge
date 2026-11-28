@@ -32,25 +32,35 @@ Same hardware layer as the nodes (hal.now / send / receive). Jobs:
      (node, counter) pair already seen is a duplicate or a replay: acknowledged, not used again.
      The pairs seen are saved to disk, so a gateway restart does not reopen the door to replays.
      ACKs are signed with the node's key, so a fake ACK cannot make a node delete its messages.
+  8. Beacon: once a minute, in the gateway's own time slot, a BEACON (signed with the building key,
+     carries the gateway time). A node that hears no beacon or ACK for 2 minutes knows the gateway
+     is away, slows its retries, and sends its stored messages in turns when the beacon is back.
+  9. Commands (CMD): warnings only the gateway can give, because they need several nodes together.
+     VALVE_CLOSED / VALVE_OPENED (from the tank node) go to every flat, PIPE_LEAK / PIPE_LEAK_CLEARED
+     to the flats of that floor. Sent in the gateway's slot and repeated until the node answers GOT;
+     the open commands are saved, so a gateway restart still delivers them.
+ 10. Tank valve shut: no water is meant to flow, so the down pipe checks and the supply rule pause
+     for every 15-minute block the valve was shut in (logged once as VALVE_CLOSED).
+ 11. BALANCE: for every complete block, the litres lost in each stretch (for the dashboard's chart;
+     not an alarm).
 How the leak checks fit together: leak_detection/README.md.
 """
 import json
 import os
 
-from aqua_edge import save_atomic, DAY, HOUR, SUMMARY_S
+from aqua_edge import save_atomic, DAY, HOUR, SUMMARY_S, RETRY_S, SLOT_GUARD_S
 from packet import pack, unpack
 
 SUPPLY_WINDOW_S = 900          # a SUPPLY_LOW flag from the tank counts for this long
 NIGHT_HOURS = (2, 4)           # down pipe check window, local time: the quietest hours
 NIGHT_MISSING_L = 20.0         # litres lost in one stretch over the window that meter error cannot explain
-# Measured with the simulation's realistic meters (live/water.py), 3 clean days: clean nights -3.2 to +1.0 L
-# per stretch (whole pipe -4 to +5 L); a 0.005 L/s leak loses 33-36 L in its own stretch, under 1.3 L in the others.
+# Measured with the simulation's realistic meters (live/water.py), 3 clean days of bursty use (each flat uses
+# water in short spurts with zero flow between, build_society.py): clean nights -1.7 to +1.1 L per stretch;
+# a 0.005 L/s leak loses 33-36 L in its own stretch, under 1.3 L in the others.
 # So 20 L finds leaks from ~0.003 L/s and names the floor.
-# ponytail: one fixed limit; on a real building measure a few clean nights first, since real night use
-# comes in bursts (a flush, a glass of water) and our simulated use is smooth
+# ponytail: one fixed limit; on a real building measure a few clean nights first
 FAST_MISSING_L = 30.0          # litres lost in one stretch in one 15-minute block, any hour
-# Measured: no clean block lost more than 2.3 L; a stretch next to a burst reads up to 9 L (meter error on the big
-# flow); 0.05 L/s loses 45 L a block, 0.5 L/s 455 L, 1.5 L/s 1330 L. So 30 L finds leaks from ~0.035 L/s in 15 min.
+# Measured (bursty use, 3 clean days, gateway BALANCE records): no clean block lost more than 4.0 L; 0.05 L/s loses 45 L a block, 0.5 L/s 455 L, 1.5 L/s 1330 L. So 30 L finds leaks from ~0.035 L/s in 15 min.
 PIPE_METERS = {"B-301": "3", "B-201": "2", "B-101": "1", "B-G01": "G"}   # flat whose node reads the meter above floor
 # ponytail: building B's table, like packet.NAMES; at installation it comes with the slot table
 SILENT_S = 2700                # nothing heard from a node for 3 summary periods = silent
@@ -59,6 +69,7 @@ ACK_AT_S = 1.5                 # seconds into the sender's slot: its own packets
 # ponytail: fits the 2.86 s slot at SF7/SF8; at SF9+ the slot fit check (HANDOVER step 8) must count ACKs
 SEEN_WINDOW = 1000             # counters this far below a node's newest are refused as too old
 # ponytail: 1000 is about 10 days of one node's messages; a longer outage loses its oldest backlog
+GATEWAY = "GATEWAY"            # the gateway's own name in the slot table and for the building key
 
 
 class Gateway:
@@ -85,6 +96,23 @@ class Gateway:
         self.last_seen = None       # node -> time last heard (set on the first step)
         self.silent = {}            # node -> time last heard before it went silent
         self.skewed = set()
+        self.valve_closed, self.valve_blocks = False, set()   # blocks the tank valve was shut in
+        self.cmd_path = path and os.path.splitext(path)[0] + "_cmds.json"
+        self.cmds, self.cmd_no = {}, 0   # command number -> {"n", "a", "t", "sent"}: waiting for a GOT
+        if self.cmd_path and os.path.exists(self.cmd_path):
+            with open(self.cmd_path) as f:
+                d = json.load(f)
+            self.cmds, self.cmd_no = {int(k): v for k, v in d["cmds"].items()}, d["no"]
+
+    def save_cmds(self):
+        if self.cmd_path:
+            save_atomic(self.cmd_path, json.dumps({"cmds": self.cmds, "no": self.cmd_no}))
+
+    def command(self, now, code, nodes):
+        for n in sorted(nodes):
+            self.cmd_no += 1
+            self.cmds[self.cmd_no] = {"n": n, "a": code, "t": now, "sent": -1e9}
+        self.save_cmds()
 
     def step(self):
         now = self.hal.now()
@@ -95,6 +123,12 @@ class Gateway:
             m = unpack(raw, self.hal.key)
             if m is None:
                 bad += 1                                    # wrong signature or broken packet
+                continue
+            if m["k"] == "GOT":                             # a node confirms a command
+                if self.cmds.get(m["s"], {}).get("n") == m["n"]:
+                    del self.cmds[m["s"]]
+                    self.save_cmds()
+                self.last_seen[m["n"]] = now
                 continue
             if m["k"] not in ("ALERT", "FLAG", "SUM"):
                 continue
@@ -111,7 +145,12 @@ class Gateway:
             new = True
             self.log.append({**m, "rx": now})
             self.check_clock(now, m)
-            if m["k"] == "ALERT" and not m["a"].endswith("_CLEARED"):     # all-clear is not a problem
+            if m["k"] == "ALERT" and m["n"] == self.tank and m["a"] in ("VALVE_CLOSED", "VALVE_OPENED"):
+                self.valve_closed = m["a"] == "VALVE_CLOSED"
+                self.valve_blocks.add(m["t"] // SUMMARY_S)
+                self.decide(m["t"], m["a"])
+                self.command(now, m["a"], self.flats)
+            elif m["k"] == "ALERT" and not m["a"].endswith("_CLEARED"):     # all-clear is not a problem
                 self.check_repeat(m)
             elif m["k"] == "FLAG" and m["n"] == self.tank:
                 self.tank_low_t = m["t"]
@@ -123,9 +162,23 @@ class Gateway:
             self.decide(now, "BAD_PACKET", count=bad)
         if new and self.seen_path:
             save_atomic(self.seen_path, json.dumps({n: sorted(v) for n, v in self.seen.items()}))
+        if self.valve_closed:
+            self.valve_blocks.add(now // SUMMARY_S)
         self.check_silence(now)
-        self.supply_rule(now)
+        if not self.valve_closed:
+            self.supply_rule(now)
         self.night_check(now)
+        self.send_radio(now)
+
+    def send_radio(self, now):
+        """In the gateway's own slot: the beacon, then commands not yet confirmed (again every 2 min)."""
+        slots = getattr(self.hal, "slots", None) or {}
+        at = slots.get(GATEWAY) and slots[GATEWAY][0] * 60 / slots[GATEWAY][1] + SLOT_GUARD_S
+        self.hal.send(pack({"k": "BEACON", "n": GATEWAY, "s": int(now) // 60 % 2 ** 32, "gt": now}, self.hal.key(GATEWAY)), at_s=at)
+        for no, c in sorted(self.cmds.items()):
+            if now - c["sent"] >= RETRY_S:
+                c["sent"] = now
+                self.hal.send(pack({"k": "CMD", "n": c["n"], "s": no, "t": c["t"], "a": c["a"]}, self.hal.key(c["n"])), at_s=at)
 
     def decide(self, now, kind, **info):
         self.events.append({"t": now, "event": kind, **info})
@@ -181,6 +234,16 @@ class Gateway:
         self.pipe_alerted.add(stretch)
         where = {} if stretch == "all" else {"where": "B-D" + ("0" if stretch == "G" else stretch)}
         self.decide(now, "PIPE_LEAK", **where, missing_l=round(lost), lps=round(lost / seconds, 3), check=check)
+        self.command(now, "PIPE_LEAK", self.floor_flats(stretch))
+
+    def floor_flats(self, stretch):
+        return self.flats if stretch == "all" else {n for n in self.flats if n[2] == stretch}
+
+    def pipe_clear(self, now, stretch):
+        if stretch in self.pipe_alerted:
+            self.pipe_alerted.discard(stretch)
+            self.decide(now, "PIPE_LEAK_CLEARED", **({} if stretch == "all" else {"where": "B-D" + ("0" if stretch == "G" else stretch)}))
+            self.command(now, "PIPE_LEAK_CLEARED", self.floor_flats(stretch))
 
     def night_check(self, now):
         if self.silent and not self.balance_paused:
@@ -192,7 +255,12 @@ class Gateway:
         # Fast check: every complete block, any hour
         for i in sorted(set(complete) - self.fast_done):
             self.fast_done.add(i)
-            for f, lost in (self.stretch_lost(i) or {}).items():
+            per = self.stretch_lost(i)
+            if i in self.valve_blocks:
+                continue                                    # valve shut: water not meant to flow
+            if per:
+                self.decide(now, "BALANCE", i=i, lost={f: round(v, 1) for f, v in per.items()})
+            for f, lost in (per or {}).items():
                 if lost > FAST_MISSING_L:
                     self.pipe_leak(now, f, lost, SUMMARY_S, "fast")
         # Night check, 02:00 to 04:00 local
@@ -207,6 +275,8 @@ class Gateway:
             if d in self.nights_done or len(blocks) < (h1 - h0) * HOUR // SUMMARY_S or not set(blocks) <= set(complete):
                 continue                                    # wait until every node's summaries arrived
             self.nights_done.add(d)
+            if self.valve_blocks & set(blocks):
+                continue                                    # valve shut that night: no check
             per = [self.stretch_lost(i) for i in blocks]
             if all(per):
                 lost = {f: sum(x[f] for x in per) for f in self.floors}
@@ -216,9 +286,9 @@ class Gateway:
                 if litres > NIGHT_MISSING_L:
                     self.pipe_leak(now, f, litres, (h1 - h0) * HOUR, "night")
                 else:
-                    self.pipe_alerted.discard(f)            # re-arm: a later leak alerts again
+                    self.pipe_clear(now, f)                 # re-arm: a later leak alerts again
                     if f != "all":
-                        self.pipe_alerted.discard("all")
+                        self.pipe_clear(now, "all")
 
 
 if __name__ == "__main__":
@@ -254,7 +324,8 @@ if __name__ == "__main__":
             gw.step()
             gw.hal.t += 60
 
-    events = lambda gw: [e["event"] for e in gw.events]
+    events = lambda gw: [e["event"] for e in gw.events if e["event"] != "BALANCE"]
+    leaks = lambda gw: [e for e in gw.events if e["event"] == "PIPE_LEAK"]
     F1, F2, T = "B-101", "B-102", "B-TANK"
     night = lambda d: [(d * DAY + NIGHT_HOURS[0] * HOUR) // SUMMARY_S + k for k in range(8)]   # 02:00-04:00
     gw = Gateway(FakeHAL(), [F1, F2], T)
@@ -264,8 +335,8 @@ if __name__ == "__main__":
     for d, v in enumerate([ok, leak, leak, ok, leak]):               # clean, leak (alert), still leaking, fixed, new leak
         for i in night(d):
             block(gw, i, v)
-    assert events(gw) == ["PIPE_LEAK", "PIPE_LEAK"], events(gw)
-    assert gw.events[0]["missing_l"] == 80 and gw.nights_done == {0, 1, 2, 3, 4}
+    assert events(gw) == ["PIPE_LEAK", "PIPE_LEAK_CLEARED", "PIPE_LEAK"], events(gw)
+    assert leaks(gw)[0]["missing_l"] == 80 and gw.nights_done == {0, 1, 2, 3, 4}
     # Without pipe meter numbers the whole pipe is checked (above); with them, each stretch on its own.
     # Floors 2 and 1; B-101 reads the meter above floor 1. Stretch 2 = tank - that meter - floor 2 flats,
     # stretch 1 = that meter - floor 1 flats.
@@ -274,20 +345,21 @@ if __name__ == "__main__":
         block(gw, i, {T: tank + lost_lower, F21: 10, F22: 10, F11: 10, F12: 10}, pipe={F11: meter + lost_lower})
     gw = Gateway(FakeHAL(), [F21, F22, F11, F12], T, {F11: "1"})
     pb(gw, 60, 140, 20)                                              # 15:00: 100 L lost in stretch 2 in one block
-    assert [(e["where"], e["check"], e["missing_l"]) for e in gw.events] == [("B-D2", "fast", 100)], gw.events
+    assert [(e["where"], e["check"], e["missing_l"]) for e in leaks(gw)] == [("B-D2", "fast", 100)], gw.events
     pb(gw, 61, 140, 20)                                              # still leaking: no second alert
     for i in night(1):                                               # stretch 2 still leaks, stretch 1 starts: 5 L x 8
         pb(gw, i, 140, 20, lost_lower=5)
-    assert [(e["where"], e["check"]) for e in gw.events] == [("B-D2", "fast"), ("B-D1", "night")], gw.events
-    assert gw.events[1]["missing_l"] == 40
+    assert [(e["where"], e["check"]) for e in leaks(gw)] == [("B-D2", "fast"), ("B-D1", "night")], gw.events
+    assert leaks(gw)[1]["missing_l"] == 40
     for i in night(2):                                               # both fixed: a clean night re-arms them
         pb(gw, i, 40, 20)
     pb(gw, 300, 40, 20, lost_lower=40)                               # later a burst below the floor 1 meter
-    assert [(e["where"], e["check"]) for e in gw.events][-1] == ("B-D1", "fast") and len(gw.events) == 3, gw.events
+    assert [(e["where"], e["check"]) for e in leaks(gw)][-1] == ("B-D1", "fast") and len(leaks(gw)) == 3, gw.events
+    assert [e["where"] for e in gw.events if e["event"] == "PIPE_LEAK_CLEARED"] == ["B-D2", "B-D1"]
     gw = Gateway(FakeHAL(), [F21, F22, F11, F12], T, {F11: "1"})
     for i in list(range(60, 70)) + night(0):                         # clean day and night: nothing
         pb(gw, i, 40, 20)
-    assert gw.events == [], gw.events
+    assert events(gw) == [] and any(e["event"] == "BALANCE" for e in gw.events), gw.events
     # F2 goes silent for 4 blocks (60 min) of the night: alert and pause; it comes back with its
     # stored summaries and the night is checked then
     gw = Gateway(FakeHAL(), [F1, F2], T)
@@ -322,4 +394,36 @@ if __name__ == "__main__":
     hal.box = [real]                                                     # someone replays the alert
     gw.step()
     assert gw.log == [] and "NEW_ALERT" not in events(gw), "replay after restart must be ignored"
+
+    # Beacon every minute in the gateway's slot; tank valve shut -> VALVE_CLOSED command to every
+    # flat, repeated every 2 min until GOT, kept across a restart; pipe checks pause meanwhile
+    from packet import peek
+    hal = FakeHAL()
+    hal.storage_path = os.path.join(tempfile.mkdtemp(), "GATEWAY.jsonl")
+    hal.slots = {F1: (0, 4), F2: (1, 4), T: (2, 4), GATEWAY: (3, 4)}
+    gw = Gateway(hal, [F1, F2], T)
+    gw.step()
+    assert [peek(r)["k"] for r in hal.sent] == ["BEACON"] and hal.at == [45 + SLOT_GUARD_S]
+    assert unpack(hal.sent[0], lambda n: sim_key(n) if n == GATEWAY else None)["gt"] == 0
+    hal.t, hal.sent, hal.at = 60, [], []
+    hal.box = [pack({"k": "ALERT", "n": T, "s": 1, "t": 60, "a": "VALVE_CLOSED", "valve": 0}, sim_key(T))]
+    gw.step()
+    cmds = [unpack(r, sim_key) for r in hal.sent if peek(r)["k"] == "CMD"]
+    assert sorted((c["n"], c["a"]) for c in cmds) == [(F1, "VALVE_CLOSED"), (F2, "VALVE_CLOSED")], cmds
+    assert "VALVE_CLOSED" in events(gw) and gw.valve_closed
+    f1 = next(c for c in cmds if c["n"] == F1)
+    hal.box = [pack({"k": "GOT", "n": F1, "s": f1["s"], "t": 61}, sim_key(F1))]
+    hal.t, hal.sent = 120, []
+    gw.step()
+    assert list(gw.cmds) == [f1["s"] + 1] and not any(peek(r)["k"] == "CMD" for r in hal.sent), "not yet 2 min"
+    gw = Gateway(hal, [F1, F2], T)                                         # restart: F2's command still waits
+    hal.t, hal.sent = 180, []
+    gw.step()
+    assert [unpack(r, sim_key)["n"] for r in hal.sent if peek(r)["k"] == "CMD"] == [F2]
+    gw = Gateway(FakeHAL(), [F1, F2], T)
+    gw.hal.t = night(0)[0] * SUMMARY_S
+    gw.hal.box = [pack({"k": "ALERT", "n": T, "s": 999, "t": gw.hal.t, "a": "VALVE_CLOSED"}, sim_key(T))]
+    for i in night(0):
+        block(gw, i, {T: 0, F1: 0, F2: 0} if i > night(0)[0] else {T: 300, F1: 0, F2: 0})   # 300 L "lost": valve shutting
+    assert "PIPE_LEAK" not in events(gw) and 0 in gw.nights_done, (events(gw), gw.nights_done, gw.valve_blocks)
     print("gateway self-check passed")
