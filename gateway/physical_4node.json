@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "building": "B-4node",
+  "root": {
+    "id": "B-TANK",
+    "type": "tank",
+    "valve": true,
+    "unmetered_homes": true,
+    "children": [
+      {
+        "id": "B-D2",
+        "type": "junction",
+        "label": "2",
+        "valve": false,
+        "children": [
+          {"id": "B-203", "type": "flat", "valve": true},
+          {
+            "id": "B-D1",
+            "type": "junction",
+            "label": "1",
+            "valve": false,
+            "children": [
+              {"id": "B-101", "type": "flat", "valve": true},
+              {"id": "B-102", "type": "flat", "valve": true}
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -810,7 +810,7 @@ class Node:
         self.reopen_when_normal(new_reading)
         self.try_reopening(td, r, new_reading)
         summary = self.interval
-        self.summarise(now, r)
+        self.summarise(td, r)
         # Save every 15 minutes of readings, with each summary, and whenever something changed,
         # so a power cut loses at most 15 minutes of learning and repeats no summary
         as_now = (int(td // SUMMARY_S), sorted(self.alerts), sorted(self.open), dict(self.valve))
@@ -863,8 +863,8 @@ class Node:
     def check_while_learning(self, td, hour, r):
         """Checks that need nothing learned."""
 
-    def summarise(self, now, r):
-        i = int(now // SUMMARY_S)
+    def summarise(self, td, r):
+        i = int(td // SUMMARY_S)
         if self.interval is not None and i != self.interval:
             self.emit("SUM", i=self.interval, **{k: round(v, 4) for k, v in self.acc.items()})
             self.acc = {}
