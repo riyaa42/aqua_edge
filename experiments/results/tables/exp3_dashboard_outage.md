@@ -1,0 +1,18 @@
+| Measure | Value |
+|---|---|
+| Dashboard backend down (s) | 300 stopped, healthy again 1.0 s after restart |
+| Snapshots generated (whole run) | 16 |
+| Snapshots generated while down | 6 |
+| Peak snapshots queued in the gateway outbox | 7 |
+| Snapshots stored by the dashboard | 16 |
+| Of those generated while down, stored | 6 |
+| Missing (gaps in the stored sequence) | 0 |
+| Still in the outbox when the gateway was stopped (kept for its next start) | 0 |
+| Duplicate frames stored | 0 |
+| Duplicate frames the server rejected | 0 |
+| Failed delivery attempts | 12 |
+| Healthy to first successful delivery (s) | 18.7 |
+| Healthy to last outage snapshot stored (recovery time, s) | 18.7 |
+| Node messages the gateway accepted while the dashboard was down | 209 |
+| Gateway decisions made while the dashboard was down | 8 |
+| Node messages generated / accepted (whole run) | 396 / 396 |

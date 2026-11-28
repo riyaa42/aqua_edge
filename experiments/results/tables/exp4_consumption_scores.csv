@@ -1,0 +1,5 @@
+Scenario,Expected,Events,Detected,Missed,False positives (trials),Precision,Recall,F1,Median delay (data min)
+sudden spike,high use or sudden change,30,30,0,32,0.48,1.00,0.65,26
+unusual night use,unusual night,30,30,0,4,0.88,1.00,0.94,14
+prolonged zero flow,zero flow,30,30,0,1,0.97,1.00,0.98,1422
+All (micro-average),,90,90,0,37,0.71,1.00,0.83,

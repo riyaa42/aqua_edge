@@ -1,0 +1,6 @@
+| Node | Messages generated | 15-min summaries | Alerts, flags and status | Unique at gateway | Delivery ratio | Missing | Packets sent (incl. retries) | Repeats the gateway rejected | Detections | Matching a planted event | False alarms | Summaries at gateway | Summary blocks visible on dashboard |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| B-TANK | 105 | 95 | 10 | 105 | 100.0% | 0 | 107 | 0 | 6 | 5 | 1 | 95/95 | 14/95 |
+| B-101 | 97 | 95 | 2 | 97 | 100.0% | 0 | 97 | 0 | 1 | 0 | 1 | 95/95 | 14/95 |
+| B-203 | 97 | 95 | 2 | 97 | 100.0% | 0 | 97 | 0 | 1 | 1 | 0 | 95/95 | 14/95 |
+| B-301 | 97 | 95 | 2 | 97 | 100.0% | 0 | 97 | 0 | 1 | 0 | 1 | 95/95 | 14/95 |

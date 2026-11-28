@@ -1,0 +1,14 @@
+Node,Data time (day 2),Alert,Against the planted events
+B-TANK,00:17,QUALITY_TEMPORAL_ANOMALY,false alarm
+B-TANK,00:17,(valve closed),
+B-TANK,06:02,QUALITY_LIMIT_VIOLATION,matches planted water-quality event
+B-TANK,06:02,QUALITY_RUNOFF,matches planted water-quality event
+B-TANK,13:49,SUPPLY_LOW,matches planted pump power cut (09:00-17:00)
+B-TANK,20:03,QUALITY_LIMIT_VIOLATION,matches planted water-quality event
+B-TANK,20:03,QUALITY_CHEMICAL,matches planted water-quality event
+B-101,07:59,LEAK_CONTINUOUS_FLOW,false alarm
+B-101,07:59,(valve closed),
+B-203,02:29,LEAK_NIGHT_FLOW,matches planted leak (from 02:00)
+B-203,02:29,(valve closed),
+B-301,07:59,LEAK_CONTINUOUS_FLOW,false alarm
+B-301,07:59,(valve closed),

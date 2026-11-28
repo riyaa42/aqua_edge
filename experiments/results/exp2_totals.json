@@ -1,0 +1,9 @@
+{
+ "outage_s": 300.5,
+ "data_start": "01:02",
+ "data_end": "13:32",
+ "packets_dropped_up": 68,
+ "packets_dropped_down": 24,
+ "generated_total": 396,
+ "received_unique": 396
+}

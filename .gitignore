@@ -36,3 +36,6 @@ dashboard/run/
 # Gateway deployment: MQTT passwords, and saved state when run outside Docker
 .env
 gateway-data/
+
+# Raw experiment logs (tables and figures are in experiments/results/)
+experiments/runs/

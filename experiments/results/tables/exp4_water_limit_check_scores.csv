@@ -1,0 +1,3 @@
+Water noise,Events,Detected,Missed,False positives (trials),True negatives,Precision,Recall,F1,Median delay (data min)
+steady,180,180,0,0,60,1.00,1.00,1.00,2
+replay,180,180,0,0,60,1.00,1.00,1.00,2

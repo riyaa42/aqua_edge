@@ -1,0 +1,14 @@
+| Run | Process | Measured seconds | CPU seconds | CPU, % of one core | Readings processed | RSS mean (MB) | RSS peak (MB) | PSS mean (MB) |
+|---|---|---|---|---|---|---|---|---|
+| fast replay | B-TANK | 573 | 0.88 | 0.15 | 1432 | 25.0 | 29.3 | 12.5 |
+| fast replay | B-101 | 573 | 0.68 | 0.12 | 1432 | 25.0 | 29.4 | 12.4 |
+| fast replay | B-203 | 573 | 0.71 | 0.12 | 1432 | 25.3 | 29.8 | 12.4 |
+| fast replay | B-301 | 573 | 0.68 | 0.12 | 1432 | 25.3 | 29.8 | 12.4 |
+| fast replay | gateway | 573 | 3.64 | 0.64 |  | 45.3 | 51.9 | 30.6 |
+| fast replay | dashboard | 573 | 0.74 | 0.13 |  | 50.7 | 56.0 | 36.0 |
+| real time | B-TANK | 537 | 0.53 | 0.10 | 8 | 24.7 | 28.1 | 12.4 |
+| real time | B-101 | 537 | 0.52 | 0.10 | 8 | 24.5 | 27.9 | 12.4 |
+| real time | B-203 | 537 | 0.51 | 0.09 | 8 | 24.5 | 28.0 | 12.4 |
+| real time | B-301 | 537 | 0.50 | 0.09 | 8 | 24.6 | 28.0 | 12.4 |
+| real time | gateway | 537 | 3.34 | 0.62 |  | 45.2 | 50.6 | 30.8 |
+| real time | dashboard | 537 | 0.74 | 0.14 |  | 51.0 | 55.8 | 36.0 |

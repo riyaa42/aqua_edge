@@ -1,0 +1,31 @@
+| Scenario | Water noise | Set | Expected | Trials | Expected alert detected | Alerts during the event (trials) | Trials with an alert outside the event | Delay, median (range), data min | Gateway named the right node |
+|---|---|---|---|---|---|---|---|---|---|
+| wq_normal | steady | main | no alert | 30 | n/a | - | 30 | n/a | n/a |
+| wq_normal | replay | main | no alert | 30 | n/a | - | 30 | n/a | n/a |
+| wq_ph_low | steady | main | limit violation | 30 | 30/30 | chemical 30; limit violation 30; temporal anomaly 8 | 30 | 2 (2-3) | 30/30 |
+| wq_ph_low | replay | main | limit violation | 30 | 30/30 | chemical 30; limit violation 30 | 30 | 2 (2-4) | 30/30 |
+| wq_ph_high | steady | main | limit violation | 30 | 30/30 | chemical 30; limit violation 30; temporal anomaly 9 | 30 | 3 (3-4) | 30/30 |
+| wq_ph_high | replay | main | limit violation | 30 | 30/30 | chemical 30; limit violation 30 | 30 | 3 (3-4) | 30/30 |
+| wq_tds_high | steady | main | limit violation | 30 | 30/30 | chemical 30; limit violation 30; temporal anomaly 9 | 30 | 2 (2-3) | 30/30 |
+| wq_tds_high | replay | main | limit violation | 30 | 30/30 | chemical 30; limit violation 30 | 30 | 2 (2-4) | 30/30 |
+| wq_turbidity_high | steady | main | limit violation | 30 | 30/30 | runoff 30; limit violation 30; temporal anomaly 13 | 19 | 2 (2-3) | 30/30 |
+| wq_turbidity_high | replay | main | limit violation | 30 | 30/30 | runoff 30; limit violation 30 | 30 | 2 (2-4) | 30/30 |
+| wq_temperature_high | steady | main | no dedicated rule | 30 | n/a | temporal anomaly 5 | 30 | n/a | n/a |
+| wq_temperature_high | replay | main | no dedicated rule | 30 | n/a | none | 30 | n/a | n/a |
+| wq_runoff_like | steady | main | limit violation | 30 | 30/30 | runoff 30; limit violation 30; temporal anomaly 8 | 22 | 2 (2-3) | 30/30 |
+| wq_runoff_like | replay | main | limit violation | 30 | 30/30 | runoff 30; limit violation 30 | 30 | 2 (2-3) | 30/30 |
+| wq_chemical_like | steady | main | limit violation | 30 | 30/30 | chemical 30; limit violation 30; temporal anomaly 10 | 30 | 2 (2-3) | 30/30 |
+| wq_chemical_like | replay | main | limit violation | 30 | 30/30 | chemical 30; limit violation 30 | 30 | 2 (2-3) | 30/30 |
+| leak_normal |  | main | no alert | 30 | n/a | - | 1 | n/a | n/a |
+| leak_night_flow |  | main | night flow | 30 | 30/30 | night flow 30; high use 12; unusual night 7; sudden change 5 | 4 | 29 (29-29) | 30/30 |
+| leak_continuous_flow |  | main | continuous flow | 30 | 30/30 | continuous flow 30; sudden change 3 | 2 | 179 (175-179) | 30/30 |
+| leak_flow_pressure_drop |  | main | pressure drop | 30 | 30/30 | pressure drop 30; sudden change 30; high use 2 | 22 | 9 (9-9) | 30/30 |
+| edge_night_flow_20min |  | boundary | no alert | 30 | n/a | none | 0 | n/a | n/a |
+| edge_flow_150min |  | boundary | no alert | 30 | n/a | none | 1 | n/a | n/a |
+| edge_high_flow_no_drop |  | boundary | no alert | 30 | n/a | sudden change 30 | 25 | n/a | n/a |
+| edge_drop_no_flow |  | boundary | no alert | 30 | n/a | none | 1 | n/a | n/a |
+| edge_long_legitimate_use |  | boundary | no alert | 30 | n/a | high use 30; continuous flow 30; sudden change 30 | 25 | n/a | n/a |
+| use_normal |  | main | no alert | 30 | n/a | - | 1 | n/a | n/a |
+| use_sudden_spike |  | main | high use or sudden change | 30 | 30/30 | high use 30; sudden change 30 | 30 | 26 (12-52) | 30/30 |
+| use_unusual_night |  | main | unusual night | 30 | 30/30 | unusual night 30; night flow 15 | 2 | 14 (14-14) | 30/30 |
+| use_prolonged_zero |  | main | zero flow | 30 | 30/30 | zero flow 30 | 3 | 1422 (1297-1439) | 30/30 |

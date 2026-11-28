@@ -1,0 +1,5 @@
+Water noise,Class,Events,Correct,Missed,False positives,Precision,Recall,F1
+steady,runoff,30,30,0,0,1.00,1.00,1.00
+steady,chemical,30,30,0,0,1.00,1.00,1.00
+replay,runoff,30,30,0,0,1.00,1.00,1.00
+replay,chemical,30,30,0,0,1.00,1.00,1.00
