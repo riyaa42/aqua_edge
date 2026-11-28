@@ -1,0 +1,345 @@
+#VRML_SIM R2025a utf8
+WorldInfo { info ["Aqua Edge: building B, 20 flat nodes, tank node, gateway"] title "Aqua Edge" basicTimeStep 32 }
+Viewpoint { orientation -0.1644 0.0608 0.9845 2.4431 position 42 -36 26 }
+Background { skyColor [0.75 0.85 0.95] }
+DirectionalLight { direction -0.4 0.6 -1 intensity 2.5 castShadows FALSE }
+Solid { name "ground" translation 0 0 0 children [ Shape { appearance PBRAppearance { baseColor 0.55 0.62 0.5 roughness 0.8 metalness 0 transparency 0.0 } geometry Plane { size 80 80 } } ] }
+Solid { name "slab0" translation 0 0 0.0 children [ Shape { appearance PBRAppearance { baseColor 0.85 0.85 0.8 roughness 0.8 metalness 0 transparency 0.7 } geometry Box { size 18 18 0.15 } } ] }
+Solid { name "slab1" translation 0 0 3.0 children [ Shape { appearance PBRAppearance { baseColor 0.85 0.85 0.8 roughness 0.8 metalness 0 transparency 0.7 } geometry Box { size 18 18 0.15 } } ] }
+Solid { name "slab2" translation 0 0 6.0 children [ Shape { appearance PBRAppearance { baseColor 0.85 0.85 0.8 roughness 0.8 metalness 0 transparency 0.7 } geometry Box { size 18 18 0.15 } } ] }
+Solid { name "slab3" translation 0 0 9.0 children [ Shape { appearance PBRAppearance { baseColor 0.85 0.85 0.8 roughness 0.8 metalness 0 transparency 0.7 } geometry Box { size 18 18 0.15 } } ] }
+Solid { name "slab4" translation 0 0 12.0 children [ Shape { appearance PBRAppearance { baseColor 0.85 0.85 0.8 roughness 0.8 metalness 0 transparency 0.7 } geometry Box { size 18 18 0.15 } } ] }
+Solid { name "slab5" translation 0 0 15.0 children [ Shape { appearance PBRAppearance { baseColor 0.85 0.85 0.8 roughness 0.8 metalness 0 transparency 0.7 } geometry Box { size 18 18 0.15 } } ] }
+Solid { name "downtake" translation 0 0 8.5 children [ Shape { appearance PBRAppearance { baseColor 0.2 0.4 0.9 roughness 0.8 metalness 0 transparency 0.0 } geometry Cylinder { height 16.0 radius 0.15 } } ] }
+Solid { name "tank" translation 0 0 16.2 children [ Shape { appearance PBRAppearance { baseColor 0.15 0.2 0.3 roughness 0.8 metalness 0 transparency 0.3 } geometry Cylinder { height 2 radius 1.5 } } ] }
+Robot {
+  name "B-101"
+  translation -6 -6 4.0
+  controller "aqua_node"
+  supervisor FALSE
+  children [
+    LED {
+      name "led"
+      color [0 0.8 0, 1 0.75 0, 1 0 0]
+      children [ Shape { appearance PBRAppearance { baseColor 0.25 0.25 0.25 roughness 0.5 metalness 0 } geometry Box { size 0.7 0.7 0.7 } } ]
+    }
+    Emitter { name "emitter" type "radio" channel 1 range 200 }
+    Receiver { name "receiver" type "radio" channel 1 }
+  ]
+}
+Robot {
+  name "B-102"
+  translation 6 -6 4.0
+  controller "aqua_node"
+  supervisor FALSE
+  children [
+    LED {
+      name "led"
+      color [0 0.8 0, 1 0.75 0, 1 0 0]
+      children [ Shape { appearance PBRAppearance { baseColor 0.25 0.25 0.25 roughness 0.5 metalness 0 } geometry Box { size 0.7 0.7 0.7 } } ]
+    }
+    Emitter { name "emitter" type "radio" channel 1 range 200 }
+    Receiver { name "receiver" type "radio" channel 1 }
+  ]
+}
+Robot {
+  name "B-103"
+  translation 6 6 4.0
+  controller "aqua_node"
+  supervisor FALSE
+  children [
+    LED {
+      name "led"
+      color [0 0.8 0, 1 0.75 0, 1 0 0]
+      children [ Shape { appearance PBRAppearance { baseColor 0.25 0.25 0.25 roughness 0.5 metalness 0 } geometry Box { size 0.7 0.7 0.7 } } ]
+    }
+    Emitter { name "emitter" type "radio" channel 1 range 200 }
+    Receiver { name "receiver" type "radio" channel 1 }
+  ]
+}
+Robot {
+  name "B-104"
+  translation -6 6 4.0
+  controller "aqua_node"
+  supervisor FALSE
+  children [
+    LED {
+      name "led"
+      color [0 0.8 0, 1 0.75 0, 1 0 0]
+      children [ Shape { appearance PBRAppearance { baseColor 0.25 0.25 0.25 roughness 0.5 metalness 0 } geometry Box { size 0.7 0.7 0.7 } } ]
+    }
+    Emitter { name "emitter" type "radio" channel 1 range 200 }
+    Receiver { name "receiver" type "radio" channel 1 }
+  ]
+}
+Robot {
+  name "B-201"
+  translation -6 -6 7.0
+  controller "aqua_node"
+  supervisor FALSE
+  children [
+    LED {
+      name "led"
+      color [0 0.8 0, 1 0.75 0, 1 0 0]
+      children [ Shape { appearance PBRAppearance { baseColor 0.25 0.25 0.25 roughness 0.5 metalness 0 } geometry Box { size 0.7 0.7 0.7 } } ]
+    }
+    Emitter { name "emitter" type "radio" channel 1 range 200 }
+    Receiver { name "receiver" type "radio" channel 1 }
+  ]
+}
+Robot {
+  name "B-202"
+  translation 6 -6 7.0
+  controller "aqua_node"
+  supervisor FALSE
+  children [
+    LED {
+      name "led"
+      color [0 0.8 0, 1 0.75 0, 1 0 0]
+      children [ Shape { appearance PBRAppearance { baseColor 0.25 0.25 0.25 roughness 0.5 metalness 0 } geometry Box { size 0.7 0.7 0.7 } } ]
+    }
+    Emitter { name "emitter" type "radio" channel 1 range 200 }
+    Receiver { name "receiver" type "radio" channel 1 }
+  ]
+}
+Robot {
+  name "B-203"
+  translation 6 6 7.0
+  controller "aqua_node"
+  supervisor FALSE
+  children [
+    LED {
+      name "led"
+      color [0 0.8 0, 1 0.75 0, 1 0 0]
+      children [ Shape { appearance PBRAppearance { baseColor 0.25 0.25 0.25 roughness 0.5 metalness 0 } geometry Box { size 0.7 0.7 0.7 } } ]
+    }
+    Emitter { name "emitter" type "radio" channel 1 range 200 }
+    Receiver { name "receiver" type "radio" channel 1 }
+  ]
+}
+Robot {
+  name "B-204"
+  translation -6 6 7.0
+  controller "aqua_node"
+  supervisor FALSE
+  children [
+    LED {
+      name "led"
+      color [0 0.8 0, 1 0.75 0, 1 0 0]
+      children [ Shape { appearance PBRAppearance { baseColor 0.25 0.25 0.25 roughness 0.5 metalness 0 } geometry Box { size 0.7 0.7 0.7 } } ]
+    }
+    Emitter { name "emitter" type "radio" channel 1 range 200 }
+    Receiver { name "receiver" type "radio" channel 1 }
+  ]
+}
+Robot {
+  name "B-301"
+  translation -6 -6 10.0
+  controller "aqua_node"
+  supervisor FALSE
+  children [
+    LED {
+      name "led"
+      color [0 0.8 0, 1 0.75 0, 1 0 0]
+      children [ Shape { appearance PBRAppearance { baseColor 0.25 0.25 0.25 roughness 0.5 metalness 0 } geometry Box { size 0.7 0.7 0.7 } } ]
+    }
+    Emitter { name "emitter" type "radio" channel 1 range 200 }
+    Receiver { name "receiver" type "radio" channel 1 }
+  ]
+}
+Robot {
+  name "B-302"
+  translation 6 -6 10.0
+  controller "aqua_node"
+  supervisor FALSE
+  children [
+    LED {
+      name "led"
+      color [0 0.8 0, 1 0.75 0, 1 0 0]
+      children [ Shape { appearance PBRAppearance { baseColor 0.25 0.25 0.25 roughness 0.5 metalness 0 } geometry Box { size 0.7 0.7 0.7 } } ]
+    }
+    Emitter { name "emitter" type "radio" channel 1 range 200 }
+    Receiver { name "receiver" type "radio" channel 1 }
+  ]
+}
+Robot {
+  name "B-303"
+  translation 6 6 10.0
+  controller "aqua_node"
+  supervisor FALSE
+  children [
+    LED {
+      name "led"
+      color [0 0.8 0, 1 0.75 0, 1 0 0]
+      children [ Shape { appearance PBRAppearance { baseColor 0.25 0.25 0.25 roughness 0.5 metalness 0 } geometry Box { size 0.7 0.7 0.7 } } ]
+    }
+    Emitter { name "emitter" type "radio" channel 1 range 200 }
+    Receiver { name "receiver" type "radio" channel 1 }
+  ]
+}
+Robot {
+  name "B-304"
+  translation -6 6 10.0
+  controller "aqua_node"
+  supervisor FALSE
+  children [
+    LED {
+      name "led"
+      color [0 0.8 0, 1 0.75 0, 1 0 0]
+      children [ Shape { appearance PBRAppearance { baseColor 0.25 0.25 0.25 roughness 0.5 metalness 0 } geometry Box { size 0.7 0.7 0.7 } } ]
+    }
+    Emitter { name "emitter" type "radio" channel 1 range 200 }
+    Receiver { name "receiver" type "radio" channel 1 }
+  ]
+}
+Robot {
+  name "B-401"
+  translation -6 -6 13.0
+  controller "aqua_node"
+  supervisor FALSE
+  children [
+    LED {
+      name "led"
+      color [0 0.8 0, 1 0.75 0, 1 0 0]
+      children [ Shape { appearance PBRAppearance { baseColor 0.25 0.25 0.25 roughness 0.5 metalness 0 } geometry Box { size 0.7 0.7 0.7 } } ]
+    }
+    Emitter { name "emitter" type "radio" channel 1 range 200 }
+    Receiver { name "receiver" type "radio" channel 1 }
+  ]
+}
+Robot {
+  name "B-402"
+  translation 6 -6 13.0
+  controller "aqua_node"
+  supervisor FALSE
+  children [
+    LED {
+      name "led"
+      color [0 0.8 0, 1 0.75 0, 1 0 0]
+      children [ Shape { appearance PBRAppearance { baseColor 0.25 0.25 0.25 roughness 0.5 metalness 0 } geometry Box { size 0.7 0.7 0.7 } } ]
+    }
+    Emitter { name "emitter" type "radio" channel 1 range 200 }
+    Receiver { name "receiver" type "radio" channel 1 }
+  ]
+}
+Robot {
+  name "B-403"
+  translation 6 6 13.0
+  controller "aqua_node"
+  supervisor FALSE
+  children [
+    LED {
+      name "led"
+      color [0 0.8 0, 1 0.75 0, 1 0 0]
+      children [ Shape { appearance PBRAppearance { baseColor 0.25 0.25 0.25 roughness 0.5 metalness 0 } geometry Box { size 0.7 0.7 0.7 } } ]
+    }
+    Emitter { name "emitter" type "radio" channel 1 range 200 }
+    Receiver { name "receiver" type "radio" channel 1 }
+  ]
+}
+Robot {
+  name "B-404"
+  translation -6 6 13.0
+  controller "aqua_node"
+  supervisor FALSE
+  children [
+    LED {
+      name "led"
+      color [0 0.8 0, 1 0.75 0, 1 0 0]
+      children [ Shape { appearance PBRAppearance { baseColor 0.25 0.25 0.25 roughness 0.5 metalness 0 } geometry Box { size 0.7 0.7 0.7 } } ]
+    }
+    Emitter { name "emitter" type "radio" channel 1 range 200 }
+    Receiver { name "receiver" type "radio" channel 1 }
+  ]
+}
+Robot {
+  name "B-G01"
+  translation -6 -6 1.0
+  controller "aqua_node"
+  supervisor FALSE
+  children [
+    LED {
+      name "led"
+      color [0 0.8 0, 1 0.75 0, 1 0 0]
+      children [ Shape { appearance PBRAppearance { baseColor 0.25 0.25 0.25 roughness 0.5 metalness 0 } geometry Box { size 0.7 0.7 0.7 } } ]
+    }
+    Emitter { name "emitter" type "radio" channel 1 range 200 }
+    Receiver { name "receiver" type "radio" channel 1 }
+  ]
+}
+Robot {
+  name "B-G02"
+  translation 6 -6 1.0
+  controller "aqua_node"
+  supervisor FALSE
+  children [
+    LED {
+      name "led"
+      color [0 0.8 0, 1 0.75 0, 1 0 0]
+      children [ Shape { appearance PBRAppearance { baseColor 0.25 0.25 0.25 roughness 0.5 metalness 0 } geometry Box { size 0.7 0.7 0.7 } } ]
+    }
+    Emitter { name "emitter" type "radio" channel 1 range 200 }
+    Receiver { name "receiver" type "radio" channel 1 }
+  ]
+}
+Robot {
+  name "B-G03"
+  translation 6 6 1.0
+  controller "aqua_node"
+  supervisor FALSE
+  children [
+    LED {
+      name "led"
+      color [0 0.8 0, 1 0.75 0, 1 0 0]
+      children [ Shape { appearance PBRAppearance { baseColor 0.25 0.25 0.25 roughness 0.5 metalness 0 } geometry Box { size 0.7 0.7 0.7 } } ]
+    }
+    Emitter { name "emitter" type "radio" channel 1 range 200 }
+    Receiver { name "receiver" type "radio" channel 1 }
+  ]
+}
+Robot {
+  name "B-G04"
+  translation -6 6 1.0
+  controller "aqua_node"
+  supervisor FALSE
+  children [
+    LED {
+      name "led"
+      color [0 0.8 0, 1 0.75 0, 1 0 0]
+      children [ Shape { appearance PBRAppearance { baseColor 0.25 0.25 0.25 roughness 0.5 metalness 0 } geometry Box { size 0.7 0.7 0.7 } } ]
+    }
+    Emitter { name "emitter" type "radio" channel 1 range 200 }
+    Receiver { name "receiver" type "radio" channel 1 }
+  ]
+}
+Robot {
+  name "B-TANK"
+  translation 2.2 0 16.2
+  controller "aqua_node"
+  supervisor FALSE
+  children [
+    LED {
+      name "led"
+      color [0 0.8 0, 1 0.75 0, 1 0 0]
+      children [ Shape { appearance PBRAppearance { baseColor 0.25 0.25 0.25 roughness 0.5 metalness 0 } geometry Box { size 0.9 0.9 0.9 } } ]
+    }
+    Emitter { name "emitter" type "radio" channel 1 range 200 }
+    Receiver { name "receiver" type "radio" channel 1 }
+  ]
+}
+Solid { name "gateway_pole" translation 16 -14 0.5 children [ Shape { appearance PBRAppearance { baseColor 0.4 0.4 0.4 roughness 0.8 metalness 0 transparency 0.0 } geometry Cylinder { height 1 radius 0.1 } } ] }
+Robot {
+  name "GATEWAY"
+  translation 16 -14 1.5
+  controller "aqua_gateway"
+  supervisor TRUE
+  children [
+    LED {
+      name "led"
+      color [0 0.8 0, 1 0.75 0, 1 0 0]
+      children [ Shape { appearance PBRAppearance { baseColor 0.25 0.25 0.25 roughness 0.5 metalness 0 } geometry Box { size 1.2 1.2 1.2 } } ]
+    }
+    Emitter { name "emitter" type "radio" channel 1 range 200 }
+    Receiver { name "receiver" type "radio" channel 1 }
+  ]
+}

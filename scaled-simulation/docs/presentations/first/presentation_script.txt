@@ -1,0 +1,237 @@
+AQUA EDGE: FIRST RESEARCH PRESENTATION SCRIPT (CSD457)
+Riya Arora, Sabarigirish Manikandan, Breeti Bandyopadhyay
+Total talking time: about 5 to 6 minutes for slides 1 to 6.
+
+Tips
+- Point at each table row instead of reading it out.
+- Stress the "we use..." sentences: they link each paper to Aqua Edge.
+- If you run over, shorten the "limit" sentences first.
+- Check that the title slide name matches what you say (Aqua Edge).
+
+
+======================================================================
+SLIDE 1: TITLE (about 30 seconds)
+======================================================================
+
+Good afternoon. We are Riya, Sabarigirish and Breeti, and our project is
+Aqua Edge.
+
+Aqua Edge is an offline-first IoT system that detects three things in a
+water network: unsafe water, pipeline leaks, and abnormal water use. It
+does this in real time, and it keeps working even when the internet
+connection is unreliable.
+
+
+======================================================================
+SLIDE 2: PROBLEM STATEMENT (about 1 minute)
+======================================================================
+
+Water networks face three problems.
+
+First, unsafe water: contamination often goes unnoticed until people are
+already affected.
+
+Second, leaks: water escapes from pipes, sometimes in the main lines before
+it ever reaches a meter.
+
+Third, abnormal consumption: things like water running all night or sudden
+spikes, which can mean a leak, a faulty meter or misuse.
+
+Most smart water systems today send their sensor data to the cloud, and the
+cloud makes the decisions. That works while the internet is up. But in rural
+areas, underground sites or during outages, the link drops. When that
+happens, unsafe water, leaks and abnormal use go undetected, exactly when
+problems happen.
+
+So our problem is: how do we keep detection working when connectivity fails?
+
+
+======================================================================
+SLIDE 3: LITERATURE REVIEW, PART 1 (about 1 minute 15 seconds)
+======================================================================
+
+We reviewed six papers. For each one, we looked at what it does and what we
+can use from it.
+
+Sharma and colleagues, 2026, put pH, TDS, temperature and turbidity sensors
+on an ESP32 microcontroller, and a tiny neural network on the chip decides
+whether the water is safe, with no cloud needed. We use this as our water
+quality check. Its limit is that it only checks water quality, not leaks or
+usage. And although it's designed to work offline, the authors never
+actually tested it during an internet outage.
+
+Alghamdi and colleagues, 2022, designed a leak detection system over LoRa,
+a long-range, low-power radio. Each node has a water meter and a pressure
+sensor, and when pressure drops below a set level, it's flagged as a leak.
+We take this pressure-drop rule for detecting leaks. They tested it in a
+network simulator, and they measured message delivery, not how accurately
+leaks were found.
+
+Babazadeh, 2019, showed that a small node can spot unusual readings by
+itself and send only those over LoRa, which saves data and battery. We
+borrow this idea of deciding on the node. Its examples were pressure events,
+not everyday water usage.
+
+
+======================================================================
+SLIDE 4: LITERATURE REVIEW, PART 2 (about 1 minute 15 seconds)
+======================================================================
+
+Mariadhason and colleagues, 2026, built a water quality system that
+timestamps readings and stores them on an SD card when the connection fails,
+then sends them once it's back. We use this store-and-forward idea so no
+data is lost offline. But it only handles water quality, and it doesn't test
+longer and longer outages.
+(Say "Mariadhason and colleagues", not "HydroSense", so nobody confuses
+their system name with Aqua Edge.)
+
+Pagano and colleagues, 2024, created SWI-FEED, a testing framework that
+combines EPANET, which simulates water flowing in pipes, with NS-3, which
+simulates the radio network. We will use the same kind of setup to test our
+system. It doesn't simulate network outages, so we will add those ourselves.
+
+Finally, Ali and colleagues, 2022, is the closest to our project. One
+prototype handles water quality, water usage and leaks. It detects leaks by
+checking whether the water going in matches the water coming out. We use
+this flow-balance check, and this system is our cloud-based baseline to
+compare against, because all its decisions are made in the cloud.
+
+So, putting it together: each piece exists separately, and the one system
+that combines them depends on the cloud. That leads us to our research gap.
+
+
+======================================================================
+SLIDE 5: RESEARCH GAP (about 45 seconds)
+======================================================================
+
+From these papers, we found three things.
+
+One: each task has already been done at the edge, meaning on the device
+itself, but separately. There's water quality on one device, leak detection
+on another, and anomaly detection on another.
+
+Two: the one system we found that combines all three still makes its
+decisions in the cloud.
+
+Three, and this is our gap: in the papers we reviewed, nobody measures how
+detection and alerts hold up when the internet is unavailable, compared with
+a cloud-based system.
+
+So the question isn't just "can we combine them?" It's "does doing it on the
+device actually help when the connection fails?"
+
+
+======================================================================
+SLIDE 6: RESEARCH QUESTION AND HYPOTHESIS (about 1 minute)
+======================================================================
+
+That gives us our research question.
+
+How does an offline-first edge system that detects water-quality problems,
+leaks and abnormal consumption compare with a cloud-dependent system, in
+detection accuracy, alert latency and energy use, when the internet is
+unavailable?
+
+In simple terms, we're comparing two designs. In one, each device makes its
+own decisions. In the other, everything waits for the cloud. And we compare
+them on three things:
+- Accuracy: does it catch the real problems?
+- Alert latency: how quickly does the alert arrive?
+- Energy: how much battery does it use?
+
+Our hypothesis: the offline-first system will stay about as accurate as the
+cloud system, but give faster alerts and keep working during internet
+outages, because it doesn't depend on the connection.
+
+We'll test this in simulation by cutting the network for different lengths
+of time and measuring what each system still manages to do.
+
+
+======================================================================
+Q&A PREPARATION
+======================================================================
+
+Q: How is your hypothesis testable?
+A: If the edge system loses a lot of accuracy, or doesn't deliver alerts
+   faster during outages, our hypothesis is wrong.
+
+Q: What does "comparable accuracy" mean?
+A: We'll set an acceptable accuracy difference once our evaluation plan is
+   approved.
+
+Q: Your hypothesis doesn't mention energy. Why is it in the question?
+A: We'll measure energy to see the cost of running detection on the device.
+
+----------------------------------------------------------------------
+
+Q: Why does the combined paper (Ali et al., 2022) do detection in the cloud?
+A: Their leak method compares flow from several nodes at the same moment
+   (water in vs water out), so they gathered everything in one central
+   place, a cloud database (Firebase), which also gave users and admins a
+   dashboard. It was a small home prototype on reliable Wi-Fi, so outages
+   weren't their focus. Their nodes store data offline, but the leak
+   decision waits for the cloud. We move that decision onto the devices and
+   the gateway, so it keeps working when the link is down.
+
+Q: So how do you compare flows from several nodes without the cloud?
+A: The gateway does it. It's local and receives data from all the nodes over
+   LoRa, with no internet needed.
+
+----------------------------------------------------------------------
+
+Q: What is the challenge in combining all three? What's the actual gap?
+A (20-second version):
+   Combining them isn't just stacking three detectors. They compete for one
+   small device's memory and battery, they work on different time scales,
+   the same signal like a pressure drop can mean a leak or a supply problem,
+   and some checks need data from other nodes, which normally comes from the
+   cloud. Nobody has measured how a combined system handles these trade-offs
+   when offline. That's our gap.
+
+The five challenges in detail:
+1. Limited device resources: one ESP32 has little memory, a slow processor
+   and a small battery, and now runs three detectors plus storage and radio.
+   Each paper ran only one task.
+2. Different time scales: leaks need checks every few seconds, water quality
+   changes over minutes, abnormal use needs days of history. Faster readings
+   catch leaks sooner but use more battery.
+3. The same signal can mean different things: a pressure drop could be a
+   leak, heavy normal use, or the whole supply weakening. A usage spike
+   could be a leak or someone filling a tank. Detectors running together
+   can contradict each other or raise false alarms.
+4. Some checks need other nodes: the flow-balance check and the
+   supply-event check need data from several nodes. Offline, that job moves
+   to a local gateway.
+5. Surviving outages: during a long outage the SD card fills up and the
+   radio can only send small amounts, so the system must decide what to
+   keep, what to send first (alerts before routine data), and keep
+   timestamps correct.
+
+The actual gap in one sentence:
+   Nobody has measured whether one low-cost device can run all three
+   detections on its own, and how well it still performs as internet
+   outages get longer, compared with a cloud-based system.
+
+----------------------------------------------------------------------
+
+Q: Does each node have an ESP32?
+A: Yes. Each node has its own ESP32, so every node makes its own decisions
+   and keeps working offline. One node = ESP32 + sensors (pH, TDS,
+   turbidity, temperature, flow, pressure) + LoRa radio module + SD card +
+   battery. The ESP32 has no LoRa built in, so we add a LoRa module (or use
+   a combined LoRa32 board). The gateway is a separate device.
+   We're doing simulation first, so most nodes will be virtual; hardware,
+   if built, would be one or two real nodes.
+
+Q: Why an ESP32?
+A: It's cheap, low-power, has enough memory to run the small water-quality
+   model, and the paper we build on already showed the model runs on it.
+
+Q: Why LoRa?
+A: Long range and low power for small sensor messages, and it works without
+   internet, which fits an offline-first water network.
+
+Q: Is Alghamdi et al. a real paper if it's "only a simulation"?
+A: Yes, it's published in Sensors (2022). "Simulation" describes how they
+   tested it: a virtual housing complex in the FLoRa simulator on OMNeT++,
+   with 72 to 1,800 nodes, instead of real hardware.
