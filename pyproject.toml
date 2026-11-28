@@ -21,6 +21,13 @@ research = [
   "streamlit>=1.66.1",
   "wntr>=1.5",
 ]
+# The dashboard server (dashboard/server.py). The shipper that sends to it needs none of these.
+dashboard = [
+  "fastapi>=0.115",
+  "uvicorn>=0.30",
+]
+# Used only by tests: FastAPI's test client
+test = ["httpx2>=2.0"]
 
 [project.optional-dependencies]
 # Only on a Raspberry Pi with the LoRa module
@@ -50,6 +57,7 @@ edge-based-node = "tasks:edge_based_node"
 edge-based-gateway = "tasks:edge_based_gateway"
 cloud-based-node = "tasks:cloud_based_node"
 cloud-based-gateway = "tasks:cloud_based_gateway"
+dashboard-server = "tasks:dashboard_server"
 pi-radio-test = "tasks:pi_radio_test"
 gate-radio-test = "tasks:gate_radio_test"
 exp-compare-leaks = "tasks:exp_compare_leaks"
@@ -68,7 +76,7 @@ build-backend = "uv_build"
 
 [tool.uv]
 package = true
-default-groups = ["research"]
+default-groups = ["research", "dashboard", "test"]
 
 [tool.uv.build-backend]
 module-root = ""

@@ -4,7 +4,7 @@ FROM docker.io/library/python:3.12-slim
 COPY --from=ghcr.io/astral-sh/uv:0.11.16 /uv /bin/uv
 WORKDIR /app
 COPY pyproject.toml uv.lock .python-version ./
-RUN UV_PYTHON_DOWNLOADS=never uv sync --locked --no-cache --no-install-project --no-default-groups --extra gateway
+RUN UV_PYTHON_DOWNLOADS=never uv sync --locked --no-cache --no-install-project --no-default-groups --group dashboard --extra gateway
 COPY comms comms
 COPY dashboard dashboard
 COPY detection detection

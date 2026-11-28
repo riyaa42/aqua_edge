@@ -90,6 +90,7 @@ def check_main():
     everyone = ["GATEWAY", "B-TANK", *Topology.load().flats]
     keys = key_file(folder, everyone)
     saved = server.open_radio, comms.gateway.connect, os.environ.get("MQTT_PASSWORD"), os.environ.pop("MQTT_HOST", None)
+    os.environ.pop("DASHBOARD_URL", None)
     handlers = {s: signal.getsignal(s) for s in (signal.SIGINT, signal.SIGTERM)}
     try:
         for with_mqtt in (False, True):
@@ -146,6 +147,10 @@ def check_compose_files():
     compose = read("compose.yaml")
     assert '"127.0.0.1:${MQTT_PORT:-1883}:1883"' in compose, "the broker is published to this computer only"
     assert "./gateway/mosquitto:/config:ro" in compose and '"gateway.edge_based"' in compose
+    assert '"127.0.0.1:${DASHBOARD_PORT:-8000}:8000"' in compose, "the dashboard too: reading it needs no token"
+    assert "--group dashboard" in dockerfile and "dashboard.server:create_app" in compose and "dashboard" in copied
+    assert compose.count("AQUA_DASHBOARD_TOKEN: ${AQUA_DASHBOARD_TOKEN:?") == 2, "no default token in this setup"
+    assert "AQUA_ENABLE_OUTAGE_SIM:-0" in compose
     assert "allow_anonymous false" in read("gateway", "mosquitto", "mosquitto.conf")
     start = read("gateway", "mosquitto", "start.sh")        # or the broker cannot start a second time
     assert start.index('rm -rf "$dir"') < start.index("mosquitto_passwd -c")

@@ -1,11 +1,15 @@
 """Gateway server entry point, edge-based solution: nodes decide their own alerts, and the gateway
 decides what needs several nodes' data (core.py). It reaches the nodes through the ESP8266 LoRa
-modem (hal/gate_hal.py) and publishes what it hears and decides over MQTT (comms/).
+modem (hal/gate_hal.py), publishes what it hears and decides over MQTT (comms/), and sends
+snapshots to the dashboard (dashboard_link.py).
 
     python3 -m gateway.edge_based --keys gateway_keys.json --data gateway-data --port /dev/ttyUSB0
     python3 -m gateway.edge_based ... --mqtt-host 127.0.0.1 --mqtt-user gateway    # password: MQTT_PASSWORD
 
-Without --mqtt-host (or MQTT_HOST) it runs without MQTT. The radio never waits for the broker.
+    python3 -m gateway.edge_based ... --dashboard-url http://127.0.0.1:8000/api/v1/ingest  # token: AQUA_DASHBOARD_TOKEN
+
+Without --mqtt-host (or MQTT_HOST) it runs without MQTT, and without --dashboard-url (or
+DASHBOARD_URL) it sends nothing to a dashboard. The radio never waits for the broker or dashboard.
 With Docker Compose, which also runs the broker: gateway/README.md. Not tested on real hardware.
 """
 import argparse
@@ -14,7 +18,9 @@ import signal
 import threading
 import time
 
+from dashboard.shipper import DashboardShipper
 from gateway.core import Gateway
+from gateway.dashboard_link import DashboardFeed
 from gateway.topology import BUILDING_B, Topology
 from hal.gate_hal import open_radio
 from hal.packet import add_names, load_keys
@@ -65,6 +71,10 @@ def parse_args(argv=None):
     ap.add_argument("--mqtt-host", default=os.environ.get("MQTT_HOST"), help="broker; without it, no MQTT")
     ap.add_argument("--mqtt-port", type=int, default=int(os.environ.get("MQTT_PORT", 1883)))
     ap.add_argument("--mqtt-user", default=os.environ.get("MQTT_USER"))
+    ap.add_argument("--dashboard-url", default=os.environ.get("DASHBOARD_URL"),
+                    help="the dashboard's ingest address; without it, nothing is sent")
+    ap.add_argument("--dashboard-id", default=os.environ.get("DASHBOARD_GATEWAY_ID"),
+                    help="this gateway's name on the dashboard (default: building-<building>)")
     return ap.parse_args(argv)
 
 
@@ -103,14 +113,24 @@ def main(argv=None):
             raise SystemExit("paho-mqtt is not installed: uv sync --extra gateway")
         GatewayComms(gateway, mqtt, building=building).attach()
 
+    feed = None
+    if a.dashboard_url:
+        shipper = DashboardShipper(a.dashboard_url, os.path.join(a.data, "dashboard-outbox"),
+                                   gateway_id=a.dashboard_id or f"building-{building}", mode="edge",
+                                   auth_token=os.environ.get("AQUA_DASHBOARD_TOKEN", ""))
+        feed = DashboardFeed(gateway, shipper).start()
+
     stop = threading.Event()
     for sig in (signal.SIGINT, signal.SIGTERM):         # Ctrl-C and `docker stop`
         signal.signal(sig, lambda *_: stop.set())
     print(f"gateway running: radio on {a.port}, " +
-          (f"MQTT {a.mqtt_host}:{a.mqtt_port}" if mqtt else "no MQTT"))
+          (f"MQTT {a.mqtt_host}:{a.mqtt_port}" if mqtt else "no MQTT") +
+          (f", dashboard {a.dashboard_url}" if feed else ", no dashboard"))
     try:
         run(gateway, stop)
     finally:
+        if feed:
+            feed.stop()
         if mqtt:
             mqtt.close()
         radio.close()

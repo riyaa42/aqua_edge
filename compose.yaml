@@ -1,7 +1,6 @@
-# Aqua Edge on the building's computer: the edge-based gateway and its MQTT broker. The dashboard
-# will be another service here, on the same image, once it has a server.
-# Setup: gateway/README.md, "Run with Docker Compose".
-#   cp .env.example .env   # set the passwords and the key file
+# Aqua Edge on the building's computer: the edge-based gateway, its MQTT broker and the dashboard
+# server. Setup: gateway/README.md, "Run with Docker Compose".
+#   cp .env.example .env   # set the passwords, the dashboard token and the key file
 #   docker compose up -d --build
 name: aqua-edge
 
@@ -28,6 +27,9 @@ services:
       MQTT_USER: gateway
       MQTT_PASSWORD: ${MQTT_GATEWAY_PASSWORD:?set it in .env}
       AQUA_TOPOLOGY_PATH: /run/config/tree.json
+      DASHBOARD_URL: ${DASHBOARD_URL:-http://dashboard:8000/api/v1/ingest}
+      DASHBOARD_GATEWAY_ID: ${DASHBOARD_GATEWAY_ID:-}
+      AQUA_DASHBOARD_TOKEN: ${AQUA_DASHBOARD_TOKEN:?set it in .env}
     devices:
       - "${GATEWAY_SERIAL:-/dev/ttyUSB0}:/dev/ttyUSB0"       # the ESP8266
     volumes:
@@ -40,6 +42,34 @@ services:
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
 
+  dashboard:
+    image: aqua-edge
+    build: .
+    # uvicorn directly, for the shutdown limit: an open live stream would otherwise hold up a stop
+    command: ["uvicorn", "--factory", "dashboard.server:create_app", "--host", "0.0.0.0", "--port", "8000",
+              "--timeout-graceful-shutdown", "3"]
+    environment:
+      AQUA_DASHBOARD_TOKEN: ${AQUA_DASHBOARD_TOKEN:?set it in .env}
+      AQUA_DASHBOARD_DB: /data/dashboard.db
+      AQUA_TOPOLOGY_PATH: /run/config/tree.json
+      AQUA_ENABLE_OUTAGE_SIM: ${AQUA_ENABLE_OUTAGE_SIM:-0}    # 1 for outage demos
+    ports:
+      - "127.0.0.1:${DASHBOARD_PORT:-8000}:8000"      # this computer only: reading needs no token
+    volumes:
+      - dashboard-data:/data
+      - ${GATEWAY_TREE:-./gateway/building_B.json}:/run/config/tree.json:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+
 volumes:
   mqtt-data:
   gateway-data:
+  dashboard-data:

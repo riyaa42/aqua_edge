@@ -6,6 +6,7 @@
 | `building_B.json` + `topology.py` | Gateway | The building's pipes as a tree of nodes, and its loader and checks ([Building tree](#building-tree)) |
 | `analytics.py` | Gateway | Open incidents, closed by explicit recovery messages, cross-node root-cause correlation (tank contamination & main riser leak groups), composite risk scoring (0–100) & ranked maintenance queue, online vs. offline delivery-latency accounting, and `Gateway.snapshot()` JSON export |
 | `edge_based.py` | Gateway | Server entry point, edge-based solution: nodes decide their own alerts, and the gateway decides what needs several nodes' data. It reaches the LoRa antenna through an ESP8266 (`../hal/gate_hal.py`), runs `core.py` and publishes over MQTT (`../comms/`). `uv run edge-based-gateway`, or [with Docker Compose](#run-with-docker-compose). Not tested on real hardware |
+| `dashboard_link.py` | Gateway | Sends snapshots to the [dashboard](../dashboard/README.md) on its own thread, through `dashboard/shipper.py` |
 | `mosquitto/` | Gateway | The MQTT broker's settings and access rules, used by [Docker Compose](#run-with-docker-compose) |
 | `cloud_based.py` | Gateway | Server entry point, cloud-based solution: nodes only buffer and stream sensor data, and all ML and every decision happen on this side. Will reach the LoRa antenna through an ESP8266. `uv run cloud-based-gateway`. **Placeholder, not implemented yet** |
 
@@ -98,7 +99,7 @@ To use a tree:
 3. **Pi.** Copy the same tree to it: `uv run edge-based-node pi-flat --keys pi-flat_keys.json --tree lab.json --csv sensors.csv`. The tree decides whether the node runs the tank or the flat checks. The CSV needs columns named for this node, such as `pi-flat:flow_lps`.
 4. **Virtual nodes** started the same way need nothing more. Code that builds a `FlatNode` or `TankNode` itself must first call `hal.packet.add_names(topology.radio_ids)`. The live simulation (`../simulation/live/`) still runs building B only.
 
-**Use a new data folder (`--data`) for a different building.** Saved state remembers which message numbers were seen for each name, so a node reusing a name with a fresh counter would be treated as a replay. With Docker Compose the state is in the `gateway-data` volume, which stays when you change `GATEWAY_TREE`.
+**Use a new data folder (`--data`) for a different building.** Saved state remembers which message numbers were seen for each name, so a node reusing a name with a fresh counter would be treated as a replay. With Docker Compose the state is in the `gateway-data` volume, which stays when you change `GATEWAY_TREE`; `docker compose -p <another name> up` gives a building its own volumes. The dashboard also keeps what it was sent under the gateway's name.
 
 ## Running the server
 
@@ -115,10 +116,10 @@ This runs without MQTT. To publish to a broker you run yourself, add `--mqtt-hos
 
 ### Run with Docker Compose
 
-This starts the server and a Mosquitto broker together, using `compose.yaml` and `Dockerfile` at the repository root. The dashboard is meant to join the same setup; it has no server yet. The image installs the locked libraries with `uv`: only the project's required ones and the `gateway` extra. It leaves out the `research` group ([Python setup](../README.md#python-setup)), so a service that needs one of those libraries, such as a dashboard using `streamlit`, must add it in `pyproject.toml` or the `Dockerfile`. From the repository root:
+This starts the gateway server, a Mosquitto broker and the [dashboard server](../dashboard/README.md) together, using `compose.yaml` and `Dockerfile` at the repository root. The gateway and dashboard share one image, in which `uv` installs the locked libraries: the project's required ones, the `gateway` extra and the `dashboard` group. It leaves out the `research` and `test` groups ([Python setup](../README.md#python-setup)). From the repository root:
 
 ```sh
-cp .env.example .env      # set both passwords and the full path of the key file
+cp .env.example .env      # set both passwords, the dashboard token and the full path of the key file
 docker compose up -d --build
 docker compose logs -f gateway
 ```
@@ -127,16 +128,22 @@ docker compose logs -f gateway
 |---|---|
 | `MQTT_GATEWAY_PASSWORD` | The gateway's broker login `gateway`: may only publish |
 | `MQTT_VIEWER_PASSWORD` | The login `viewer` for subscribers: may only read |
+| `AQUA_DASHBOARD_TOKEN` | A long random secret, which the gateway sends with its data. For example `openssl rand -hex 32` |
+| `DASHBOARD_PORT` | The dashboard's port on this computer, default 8000 |
+| `DASHBOARD_URL` | Send to a dashboard elsewhere instead of this setup's own (its full ingest address; use `https` over a network) |
+| `DASHBOARD_GATEWAY_ID` | This gateway's name on the dashboard, default `building-<building>` |
+| `AQUA_ENABLE_OUTAGE_SIM` | `1` allows the simulated Internet outage, off by default |
 | `GATEWAY_KEYS` | Full path of the key file. Mounted read-only, never copied into the image |
 | `GATEWAY_TREE` | The [building tree](#building-tree), default `./gateway/building_B.json`. Start a relative path with `./` |
 | `GATEWAY_SERIAL` | The ESP8266's port, default `/dev/ttyUSB0` |
 | `MQTT_PORT` | Port on this computer, default 1883 |
 
 - **Subscribe** from this computer at `127.0.0.1:1883` as `viewer`, or: `docker compose exec mqtt mosquitto_sub -V 5 -u viewer -P <password> -t 'aqua/v1/#' -v`. Topics and payloads: [`../comms/README.md`](../comms/README.md). The broker is not reachable from other computers.
-- **State** is in the `gateway-data` volume. `docker compose down` keeps it; **`down -v` deletes it**, including the record of which packets were already seen and the commands not yet confirmed.
+- **Dashboard:** read it from this computer at `http://127.0.0.1:8000/api/v1/health` ([all addresses](../dashboard/README.md#running-it)). There is no web page yet. It is not reachable from other computers.
+- **State** is in the `gateway-data` and `dashboard-data` volumes. `docker compose down` keeps them; **`down -v` deletes them**, including the record of which packets were already seen, the commands not yet confirmed and the dashboard's history. Do not delete `gateway-data` alone: [the dashboard would ignore new data](../dashboard/README.md#how-the-gateway-sends). If you do, also set a new `DASHBOARD_GATEWAY_ID`.
 - **No ESP8266:** the gateway container cannot start if the serial port does not exist.
 - **After unplugging the ESP8266**, the container may not see the device again, or it may return as another port: check the port, then run `docker compose up -d --force-recreate gateway`.
-- If the broker stops, the gateway keeps working over the radio and reconnects when it returns.
+- If the broker or dashboard stops, the gateway keeps working over the radio. It reconnects to the broker, and sends the dashboard what it kept.
 
 **Tested** with Podman and `podman-compose`, using a copy of this setup with a simulated radio and no serial device. **Not tested:** Docker itself, and passing a real serial port into the container. With rootless Podman your user needs access to the port (the `uucp` or `dialout` group), and the container may also need that group kept (`group_add: [keep-groups]`).
 

@@ -15,6 +15,7 @@ EDGE = [("edge.aqua_edge",), ("tests.test_pi_node",)]
 GATEWAY = [("gateway.topology",), ("gateway.core",), ("tests.test_gateway_analytics",), ("tests.test_gateway_server",),
            ("tests.test_small_buildings",)]
 COMMS = [("comms.common",), ("tests.test_comms",)]
+DASHBOARD = [("dashboard.tests.test_shipper",), ("dashboard.tests.test_server",), ("tests.test_dashboard_link",)]
 QUALITY = [("detection.quality.quality_model",)]
 CONSUMPTION = [("detection.consumption.test_integration",)]
 LEAKAGE = [("detection.leakage.test_regression",), ("detection.leakage.test_offline_supply",),
@@ -43,7 +44,7 @@ def _suite(checks):
 
 # tests
 def test_all():
-    _suite(HAL + EDGE + GATEWAY + COMMS + QUALITY + CONSUMPTION + LEAKAGE + RUNTIME)
+    _suite(HAL + EDGE + GATEWAY + COMMS + DASHBOARD + QUALITY + CONSUMPTION + LEAKAGE + RUNTIME)
 
 
 def test_hal():
@@ -83,7 +84,7 @@ def test_parity():
 
 
 def test_dashboard():
-    _one("dashboard.test_dashboard")
+    _suite(DASHBOARD)
 
 
 # entry points

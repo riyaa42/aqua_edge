@@ -20,7 +20,7 @@ There are two solutions, and `edge/` and `gateway/` each have an entry point for
 
 **The two edge-based programs run; the two cloud-based ones do not.** They are placeholders: each prints "not implemented yet" and exits with an error. `edge-based-node` replays a CSV in place of sensors and runs the node checks on the node. It needs a Raspberry Pi with an SX1278 (options: `uv run edge-based-node --help`); `uv run test-edge` tests it with a fake radio. On the Pi, first run `uv sync --extra pi`, then `uv run pi-radio-test` checks the LoRa module. Wiring and setup: [Running on the Pi](hal/README.md#running-on-the-pi).
 
-The gateway computer reaches the nodes through an ESP8266 on USB. After flashing it, run `uv sync --extra gateway`, then `uv run gate-radio-test` checks the modem (`--port` if it is not `/dev/ttyUSB0`). Wiring and flashing: [Gateway modem (ESP8266)](hal/README.md#gateway-modem-esp8266). To run the gateway, with or without Docker Compose: [Running the server](gateway/README.md#running-the-server). What the two ends publish over MQTT: [`comms/README.md`](comms/README.md).
+The gateway computer reaches the nodes through an ESP8266 on USB. After flashing it, run `uv sync --extra gateway`, then `uv run gate-radio-test` checks the modem (`--port` if it is not `/dev/ttyUSB0`). Wiring and flashing: [Gateway modem (ESP8266)](hal/README.md#gateway-modem-esp8266). `uv run dashboard-server` runs the [dashboard API](dashboard/README.md#running-it). To run the gateway, with or without Docker Compose: [Running the server](gateway/README.md#running-the-server). What the two ends publish over MQTT: [`comms/README.md`](comms/README.md).
 
 ### Tests
 
@@ -33,6 +33,7 @@ A group runs all its checks even if one fails, then lists the failures.
 | `uv run test-edge` | Node self-check |
 | `uv run test-gateway` | Building tree and gateway self-checks, gateway analytics, server and small-building tests |
 | `uv run test-comms` | MQTT communication self-check and tests |
+| `uv run test-dashboard` | Dashboard sender and server tests, and the gateway-to-dashboard link |
 | `uv run test-quality` | Water-quality model self-check |
 | `uv run test-consumption` | Abnormal-consumption integration tests |
 | `uv run test-leakage` | Leak regression, LoRa-outage and supply-robustness tests, and the comparison's scoring self-check |
@@ -68,13 +69,13 @@ The comparisons against the baselines planned in [`planning/experiments.md`](pla
 | `edge/` | The Python code for the Raspberry Pi 3B nodes (`aqua_edge.py`). `edge_based.py` runs a node on the Pi, with its clock, LEDs and buzzer in `board.py`; `cloud_based.py` is a placeholder for the other node entry point |
 | `gateway/` | The Python code for the laptop gateway (`core.py`, `analytics.py`). The gateway reads the building's pipes and valves as a tree of nodes from `gateway/building_B.json` (schema in `gateway/README.md`). `edge_based.py` is the edge-based gateway server, also run with Docker Compose (`compose.yaml`); `cloud_based.py` is a placeholder |
 | `hal/` | Radio packets and SX1278 433 MHz settings (`packet.py`, `lora433.py`) and the hardware adapters (`pi_hal.py`) so the same detection code runs unchanged in simulation and on the Pi; placeholder for the gateway's ESP8266 passthrough |
-| `compose.yaml`, `Dockerfile`, `.env.example` | Docker Compose setup for the building's computer: the gateway server and MQTT broker now, the dashboard later ([how to run](gateway/README.md#run-with-docker-compose)) |
+| `compose.yaml`, `Dockerfile`, `.env.example` | Docker Compose setup for the building's computer: gateway server, MQTT broker and dashboard server ([how to run](gateway/README.md#run-with-docker-compose)) |
 | `comms/` | How the Pi and gateway communicate: the specification (`comms/README.md`) and the code for its MQTT topics and publishing |
 | `detection/` | The three detection subsystems: `quality/` (IS 10500 + `int8` TinyML), `leakage/` (flow/pressure rules + mass balance) and `consumption/` (statistical + Lempel–Ziv) |
 | `detection/quality/` | Offline training, quantization, and testing code for the water-quality neural network (`train_quality.py`, `results.txt`). Holds `quality_model.py` and produces `quality_model.json` for `edge/` |
 | `detection/leakage/` | Standalone leak-rule comparison scripts (`compare_leaks.py`) and documentation comparing flow-based and pressure-based leak detection |
 | `detection/consumption/` | Abnormal water-consumption detection experiments (spikes, night bursts, prolonged zero flow, and Paper [3] Lempel–Ziv compression-rate analytics), scored separately from leaks |
-| `dashboard/` | Buffered gateway-to-dashboard Internet shipper, ingest API server, and mode-aware (`edge` vs `cloud`) monitoring dashboard |
+| `dashboard/` | Buffered gateway-to-dashboard shipper and the ingest and read API server ([how to run](dashboard/README.md#running-it)). The web page is not written yet |
 | `bogo/` | *(Planned, empty for now)* Streams parts of the datasets as real-time sensor data, in place of physical sensors |
 | `tests/` | Gateway analytics tests and the unified runtime replay and benchmark |
 | `tasks/` | The functions behind the `uv run` scripts above |
@@ -90,7 +91,7 @@ This repository uses one `uv` project at the repository root (`pyproject.toml`, 
 uv sync
 ```
 
-The libraries for the simulation, the experiments and some tests (`numpy`, `pandas`, `wntr`, `scikit-learn`, `matplotlib`, `streamlit`) are in the `research` dependency group in `pyproject.toml`. `uv sync` and `uv run` install it by default. The nodes and the gateway do not need it: `--no-default-groups` leaves it out, as the gateway's Docker image does. Add a library to the project's `dependencies` only if a node or the gateway needs it to run.
+The libraries for the simulation, the experiments and some tests (`numpy`, `pandas`, `wntr`, `scikit-learn`, `matplotlib`, `streamlit`) are in the `research` dependency group in `pyproject.toml`. `uv sync` and `uv run` install it by default. The nodes and the gateway do not need it: `--no-default-groups` leaves it out, as the gateway's Docker image does. The dashboard server's libraries are in the `dashboard` group, which its Docker image includes, and the test-only ones in `test`; both are installed by default too. Add a library to the project's `dependencies` only if a node or the gateway needs it to run.
 
 Run every existing simulation check in one go:
 
