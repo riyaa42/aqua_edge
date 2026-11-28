@@ -12,10 +12,10 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HAL = [("hal.packet",), ("hal.lora433",), ("hal.pi_hal", "--check")]
 EDGE = [("edge.aqua_edge",)]
 GATEWAY = [("gateway.topology",), ("gateway.core",), ("tests.test_gateway_analytics",)]
-QUALITY = [("tinyml.quality.quality_model",)]
-CONSUMPTION = [("tinyml.consumption.test_integration",)]
-LEAKAGE = [("tinyml.leakage.test_regression",), ("tinyml.leakage.test_offline_supply",),
-           ("tinyml.leakage.test_supply_robustness",), ("tinyml.leakage.compare_leaks", "--check")]
+QUALITY = [("detection.quality.quality_model",)]
+CONSUMPTION = [("detection.consumption.test_integration",)]
+LEAKAGE = [("detection.leakage.test_regression",), ("detection.leakage.test_offline_supply",),
+           ("detection.leakage.test_supply_robustness",), ("detection.leakage.compare_leaks", "--check")]
 RUNTIME = [("tests.test_unified_runtime",)]
 
 
@@ -72,7 +72,11 @@ def test_runtime():
 
 
 def test_parity():
-    _one("tinyml.quality.test_temporal_parity")
+    _one("detection.quality.test_temporal_parity")
+
+
+def test_dashboard():
+    _one("dashboard.test_dashboard")
 
 
 # entry points
@@ -96,38 +100,42 @@ def pi_node():
     _one("hal.pi_hal")
 
 
+def dashboard_server():
+    _one("dashboard.server")
+
+
 # experiments
 def exp_compare_leaks():
-    _one("tinyml.leakage.compare_leaks")
+    _one("detection.leakage.compare_leaks")
 
 
 def exp_validate_campaign():
-    _one("tinyml.leakage.validate_campaign")
+    _one("detection.leakage.validate_campaign")
 
 
 def exp_validate_swifeed():
-    _one("tinyml.leakage.validate_swifeed")
+    _one("detection.leakage.validate_swifeed")
 
 
 def exp_validate_cache_county():
-    _one("tinyml.leakage.validate_cache_county")
+    _one("detection.leakage.validate_cache_county")
 
 
 def exp_consumption_building_b():
-    _one("tinyml.consumption.eval_building_b")
+    _one("detection.consumption.eval_building_b")
 
 
 def exp_consumption_cache_county():
-    _one("tinyml.consumption.eval_cache_county")
+    _one("detection.consumption.eval_cache_county")
 
 
 def exp_static_anomaly():
-    _one("tinyml.quality.exp1_multivariate_anomaly")
+    _one("detection.quality.exp1_multivariate_anomaly")
 
 
 def exp_temporal_anomaly():
-    _one("tinyml.quality.exp2_temporal_anomaly")
+    _one("detection.quality.exp2_temporal_anomaly")
 
 
 def exp_train_quality():
-    _one("tinyml.quality.train_quality")
+    _one("detection.quality.train_quality")

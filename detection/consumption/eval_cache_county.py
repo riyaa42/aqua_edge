@@ -11,7 +11,7 @@ Chronological split per home (Sites 003, 006, 010, 020, 031):
 Also evaluates controlled anomaly injections on held-out Days 15..30 of Sites 006, 010, 020
 (clearly separated from naturally observed consumption). An injection is scored only if its
 window has data, and a hit only if the same alert does not also fire without the injection.
-Outputs JSON to tinyml/consumption/results/eval_cache_county.json.
+Outputs JSON to detection/consumption/results/eval_cache_county.json.
 """
 import json
 import os
@@ -21,7 +21,7 @@ import pandas as pd
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
 
-from tinyml.consumption.detectors import (  # noqa: E402
+from detection.consumption.detectors import (  # noqa: E402
     StatisticalBaselineDetector,
     StatisticalZeroFlowDetector,
     LZCompressionDetector,

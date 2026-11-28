@@ -377,14 +377,14 @@ sh simulation/live/run_local.sh --scenario simulation/live/scenarios/flow_leaks.
 python3 simulation/live/check_comms.py                                                  # PASS/FAIL report for that run
 python3 -m gateway.core                                                                         # gateway self-check (re-arm, silent node, clock)
 uv run python -m tests.test_gateway_analytics                                           # recovery, replay, block order, restart
-uv run python -m tinyml.leakage.compare_leaks                                           # flow vs pressure, 35 runs (~5 min; see note in the file)
-uv run python -m tinyml.leakage.compare_leaks --check                                   # self-check of the scoring
-uv run python -m tinyml.leakage.test_regression          # 8 leak and supply scenarios
-uv run python -m tinyml.leakage.test_offline_supply      # LoRa outages
-uv run python -m tinyml.leakage.test_supply_robustness   # prints supply-rule behaviour in edge cases
-uv run python -m tinyml.leakage.validate_campaign        # Building B campaign
-uv run python -m tinyml.leakage.validate_swifeed         # needs SWI-FEED data
-uv run python -m tinyml.leakage.validate_cache_county    # needs Cache County data
+uv run python -m detection.leakage.compare_leaks                                           # flow vs pressure, 35 runs (~5 min; see note in the file)
+uv run python -m detection.leakage.compare_leaks --check                                   # self-check of the scoring
+uv run python -m detection.leakage.test_regression          # 8 leak and supply scenarios
+uv run python -m detection.leakage.test_offline_supply      # LoRa outages
+uv run python -m detection.leakage.test_supply_robustness   # prints supply-rule behaviour in edge cases
+uv run python -m detection.leakage.validate_campaign        # Building B campaign
+uv run python -m detection.leakage.validate_swifeed         # needs SWI-FEED data
+uv run python -m detection.leakage.validate_cache_county    # needs Cache County data
 ```
 
-Results of the comparison are written to `tinyml/leakage/results/compare_leaks.csv`.
+Results of the comparison are written to `detection/leakage/results/compare_leaks.csv`.

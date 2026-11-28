@@ -80,9 +80,9 @@ All four detectors in [`detectors.py`](detectors.py) were evaluated causally (1-
 Cache County needs `sites.csv` and `site{003,006,010,020,031}qc_data.csv` from HydroShare in `../../simulation/data/cache_county/`. Evaluation JSON is written to `results/` (ignored by Git).
 
 ```bash
-uv run python -m tinyml.consumption.eval_building_b
-uv run python -m tinyml.consumption.eval_cache_county
-uv run python -m tinyml.consumption.test_integration
+uv run python -m detection.consumption.eval_building_b
+uv run python -m detection.consumption.eval_cache_county
+uv run python -m detection.consumption.test_integration
 ```
 
 See [`validation_results.md`](validation_results.md) for per-category confusion matrices and detailed logs.

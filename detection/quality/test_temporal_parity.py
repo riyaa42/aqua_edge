@@ -1,9 +1,12 @@
 """Parity & integration test: standalone Experiment 2 vs integrated firmware TemporalModel."""
+import json
+import os
+import tempfile
 import numpy as np
 
 
-from tinyml.quality import exp2_temporal_anomaly as E2
-from tinyml.quality.quality_model import TemporalModel, QualityMonitor
+from detection.quality import exp2_temporal_anomaly as E2
+from detection.quality.quality_model import TemporalModel, QualityMonitor
 from hal.packet import pack, unpack, sim_key
 
 
@@ -25,11 +28,16 @@ def main():
     tae.fit(z_trn, epochs=60, lr=0.01)
     tae.quantize_int8(z_trn)
 
-    # Compare on first 3,000 samples from index 0 (identical EWMA initial state z[0])
+    # Compare on first 3,000 samples from index 0 using the exact same quantized parameters
     n_check = 3000
     stand_scores = tae.mse_int8(((z_temp[:n_check] - mu) / sd))
 
-    fw_model = TemporalModel()
+    tmp_path = os.path.join(tempfile.mkdtemp(), "temporal_model.json")
+    with open(tmp_path, "w") as f:
+        json.dump(tae.export_dict(mu, sd, 1.0), f)
+    fw_model = TemporalModel(path=tmp_path)
+    # Also verify committed temporal_model.json loads cleanly
+    _ = TemporalModel()
     fw_scores = []
     for i in range(n_check):
         _, sc, _ = fw_model.step(*gx[i], ts_s=i * 60)

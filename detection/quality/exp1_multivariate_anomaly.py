@@ -12,7 +12,7 @@ Evaluates on:
   B. Kenya Safe + In-Range Correlated Anomalies (strictly inside IS 10500 limits)
   C. Edge suitability (parameter bytes and host inference time per reading)
 
-Writes tinyml/quality/exp1_results.txt.
+Writes detection/quality/exp1_results.txt.
 """
 import csv
 import math
@@ -25,7 +25,7 @@ from sklearn.ensemble import IsolationForest
 from sklearn.metrics import roc_auc_score
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-from tinyml.quality.quality_model import check_standards  # noqa: E402
+from detection.quality.quality_model import check_standards  # noqa: E402
 
 COND_TO_TDS = 0.65
 rng = np.random.default_rng(42)

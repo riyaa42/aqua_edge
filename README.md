@@ -34,7 +34,7 @@ A group runs all its checks even if one fails, then lists the failures.
 | `uv run test-consumption` | Abnormal-consumption integration tests |
 | `uv run test-leakage` | Leak regression, LoRa-outage and supply-robustness tests, and the comparison's scoring self-check |
 | `uv run test-runtime` | Unified runtime replay and benchmark. Also part of `test-all`; both rewrite `tests/unified_runtime_metrics.json` |
-| `uv run test-parity` | Temporal model parity check. Needs the GECCO data, and **currently fails** (difference 7.84e-06, limit 1e-6) |
+| `uv run test-parity` | Temporal model parity check between standalone NumPy `int8` AE and streaming `TemporalModel` (needs GECCO data) |
 
 ### Experiments
 
@@ -42,15 +42,15 @@ Datasets are not in the repository: see the linked README for each area.
 
 | Script | What it does | Needs | Writes |
 |---|---|---|---|
-| `uv run exp-compare-leaks` | Flow vs pressure leak detection, 35 runs ([leakage](tinyml/leakage/README.md)) | | `tinyml/leakage/results/` |
-| `uv run exp-validate-campaign` | Building B leak campaign | | `tinyml/leakage/results/` |
-| `uv run exp-validate-swifeed` | Leak validation on SWI-FEED | SWI-FEED data | `tinyml/leakage/results/` |
-| `uv run exp-validate-cache-county` | Leak validation on household data | Cache County data | `tinyml/leakage/results/` |
-| `uv run exp-consumption-building-b` | Consumption detectors on Building B ([consumption](tinyml/consumption/README.md)) | | `tinyml/consumption/results/` |
-| `uv run exp-consumption-cache-county` | Consumption detectors on household data | Cache County data | `tinyml/consumption/results/` |
-| `uv run exp-static-anomaly` | Experiment 1, static anomaly detection ([quality](tinyml/quality/README.md)) | GECCO, Kenya data | **Overwrites** `tinyml/quality/exp1_results.txt` |
-| `uv run exp-temporal-anomaly` | Experiment 2, temporal anomaly detection | GECCO, Loddon data | **Overwrites** `temporal_model.json` and `exp2_results.txt` in `tinyml/quality/` |
-| `uv run exp-train-quality` | Retrains the water-quality classifier | Kenya, GECCO, CSU ROSS, Loddon data | **Overwrites** `quality_model.json` and `results.txt` in `tinyml/quality/` |
+| `uv run exp-compare-leaks` | Flow vs pressure leak detection, 35 runs ([leakage](detection/leakage/README.md)) | | `detection/leakage/results/` |
+| `uv run exp-validate-campaign` | Building B leak campaign | | `detection/leakage/results/` |
+| `uv run exp-validate-swifeed` | Leak validation on SWI-FEED | SWI-FEED data | `detection/leakage/results/` |
+| `uv run exp-validate-cache-county` | Leak validation on household data | Cache County data | `detection/leakage/results/` |
+| `uv run exp-consumption-building-b` | Consumption detectors on Building B ([consumption](detection/consumption/README.md)) | | `detection/consumption/results/` |
+| `uv run exp-consumption-cache-county` | Consumption detectors on household data | Cache County data | `detection/consumption/results/` |
+| `uv run exp-static-anomaly` | Experiment 1, static anomaly detection ([quality](detection/quality/README.md)) | GECCO, Kenya data | **Overwrites** `detection/quality/exp1_results.txt` |
+| `uv run exp-temporal-anomaly` | Experiment 2, temporal anomaly detection | GECCO, Loddon data | **Overwrites** `temporal_model.json` and `exp2_results.txt` in `detection/quality/` |
+| `uv run exp-train-quality` | Retrains the water-quality classifier | Kenya, GECCO, CSU ROSS, Loddon data | **Overwrites** `quality_model.json` and `results.txt` in `detection/quality/` |
 
 The comparisons against the baselines planned in [`planning/experiments.md`](planning/experiments.md) are not written yet, so they have no script.
 
@@ -65,10 +65,11 @@ The comparisons against the baselines planned in [`planning/experiments.md`](pla
 | `edge/` | The Python code for the Raspberry Pi 3B nodes (`aqua_edge.py`); `edge_based.py` and `cloud_based.py` are placeholders for the two node entry points |
 | `gateway/` | The Python code for the laptop gateway (`core.py`, `analytics.py`). The gateway reads the building's pipes and valves as a tree of nodes from `gateway/building_B.json` (schema in `gateway/README.md`). `edge_based.py` and `cloud_based.py` are placeholders for the two gateway server entry points |
 | `hal/` | Radio packets and SX1278 433 MHz settings (`packet.py`, `lora433.py`) and the hardware adapters (`pi_hal.py`) so the same detection code runs unchanged in simulation and on the Pi; placeholder for the gateway's ESP8266 passthrough |
-| `tinyml/` | The three detection areas: `quality/`, `leakage/` and `consumption/` |
-| `tinyml/quality/` | Offline training, quantization, and testing code for the water-quality neural network (`train_quality.py`, `results.txt`). Holds `quality_model.py` and produces `quality_model.json` for `edge/` |
-| `tinyml/leakage/` | Standalone leak-rule comparison scripts (`compare_leaks.py`) and documentation comparing flow-based and pressure-based leak detection |
-| `tinyml/consumption/` | Abnormal water-consumption detection experiments (spikes, night bursts, prolonged zero flow, and Paper [3] Lempel–Ziv compression-rate analytics), scored separately from leaks |
+| `detection/` | The three detection subsystems: `quality/` (IS 10500 + `int8` TinyML), `leakage/` (flow/pressure rules + mass balance) and `consumption/` (statistical + Lempel–Ziv) |
+| `detection/quality/` | Offline training, quantization, and testing code for the water-quality neural network (`train_quality.py`, `results.txt`). Holds `quality_model.py` and produces `quality_model.json` for `edge/` |
+| `detection/leakage/` | Standalone leak-rule comparison scripts (`compare_leaks.py`) and documentation comparing flow-based and pressure-based leak detection |
+| `detection/consumption/` | Abnormal water-consumption detection experiments (spikes, night bursts, prolonged zero flow, and Paper [3] Lempel–Ziv compression-rate analytics), scored separately from leaks |
+| `dashboard/` | Buffered gateway-to-dashboard Internet shipper, ingest API server, and mode-aware (`edge` vs `cloud`) monitoring dashboard |
 | `bogo/` | *(Planned, empty for now)* Streams parts of the datasets as real-time sensor data, in place of physical sensors |
 | `tests/` | Gateway analytics tests and the unified runtime replay and benchmark |
 | `tasks/` | The functions behind the `uv run` scripts above |

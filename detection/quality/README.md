@@ -6,13 +6,13 @@
 |---|---|---|
 | `quality_model.py` + `quality_model.json` + `temporal_model.json` | Edge node | Offline 3-module water-quality stack (pure Python, `int8`): **Module 1** (`check_standards`, authoritative IS 10500 / *TrinkwV* limits), **Module 2** (`TemporalModel`, 432 B `int8` Temporal AE for subtle temporal anomalies), and **Module 3** (`QualityModel`, 324 B `int8` 4-feature classifier: `NORMAL` / `RUNOFF` / `CHEMICAL`) |
 
-Self-check, from the repository root: `python3 -m tinyml.quality.quality_model`.
+Self-check, from the repository root: `python3 -m detection.quality.quality_model`.
 
 ---
 
 ## 1. Overview
 
-This document explains the design, experiments, evaluation results, and final architecture of JalRakshak's offline water-quality monitoring subsystem in `tinyml/quality/` and `edge/`.
+This document explains the design, experiments, evaluation results, and final architecture of JalRakshak's offline water-quality monitoring subsystem in `detection/quality/` and `edge/`.
 
 Unlike leakage (`../leakage/`) and abnormal water consumption (`../consumption/`), which use lightweight statistical and compression-rate rules, water-quality monitoring combines three separate on-node components:
 1. **Module 1 (`check_standards`):** An authoritative deterministic check against drinking-water limits (IS 10500:2012 or German *TrinkwV*).
@@ -40,7 +40,7 @@ Because these three questions are different, a single model should not be asked 
 
 ## 3. System Architecture
 
-The water-quality subsystem runs on the monitoring node inside [tinyml/quality/quality_model.py](quality_model.py) and [edge/aqua_edge.py](../../edge/aqua_edge.py) (`EdgeRuntime._check_tank`, used by `TankNode` and `combined` mode), and encodes its alerts in [hal/packet.py](../../hal/packet.py).
+The water-quality subsystem runs on the monitoring node inside [detection/quality/quality_model.py](quality_model.py) and [edge/aqua_edge.py](../../edge/aqua_edge.py) (`EdgeRuntime._check_tank`, used by `TankNode` and `combined` mode), and encodes its alerts in [hal/packet.py](../../hal/packet.py).
 
 ```mermaid
 flowchart TD
@@ -79,7 +79,7 @@ Following Sharma et al. [1], the initial goal was a compact on-device neural net
 - **Input features and preprocessing:** `[Temperature_C, pH, log1p(TDS_ppm), log1p(Turbidity_NTU)]`. Log transforms (`log(1 + x)`) compress TDS and turbidity, which span more than three orders of magnitude. Each feature is standardized using the training mean and standard deviation.
 - **Note on earlier branch history:** An earlier version on `live-simulation` dropped temperature (using `3 -> 16 -> 8 -> 3`) because `Unsafe` river/lake rows in the Kenya dataset happened to be warmer (`~26 °C`) than `Safe` tap water (`~22 °C`), which caused the model to associate warmer water with contamination. We restored the 4-input shape from Paper [1] and fixed the shortcut by sampling temperature from an overlapping range across all three classes.
 - **Training and quantization:** Trained in NumPy with Adam (`50` epochs, learning rate `0.01`, batch size `128`) using Stratified 5-Fold Cross-Validation, then quantized post-training to `int8` weights (`-127..127`) and `int32` biases with calibrated activation scales (mirroring TensorFlow Lite Micro).
-- **Firmware inference and footprint:** `QualityModel` in [tinyml/quality/quality_model.py](quality_model.py) runs integer-only matrix multiplications in pure Python (`216` `int8` weights + `27` `int32` biases = `324 bytes`; `1,450 bytes` in [tinyml/quality/quality_model.json](quality_model.json)).
+- **Firmware inference and footprint:** `QualityModel` in [detection/quality/quality_model.py](quality_model.py) runs integer-only matrix multiplications in pure Python (`216` `int8` weights + `27` `int32` biases = `324 bytes`; `1,450 bytes` in [detection/quality/quality_model.json](quality_model.json)).
 - **Why synthetic mixtures were needed:** No public IoT water-quality dataset we found provides verified `RUNOFF` and `CHEMICAL` labels across all four sensor channels. Synthetic mixtures were built from real `Safe` tap-water readings mixed with simulated runoff or chemical solutions and labeled using IS 10500:2012 limits.
 - **Limitation of synthetic labels:** Because labels came from synthetic mixing ranges and IS 10500 cutoffs, the original model could achieve very high cross-validation accuracy by memorizing simple feature ranges rather than learning true physical contamination signatures.
 
@@ -87,7 +87,7 @@ Following Sharma et al. [1], the initial goal was a compact on-device neural net
 
 ## 5. Datasets and Their Roles
 
-All datasets are stored locally under `tinyml/quality/data/` (excluded from Git via `.gitignore`) and are not included in the repository.
+All datasets are stored locally under `detection/quality/data/` (excluded from Git via `.gitignore`) and are not included in the repository.
 
 | Dataset | Source / Reference | Measured Parameters Used | Role in This Project | Key Limitation |
 |---|---|---|---|---|
@@ -108,7 +108,7 @@ All datasets are stored locally under `tinyml/quality/data/` (excluded from Git 
 
 ## 6. Original Classifier Failure Analysis
 
-To test whether the original 3-class classifier learned multi-sensor contamination patterns or simple range shortcuts, we ran an overlap experiment using held-out Kenya source samples. The script and original model for this experiment are not in the current `tinyml/quality/` code, so the figures in this section are a historical record that cannot be regenerated from it:
+To test whether the original 3-class classifier learned multi-sensor contamination patterns or simple range shortcuts, we ran an overlap experiment using held-out Kenya source samples. The script and original model for this experiment are not in the current `detection/quality/` code, so the figures in this section are a historical record that cannot be regenerated from it:
 - In the original training mixtures, `RUNOFF` always had high turbidity (`10-300 NTU`), while `CHEMICAL` was always clear alkaline water (`0.2-3 NTU`, `pH 10.5-12.5`).
 - When tested on an overlapping region (`pH 6.2-8.7`, `TDS 80-600`, `Turbidity 6-60 NTU` for runoff vs. `pH 6.5-10.5`, `TDS 350-1500`, `Turbidity 0.5-12 NTU` for chemical), **`37.4%` (`1,092 / 2,920`) of chemical samples were misclassified as `RUNOFF`**.
 - Inside the strict overlap sub-box (`pH 6.5-8.7`, `TDS 350-600`, `Turbidity 6-12 NTU`), **`100%` (`182 / 182`) of chemical samples were misclassified as `RUNOFF`**.
@@ -119,14 +119,14 @@ To test whether the original 3-class classifier learned multi-sensor contaminati
 
 ## 7. Retraining Methodology
 
-To fix those shortcuts, `tinyml/quality/train_quality.py` was updated as follows. No rows from `GECCO`, `CSU ROSS`, `Loddon`, or `Mendeley 2019` are used for training. The evaluation is not fully independent of GECCO, though: the `NORMAL` pH range was chosen with GECCO's water in mind (item 3), and the script ends by asserting `FPR <= 0.05` on GECCO's IS-compliant normal rows. Turbidity, pH and TDS ranges below for `RUNOFF` and `CHEMICAL` describe the contaminant before it is mixed into tap water. A mixture is labelled with its contaminant class only if it breaks an IS 10500 limit; otherwise it is labelled `NORMAL`. Classes are then balanced.
+To fix those shortcuts, `detection/quality/train_quality.py` was updated as follows. No rows from `GECCO`, `CSU ROSS`, `Loddon`, or `Mendeley 2019` are used for training. The evaluation is not fully independent of GECCO, though: the `NORMAL` pH range was chosen with GECCO's water in mind (item 3), and the script ends by asserting `FPR <= 0.05` on GECCO's IS-compliant normal rows. Turbidity, pH and TDS ranges below for `RUNOFF` and `CHEMICAL` describe the contaminant before it is mixed into tap water. A mixture is labelled with its contaminant class only if it breaks an IS 10500 limit; otherwise it is labelled `NORMAL`. Classes are then balanced.
 1. **Expanded `RUNOFF` regime:** Varied concentrations from `2.5` to `300 NTU`, `pH 5.4-7.4`, and low-to-moderate TDS (`10-250 ppm` endmember).
 2. **Expanded `CHEMICAL` regimes:** Included **acidic** (`pH 2.0-5.0`), **neutral high-TDS** (`pH 6.5-8.5`), and **alkaline** (`pH 9.5-12.5`) chemicals across overlapping turbidity (`0.2-80 NTU`).
 3. **Expanded `NORMAL` municipal pH envelope:** Covered `pH 6.55-8.49` so legitimate alkaline municipal supplies (such as GECCO's IS-compliant `pH ~8.48` water) are represented. The range applies before sensor noise (`sigma = 0.05`) is added.
 4. **Overlapping temperature (`4-35 °C`):** Sampled identically across all three classes.
 5. **Leakage-free 5-fold CV:** Original Kenya `Safe` source rows are shuffled and split into 5 folds *first*; class-balanced synthetic mixtures are then generated independently inside each fold. The exported model is trained separately on the first `80%` of `Safe` rows (file order), with the last `20%` held out.
 
-### Updated Classifier Results (`tinyml/quality/results.txt`)
+### Updated Classifier Results (`detection/quality/results.txt`)
 - **Leakage-free 5-Fold CV (expanded mixtures):** `float32` accuracy `0.9848 +/- 0.0012`, `int8` accuracy `0.9839 +/- 0.0013`, `int8`/`float32` agreement `0.9956`, macro-F1 `0.9839` (`NORMAL` F1 `0.9930`, `RUNOFF` F1 `0.9804`, `CHEMICAL` F1 `0.9784`).
 - **`RUNOFF` vs. `CHEMICAL` overlap zone (held-out sources, `Turb 5-40 NTU` & `pH 5.5-8.5`, `N=1,779`):** `99.44%` 2-class accuracy (`RUNOFF`: `1,748/1,752` correct; `CHEMICAL`: `21/27` correct, `6` misclassified as `RUNOFF`).
 - **Held-out Kenya:** `Safe` (`N=6,048`): `FPR = 0.0000` (`0` flagged); `Unsafe` exceeding IS 10500 (`N=67,855`): `TPR = 0.9998`.
@@ -142,7 +142,7 @@ To fix those shortcuts, `tinyml/quality/train_quality.py` was updated as follows
 
 ## 8. Why Alternative ML Tasks Were Investigated
 
-We directly compared the binary (`NORMAL` vs. `UNSAFE`) predictions of the committed TinyML classifier against the exact IS 10500 `if/else` rules (`unsafe_is10500`), on single unsmoothed readings. No script in `tinyml/quality/` prints this table. The first four rows were computed with `unsafe_is10500` and the committed model (synthetic mixtures regenerated by the `train_quality.py` pipeline); the CSU ROSS row is derived from the rates in `tinyml/quality/results.txt`.
+We directly compared the binary (`NORMAL` vs. `UNSAFE`) predictions of the committed TinyML classifier against the exact IS 10500 `if/else` rules (`unsafe_is10500`), on single unsmoothed readings. No script in `detection/quality/` prints this table. The first four rows were computed with `unsafe_is10500` and the committed model (synthetic mixtures regenerated by the `train_quality.py` pipeline); the CSU ROSS row is derived from the rates in `detection/quality/results.txt`.
 
 | Dataset | Samples (`N`) | Rule Unsafe Rate | TinyML Unsafe Rate | Binary Agreement |
 |---|---|---|---|---|
@@ -163,7 +163,7 @@ We directly compared the binary (`NORMAL` vs. `UNSAFE`) predictions of the commi
 
 ## 9. Experiment 1: Static Multivariate Anomaly Detection
 
-Implemented in [tinyml/quality/exp1_multivariate_anomaly.py](exp1_multivariate_anomaly.py) with results in [tinyml/quality/exp1_results.txt](exp1_results.txt).
+Implemented in [detection/quality/exp1_multivariate_anomaly.py](exp1_multivariate_anomaly.py) with results in [detection/quality/exp1_results.txt](exp1_results.txt).
 
 The `int8` autoencoder uses one fixed activation scale per layer, calibrated on the training set, so a reading's score does not depend on what else is scored with it.
 
@@ -181,7 +181,7 @@ Each detector was trained only on normal readings, calibrated at the 98th percen
 
 ## 10. Experiment 2: Temporal TinyML Anomaly Detection
 
-Implemented in [tinyml/quality/exp2_temporal_anomaly.py](exp2_temporal_anomaly.py) with results in [tinyml/quality/exp2_results.txt](exp2_results.txt).
+Implemented in [detection/quality/exp2_temporal_anomaly.py](exp2_temporal_anomaly.py) with results in [detection/quality/exp2_results.txt](exp2_results.txt).
 
 To absorb slow seasonal drift while catching sudden spikes and persistent changes over time, we built an 8-feature causal temporal representation at each step:
 - **Short-term delta (4 features):** `z_t - EWMA_short(z)` with `alpha_short = 1/15` (~15-minute window at 1-min sampling).
@@ -241,10 +241,10 @@ Because `QualityModel` relies partly on synthetic contamination mixtures, it is 
 
 ## 12. Final Architecture and Design Decisions
 
-JalRakshak's water-quality monitoring separates responsibilities across three offline modules inside `QualityMonitor` ([tinyml/quality/quality_model.py](quality_model.py)):
+JalRakshak's water-quality monitoring separates responsibilities across three offline modules inside `QualityMonitor` ([detection/quality/quality_model.py](quality_model.py)):
 1. **Module 1: Standards Checker (`check_standards`)** - Authoritative, deterministic regulatory safety check against IS 10500 (the default) or *TrinkwV* limits, chosen by the `standard` argument of `QualityMonitor`; `EdgeRuntime` does not expose it, so nodes use IS 10500. Never overridden by ML scores: it confirms, alerts (`QUALITY_LIMIT_VIOLATION`, carrying pH, TDS, turbidity and which limits were broken) and clears independently of both models. It does not need temperature.
-2. **Module 2: Temporal TinyML Autoencoder (`TemporalModel`, [tinyml/quality/temporal_model.json](temporal_model.json))** - Primary ML anomaly detector. Runs on unsmoothed readings with causal EWMA features (15-minute and 12-hour at one reading per minute), suppresses alerts during startup warm-up (`< 15` samples, much shorter than the 12-hour EWMA window), skips readings with any missing/`NaN` value (including temperature), and after a timestamp gap (`> 1800 s`) discards both EWMAs and its confirmation counts and warms up again as at startup, emitting `QUALITY_TEMPORAL_ANOMALY` / `QUALITY_TEMPORAL_CLEARED` separately in [hal/packet.py](../../hal/packet.py).
-3. **Module 3: Three-Class Classifier (`QualityModel`, [tinyml/quality/quality_model.json](quality_model.json))** - Secondary contamination-pattern attribution (`NORMAL`, `RUNOFF`, `CHEMICAL`) after 3-sample moving-average smoothing and 3-reading confirmation. It is skipped when temperature is missing.
+2. **Module 2: Temporal TinyML Autoencoder (`TemporalModel`, [detection/quality/temporal_model.json](temporal_model.json))** - Primary ML anomaly detector. Runs on unsmoothed readings with causal EWMA features (15-minute and 12-hour at one reading per minute), suppresses alerts during startup warm-up (`< 15` samples, much shorter than the 12-hour EWMA window), skips readings with any missing/`NaN` value (including temperature), and after a timestamp gap (`> 1800 s`) discards both EWMAs and its confirmation counts and warms up again as at startup, emitting `QUALITY_TEMPORAL_ANOMALY` / `QUALITY_TEMPORAL_CLEARED` separately in [hal/packet.py](../../hal/packet.py).
+3. **Module 3: Three-Class Classifier (`QualityModel`, [detection/quality/quality_model.json](quality_model.json))** - Secondary contamination-pattern attribution (`NORMAL`, `RUNOFF`, `CHEMICAL`) after 3-sample moving-average smoothing and 3-reading confirmation. It is skipped when temperature is missing.
 
 Their outputs stay separate, interpretable signals (`QUALITY_LIMIT_VIOLATION`, `QUALITY_RUNOFF`, `QUALITY_CHEMICAL`, and `QUALITY_TEMPORAL_ANOMALY`) for the node's alert LED and signed binary LoRa transmission, without treating ML predictions as confirmed root causes. One reading that is both over a limit and classified as contamination raises both alerts. `QUALITY_CLEARED` is sent once no limit or classifier alert remains active. The runtime also calls `hal.buzzer` on a new alert; `hal/pi_hal.py` drives it on the Pi (not verified on hardware in these tests).
 
@@ -266,10 +266,10 @@ Their outputs stay separate, interpretable signals (`QUALITY_LIMIT_VIOLATION`, `
 
 | Component | File(s) | Status |
 |---|---|---|
-| Module 1: Deterministic Standards Checker (`check_standards`) | [tinyml/quality/quality_model.py](quality_model.py) | **Implemented & integrated** |
-| Module 2: Temporal TinyML AE (`TemporalModel`) + export | [tinyml/quality/exp2_temporal_anomaly.py](exp2_temporal_anomaly.py), [tinyml/quality/temporal_model.json](temporal_model.json), [tinyml/quality/quality_model.py](quality_model.py), [hal/packet.py](../../hal/packet.py), [edge/aqua_edge.py](../../edge/aqua_edge.py) | **Implemented & integrated** (parity over `3,000` GECCO samples: max diff `1.11e-16` where the model was exported; the test retrains, so on another machine export again with Experiment 2 first, or small floating-point differences exceed its `1e-6` tolerance) |
-| Module 3: 3-Class Classifier (`QualityModel`) | [tinyml/quality/train_quality.py](train_quality.py), [tinyml/quality/quality_model.json](quality_model.json), [tinyml/quality/quality_model.py](quality_model.py) | **Implemented & integrated** (frozen baseline) |
-| Experiment 1: Static Multivariate Benchmark | [tinyml/quality/exp1_multivariate_anomaly.py](exp1_multivariate_anomaly.py), [tinyml/quality/exp1_results.txt](exp1_results.txt) | **Archived benchmark** (not used in production) |
+| Module 1: Deterministic Standards Checker (`check_standards`) | [detection/quality/quality_model.py](quality_model.py) | **Implemented & integrated** |
+| Module 2: Temporal TinyML AE (`TemporalModel`) + export | [detection/quality/exp2_temporal_anomaly.py](exp2_temporal_anomaly.py), [detection/quality/temporal_model.json](temporal_model.json), [detection/quality/quality_model.py](quality_model.py), [hal/packet.py](../../hal/packet.py), [edge/aqua_edge.py](../../edge/aqua_edge.py) | **Implemented & integrated** (parity over `3,000` GECCO samples: max diff `1.11e-16` where the model was exported; the test retrains, so on another machine export again with Experiment 2 first, or small floating-point differences exceed its `1e-6` tolerance) |
+| Module 3: 3-Class Classifier (`QualityModel`) | [detection/quality/train_quality.py](train_quality.py), [detection/quality/quality_model.json](quality_model.json), [detection/quality/quality_model.py](quality_model.py) | **Implemented & integrated** (frozen baseline) |
+| Experiment 1: Static Multivariate Benchmark | [detection/quality/exp1_multivariate_anomaly.py](exp1_multivariate_anomaly.py), [detection/quality/exp1_results.txt](exp1_results.txt) | **Archived benchmark** (not used in production) |
 | Unified multi-task node execution (`FlatNode` + `TankNode` merge) | [edge/aqua_edge.py](../../edge/aqua_edge.py) | **Implemented in software** (`EdgeRuntime` `combined` mode, for resource validation). Deployment keeps them separate: `QualityMonitor` runs on `TankNode`, not on flat nodes |
 | Local buzzer output | `hal/pi_hal.py` | **Written**, not verified on hardware |
 | Raspberry Pi 3B RAM/CPU/latency hardware benchmark | `hal/` | **Pending** |

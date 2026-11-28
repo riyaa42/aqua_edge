@@ -84,12 +84,12 @@
 | `7d_elevated_noise_drift` (seed `602`) | `0` | `0` | `0` | `0` | **`2`** |
 | **Combined (12 test days)** | **`0`** | **`0`** | **`0`** | **`0`** | **`7` (`0.58/day`)** |
 
-- Only `ABNORMAL_CONSUMPTION` is counted among consumption alerts; the alerts from `tinyml/consumption/detectors.py` are not.
+- Only `ABNORMAL_CONSUMPTION` is counted among consumption alerts; the alerts from `detection/consumption/detectors.py` are not.
 - **Cause of the supply false alarms** (only the first one was traced): the learned floor was `0.68 m`, but the node uses the lower of that and this hour's average minus `0.3 m`, which was `0.53 m` then. On an ordinary pump cycle the level stayed below `0.53 m` for 10 min, shortly before the pump (switch-on level `0.5 m`) refilled the tank, with inflow `0`, which the gateway reads as a supply interruption. All 7 report zero inflow. The same 5 events of seed `501` also occur on commit `990279d`. Not fixed: changing the rule is a design decision.
 
 ---
 
-## 4. Before / After 35-Run Benchmark (`tinyml/leakage/compare_leaks.py`)
+## 4. Before / After 35-Run Benchmark (`detection/leakage/compare_leaks.py`)
 
 | Metric | Prior Baseline (`4f7867a`) | Pre-Fix (`CONT_FLOW_MIN=480`) | Post-Fix (`CONT_FLOW_MIN=180`, `p_mean`) |
 |---|---|---|---|

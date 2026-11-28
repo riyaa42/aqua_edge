@@ -1,7 +1,7 @@
 """Abnormal Household Water-Consumption Detection Subsystem (Offline-First).
 
-Logically separated from pipeline leakage detection (tinyml/leakage/) and
-water-quality TinyML (tinyml/quality/). Implements four comparable detectors:
+Logically separated from pipeline leakage detection (detection/leakage/) and
+water-quality TinyML (detection/quality/). Implements four comparable detectors:
   1. StatisticalBaselineDetector: hourly mean + 3x baseline rule (existing).
   2. StatisticalZeroFlowDetector: adds time-of-day-aware prolonged zero-flow.
   3. LZCompressionDetector: Babazadeh (2019) [3] inspired LZ78 complexity rate

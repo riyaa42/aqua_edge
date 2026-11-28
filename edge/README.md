@@ -1,6 +1,6 @@
 # Aqua Edge: Firmware
 
-The real code for the nodes and the gateway (this folder for the nodes, [`../gateway/`](../gateway/README.md), [`../hal/`](../hal/README.md) and the water-quality model in [`../tinyml/quality/`](../tinyml/quality/README.md)). It only uses the Python standard library, and it never talks to hardware directly: it calls a small hardware layer (`hal`) for sensors, radio, clock, SD card and buzzer/LED. There are no valves yet: the response to a problem is the buzzer, the LED and an alert. A node sounds `hal.buzzer` for its own alerts and for gateway alerts that concern it. There is a hook for valve control (`hal.on_gateway_alert`) that closes nothing. The simulation (`../simulation/`) plugs in a simulated hardware layer; real hardware has its own: `../hal/pi_hal.py` for the Raspberry Pi 3B nodes (USB powered; SX1278 and buzzer drivers, not verified on hardware in these tests). The laptop gateway's layer, which exchanges packets over USB serial with an ESP8266 (the interface to its LoRa module), and the ESP8266 sketch are not in the repository yet, so **no gateway message reaches a real node yet**.
+The real code for the nodes and the gateway (this folder for the nodes, [`../gateway/`](../gateway/README.md), [`../hal/`](../hal/README.md) and the water-quality model in [`../detection/quality/`](../detection/quality/README.md)). It only uses the Python standard library, and it never talks to hardware directly: it calls a small hardware layer (`hal`) for sensors, radio, clock, SD card and buzzer/LED. There are no valves yet: the response to a problem is the buzzer, the LED and an alert. A node sounds `hal.buzzer` for its own alerts and for gateway alerts that concern it. There is a hook for valve control (`hal.on_gateway_alert`) that closes nothing. The simulation (`../simulation/`) plugs in a simulated hardware layer; real hardware has its own: `../hal/pi_hal.py` for the Raspberry Pi 3B nodes (USB powered; SX1278 and buzzer drivers, not verified on hardware in these tests). The laptop gateway's layer, which exchanges packets over USB serial with an ESP8266 (the interface to its LoRa module), and the ESP8266 sketch are not in the repository yet, so **no gateway message reaches a real node yet**.
 
 | File | Runs on | What it does |
 |---|---|---|
@@ -13,9 +13,9 @@ The rest of this README describes the node logic that exists today, which belong
 Checks run once a minute; alarms are sent the moment they fire, summaries every 15 minutes, first tried in each node's time slot.
 Self-check, from the repository root: `python3 -m edge.aqua_edge`. The other modules list their own.
 
-How the leak checks work, with the math: [`../tinyml/leakage/README.md`](../tinyml/leakage/README.md).
-Abnormal consumption detection: [`../tinyml/consumption/README.md`](../tinyml/consumption/README.md).
-Water-quality model, data and test results: [`../tinyml/quality/README.md`](../tinyml/quality/README.md).
+How the leak checks work, with the math: [`../detection/leakage/README.md`](../detection/leakage/README.md).
+Abnormal consumption detection: [`../detection/consumption/README.md`](../detection/consumption/README.md).
+Water-quality model, data and test results: [`../detection/quality/README.md`](../detection/quality/README.md).
 
 ## Hybrid Physical Pi 3B + Dockerized Multi-Node Setup
 
