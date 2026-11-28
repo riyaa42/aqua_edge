@@ -1,4 +1,4 @@
-# Aqua Edge — Three-LED Status Indication System
+# Aqua Edge — Three-LED & Valve Control Specification
 
 ## 1. Objective
 
@@ -170,19 +170,38 @@ The buzzer should not sound continuously during prolonged incidents. Acknowledge
 
 ---
 
-## 7. Important Operational Rules
+## 7. Valve Closure Mapping & Gateway Valve Signaling
 
-- A node can only indicate conditions it knows about through its local detection or gateway messages.
-- A flat node must not indicate a water-quality problem detected by a separate tank node unless that information is explicitly communicated to it.
-- Gateway-originated remote alerts must be considered when selecting the local LED state.
-- Informational gateway messages must not automatically trigger `RED`.
-- A gateway `NODE_SILENT` alert cannot make a powered-off node illuminate its LEDs. The gateway/dashboard should report the node as silent instead.
-- The existing valve callback (`on_gateway_alert`) is only a hook. `RED` illumination must never be interpreted as automatic valve closure.
-- The LED system must not interfere with LoRa transmission, acknowledgements, SD-card buffering, or gateway communication.
+### RED LED & Valve Closure Rule
+- **RED (`R1` or `R2`) = Close Valve:** When a physical shutoff valve is fitted, any active **RED** condition (local detection or gateway `CMD`) commands the valve **closed**.
+- **YELLOW (`Y1` or `Y2`) & GREEN = Keep Valve Open:** Communication/sensor warnings (`YELLOW`) and normal operation (`GREEN`) must **not** close the water valve.
+- **Explicit Re-Open Only:** The valve re-opens only when all active `RED` conditions on that node clear via explicit recovery messages (`*_CLEARED` / `PIPE_LEAK_CLEARED` / `SUPPLY_CLEARED`), never on silence, `ACK`, or buzzer muting.
+- **Current Hardware Status:** In software today, `hal.on_gateway_alert(code, active)` is a callback hook; no physical valve hardware is attached yet (`RED` drives the LED and buzzer).
+
+### How the Gateway Signals Valve Closure (`gateway/core.py` → `edge/aqua_edge.py`)
+1. **Targeted Dispatch (`Gateway.dispatch`):** When the gateway detects a cross-node issue (`PIPE_LEAK`, `SUPPLY_EVENT`, `LEAK_TANK_DRAIN`, `SUPPLY_UNCERTAIN`, or `PIPE_LEAK_CAUSE`), it queues a signed `CMD` packet (`over=0`) to **only the affected nodes**:
+   - `PIPE_LEAK`: tank + flats fed through the suspected junction (`Topology.flats_below()`), or **tank only** if the leak cannot be localized.
+   - `SUPPLY_EVENT` / `LEAK_TANK_DRAIN` / `SUPPLY_UNCERTAIN`: tank node.
+   - `PIPE_LEAK_CAUSE`: the specific flat with a pressure-drop alert during a pipe leak.
+2. **Reliable Delivery (`CMD` / `GOT`):** The gateway repeats queued `CMD`s from its persisted `outbox` until each target node replies with a signed `GOT` confirmation.
+3. **Node Execution (`Node.on_gateway_event`):** On receiving a `CMD` (`over=0`), the node records `self.remote[code] = t` in `<node>_open.json`, switches the LED to **RED**, sounds the intermittent buzzer, and calls **`hal.on_gateway_alert(code, True)`** (where the valve driver closes the valve).
+4. **Gateway Recovery (`*_CLEARED`):** When the gateway confirms recovery (e.g., 2 tight mass-balance blocks for `PIPE_LEAK_CLEARED`, or `SUPPLY_RECOVERED` for `SUPPLY_CLEARED`), it sends the clearing `CMD`. The node removes `code` from `self.remote`, calls **`hal.on_gateway_alert(code, False)`** to reopen the valve (if no other `RED` condition remains active), and transitions the LED back to `YELLOW` or `GREEN`.
+5. **Missed Historical Events (`over=1`):** If an incident started and ended before delivery, the `CMD` arrives marked `over=1` and is logged in `self.missed` without closing the valve.
 
 ---
 
-## 8. Design Principle
+## 8. Important Operational Rules
+
+- A node can only indicate conditions it knows about through its local detection or gateway messages.
+- A flat node must not indicate a water-quality problem detected by a separate tank node unless that information is explicitly communicated to it.
+- Gateway-originated remote alerts must be considered when selecting the local LED state and valve state.
+- Informational gateway messages must not automatically trigger `RED` or close a valve.
+- A gateway `NODE_SILENT` alert cannot make a powered-off node illuminate its LEDs. The gateway/dashboard should report the node as silent instead.
+- The LED and valve hooks must not interfere with LoRa transmission, acknowledgements, SD-card buffering, or gateway communication.
+
+---
+
+## 9. Design Principle
 
 - Colour communicates severity.
 - One blink communicates the first category.
