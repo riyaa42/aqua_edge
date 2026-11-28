@@ -52,7 +52,7 @@ Three rules shape the design:
 
 ## Topics (New)
 
-All topics start with `aqua/v1/{building}/`. `{node}` is a node name such as `B-203` or `B-TANK`; gateway-wide topics use `gateway` in its place.
+All topics start with `aqua/v1/{building}/`. `{node}` is a node name from the [building tree](../gateway/README.md#building-tree), such as `B-203` or `B-TANK`; gateway-wide topics use `gateway` in its place.
 
 | Topic | What it carries | QoS | Retained | Expires | Pi broker | Gateway broker |
 |---|---|---|---|---|---|---|
@@ -252,7 +252,7 @@ Reconsider it if a constrained IP link is added (for example 6LoWPAN or NB-IoT),
 ## Time and versions
 
 - Real nodes use UTC Unix time. A node sets its clock only from a genuine `ACK` newer than the last one it used. The gateway's clock must be right and must not jump back across restarts.
-- Packet lists (`KINDS`, `ALERTS`, `FLAGS`, `FIELDS`, `NAMES`) are append-only: a value's position is its number on air.
+- Packet lists (`KINDS`, `ALERTS`, `FLAGS`, `FIELDS`, `NAMES`) are append-only: a value's position is its number on air. Custom nodes instead use the `radio_id` (128–255) in the building tree.
 - Adding a topic or payload field keeps `v1`. Removing or changing the meaning of one needs `aqua/v2`.
 
 ## Using the module

@@ -66,7 +66,7 @@ from edge.aqua_edge import SUMMARY_S, iso_utc, save_atomic
 from gateway.analytics import FLAT_LEAK_ALERTS, GatewayAnalytics, category_of
 from hal.link import MessageLink
 from hal.lora433 import BEACON_S, AirtimeBudget, retry_wait
-from hal.packet import pack, unpack
+from hal.packet import add_names, pack, unpack
 from gateway.topology import Topology  # noqa: F401  (callers build one for Gateway)
 
 SUPPLY_WINDOW_S = 900          # a SUPPLY_LOW flag from the tank counts for this long
@@ -89,6 +89,7 @@ BY_BLOCK = ("sums", "p_sums", "p_mean_sums", "verdicts")     # {block number: va
 
 class Gateway:
     def __init__(self, hal, topology, enable_commands=True):
+        add_names(topology.radio_ids)           # custom nodes: their numbers on air
         self.hal, self.tree = hal, topology
         self.link = MessageLink(hal, hal.key)
         self.flats, self.tank = set(topology.flats), topology.tank
@@ -190,7 +191,7 @@ class Gateway:
     def _forget_removed_nodes(self):
         """Saved state may name nodes that are no longer in the tree. Left in, one would count
         as silent for ever (pausing the building check) and its commands would never end."""
-        members = self.flats | {self.tank}
+        members = self.tree.devices
         for node in set(self.silent) - members:
             self.analytics._resolve(node, "NODE_SILENT", reason="removed_from_topology")
             del self.silent[node]
@@ -221,10 +222,10 @@ class Gateway:
         if self.boot is None:
             self.boot = int(utc_s)
         if self.last_seen is None:
-            self.last_seen = {n: now for n in self.flats | {self.tank}}
+            self.last_seen = {n: now for n in self.tree.devices}
         if self.resumed:            # the gateway was down, not the nodes: restart their silence timers
             self.resumed = False
-            self.last_seen.update({n: now for n in self.flats | {self.tank} if n not in self.silent})
+            self.last_seen.update({n: now for n in self.tree.devices if n not in self.silent})
         acks, events_before = [], len(self.events)
         messages, bad = self.link.receive()                 # bad: failed authentication or broken packet
         for m in messages:
@@ -359,7 +360,7 @@ class Gateway:
         """The tank, and every flat the leak could cut off: those fed through the suspected
         junction. If the spot is unknown (None), the tank only."""
         junction = self.tree.labels.get(suspected)
-        return sorted((self.tree.flats_below(junction) if junction else set()) | {self.tank})
+        return sorted((self.tree.flats_below(junction) if junction else set()) | {self.tank})   # needs a tank
 
     def dispatch(self, now, ev):
         if not self.enable_commands:
@@ -523,6 +524,9 @@ class Gateway:
         self.tank_abnormal_supply_recv_t, self.flat_leak_recv_t = -1e9, -1e9
 
     def mass_balance(self, now):
+        if not (self.tank and self.flats):      # one side only: nothing to compare. A lone tank's
+            self._forget_old_blocks()           # whole outflow would otherwise look like a pipe leak
+            return
         if self.silent and not self.balance_paused:
             self.balance_paused = True
             self.decide(now, "BALANCE_PAUSED", silent=sorted(self.silent))

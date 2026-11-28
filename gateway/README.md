@@ -41,14 +41,15 @@ B-TANK (tank, valve)
 |---|---|
 | `schema_version` | `1` |
 | `building` | The building's name |
-| `root` | The tank entry; everything else hangs under it |
+| `root` | The tank entry, with everything else under it. A one-node building may instead be a [lone flat](#one-node-and-custom-names) |
 
 | Entry key | Needed | Meaning |
 |---|---|---|
 | `id` | Yes | Unique name. For `tank` and `flat` it is the node's radio name |
-| `type` | Yes | `tank` (the root, exactly one), `junction` (a point in the pipes with no device) or `flat` |
+| `radio_id` | Custom names only | `tank` and `flat`: the number the node's packets carry, 128 to 255 ([custom names](#one-node-and-custom-names)) |
+| `type` | Yes | `tank` (only as the root; none in a lone-flat tree), `junction` (a point in the pipes with no device) or `flat` |
 | `valve` | Yes | `true` if a valve sits on the pipe **just before** this entry. It controls the water to this entry and everything under it |
-| `children` | Junctions | The entries fed through this one. Optional for the tank (the tree needs at least one flat); not allowed on a flat, whose meter would then count their water twice |
+| `children` | Junctions | The entries fed through this one. Optional for the tank (a tank alone is a one-node building); not allowed on a flat, whose meter would then count their water twice |
 | `label` | No, junctions only | Short unique name used in gateway events (`"4"` .. `"G"`); defaults to the `id` |
 
 Other keys are rejected, and so is a junction that uses a radio name. The loader stops with a message naming the problem.
@@ -57,9 +58,47 @@ Other keys are rejected, and so is a junction that uses a radio name. The loader
 
 **What the gateway takes from the tree:** the list of nodes; which junction feeds each flat (the old "floor", no longer read from the flat's name); what is upstream of what, for locating pipe leaks; who is fed through a suspected junction; and the affected-flat count in the maintenance ranking. Pipe lengths, diameters and heights are not in it.
 
-**Adding a node:** add its entry to the JSON file. If the radio name is new, also append it to the end of `NAMES` in `../hal/packet.py` (packets carry a node's position in that list, so never reorder it), give it a key, and update every device. Restart the gateway to load a changed tree. Saved silence timers and unconfirmed alerts for removed nodes are dropped.
+**Adding a node:** add its entry to the JSON file, with a `radio_id` if the name is not built in, give it a key, and give every device that needs it the new tree. Restart the gateway to load a changed tree. Saved silence timers and unconfirmed alerts for removed nodes are dropped.
 
-**Limits:** one tank and one tree per gateway. Branching pipes are allowed, and the self-check covers a two-branch example, but the pressure thresholds have only been tested on building B. The building check compares the tank with all flats together, not branch by branch.
+**Limits:** at most one tank, and one tree per gateway. Branching pipes are allowed, and the self-check covers a two-branch example, but the pressure thresholds have only been tested on building B. The building check compares the tank with all flats together, not branch by branch.
+
+### One node and custom names
+
+Building B's names (`B-TANK`, `B-G01` to `B-404`) are built in: their radio numbers are their positions in `NAMES` in `../hal/packet.py`. **Any other `tank` or `flat` needs a `radio_id`**, a whole number from 128 to 255, used once in the tree. A custom name is 1 to 32 letters, digits, `_`, `.` or `-`, starts with a letter or digit, and is not `GATEWAY`.
+
+Packets carry the number, not the name. **Every device must have the same number for the same node.** If they differ, the receiver rejects the packet (`BAD_PACKET` on the gateway). Changing a node's number means updating both ends.
+
+A four-node demo, one of them the physical Pi:
+
+```json
+{"schema_version": 1, "building": "lab",
+ "root": {"id": "LAB-TANK", "type": "tank", "valve": true, "radio_id": 128, "children": [
+   {"id": "pi-flat", "type": "flat", "valve": true, "radio_id": 129},
+   {"id": "virtual-1", "type": "flat", "valve": true, "radio_id": 130},
+   {"id": "virtual-2", "type": "flat", "valve": true, "radio_id": 131}]}}
+```
+
+A one-node demo is the root alone, either a tank or a flat:
+
+```json
+{"schema_version": 1, "building": "demo",
+ "root": {"id": "pi-flat", "type": "flat", "valve": true, "radio_id": 129}}
+```
+
+| Tree | What the gateway can check |
+|---|---|
+| Tank and flats | Everything. The pipe-leak thresholds were tested only on building B |
+| Tank alone | What the tank reports, silent nodes, clock errors, repeats. **No building check or pipe leak** (there are no flats to compare with). Its incidents show `affected_flats: 0` but are ranked as affecting the whole building |
+| Flat alone | What the flat reports, silent nodes, clock errors, repeats. No building check, pipe leak or supply event |
+
+To use a tree:
+
+1. **Keys.** [Make a key file](../hal/README.md#setting-up-keys) holding `GATEWAY` and every node in the tree.
+2. **Gateway.** `--tree path.json` or `AQUA_TOPOLOGY_PATH` (the dashboard server reads the same variable). With Docker Compose, set `GATEWAY_TREE`. MQTT topics use the tree's `building` unless `--building` is given.
+3. **Pi.** Copy the same tree to it: `uv run edge-based-node pi-flat --keys pi-flat_keys.json --tree lab.json --csv sensors.csv`. The tree decides whether the node runs the tank or the flat checks. The CSV needs columns named for this node, such as `pi-flat:flow_lps`.
+4. **Virtual nodes** started the same way need nothing more. Code that builds a `FlatNode` or `TankNode` itself must first call `hal.packet.add_names(topology.radio_ids)`. The live simulation (`../simulation/live/`) still runs building B only.
+
+**Use a new data folder (`--data`) for a different building.** Saved state remembers which message numbers were seen for each name, so a node reusing a name with a fresh counter would be treated as a replay. With Docker Compose the state is in the `gateway-data` volume, which stays when you change `GATEWAY_TREE`.
 
 ## Running the server
 
@@ -89,6 +128,7 @@ docker compose logs -f gateway
 | `MQTT_GATEWAY_PASSWORD` | The gateway's broker login `gateway`: may only publish |
 | `MQTT_VIEWER_PASSWORD` | The login `viewer` for subscribers: may only read |
 | `GATEWAY_KEYS` | Full path of the key file. Mounted read-only, never copied into the image |
+| `GATEWAY_TREE` | The [building tree](#building-tree), default `./gateway/building_B.json`. Start a relative path with `./` |
 | `GATEWAY_SERIAL` | The ESP8266's port, default `/dev/ttyUSB0` |
 | `MQTT_PORT` | Port on this computer, default 1883 |
 

@@ -17,7 +17,7 @@ import time
 from gateway.core import Gateway
 from gateway.topology import BUILDING_B, Topology
 from hal.gate_hal import open_radio
-from hal.packet import load_keys
+from hal.packet import add_names, load_keys
 
 POLL_S = 0.02           # a packet that has arrived is handled within this long
 MIN_WAIT_S = 0.005
@@ -59,8 +59,9 @@ def parse_args(argv=None):
     ap.add_argument("--keys", required=True, help="key file with GATEWAY and every node (load_keys, hal/packet.py)")
     ap.add_argument("--data", default="gateway-data", help="folder for the gateway's saved state")
     ap.add_argument("--port", default="/dev/ttyUSB0", help="the ESP8266's serial port")
-    ap.add_argument("--tree", default=BUILDING_B, help="the building's pipe tree (JSON)")
-    ap.add_argument("--building", default="B", help="building name in MQTT topics")
+    ap.add_argument("--tree", default=os.environ.get("AQUA_TOPOLOGY_PATH") or BUILDING_B,
+                    help="the building's pipe tree (JSON); also AQUA_TOPOLOGY_PATH")
+    ap.add_argument("--building", help="building name in MQTT topics (default: the tree's)")
     ap.add_argument("--mqtt-host", default=os.environ.get("MQTT_HOST"), help="broker; without it, no MQTT")
     ap.add_argument("--mqtt-port", type=int, default=int(os.environ.get("MQTT_PORT", 1883)))
     ap.add_argument("--mqtt-user", default=os.environ.get("MQTT_USER"))
@@ -68,8 +69,9 @@ def parse_args(argv=None):
 
 
 def load_gateway_keys(path, topology):
+    add_names(topology.radio_ids)           # before load_keys, which refuses unknown names
     keys = load_keys(path)
-    missing = sorted(({"GATEWAY", topology.tank} | topology.flats) - set(keys))
+    missing = sorted(({"GATEWAY"} | topology.devices) - set(keys))
     if missing:
         raise SystemExit(f"{path} has no key for: {', '.join(missing)}")
     return keys
@@ -77,8 +79,12 @@ def load_gateway_keys(path, topology):
 
 def main(argv=None):
     a = parse_args(argv)
-    topology = Topology.load(a.tree)
-    keys = load_gateway_keys(a.keys, topology)
+    try:
+        topology = Topology.load(a.tree)
+        keys = load_gateway_keys(a.keys, topology)
+    except (OSError, ValueError) as e:
+        raise SystemExit(str(e))
+    building = a.building or topology.data["building"]
     os.makedirs(a.data, exist_ok=True)
     try:
         radio = open_radio(a.port)
@@ -90,12 +96,12 @@ def main(argv=None):
     if a.mqtt_host:
         from comms.gateway import GatewayComms, connect
         try:
-            mqtt = connect(a.building, host=a.mqtt_host, port=a.mqtt_port, username=a.mqtt_user,
+            mqtt = connect(building, host=a.mqtt_host, port=a.mqtt_port, username=a.mqtt_user,
                            password=os.environ.get("MQTT_PASSWORD"))
         except ImportError:
             radio.close()
             raise SystemExit("paho-mqtt is not installed: uv sync --extra gateway")
-        GatewayComms(gateway, mqtt, building=a.building).attach()
+        GatewayComms(gateway, mqtt, building=building).attach()
 
     stop = threading.Event()
     for sig in (signal.SIGINT, signal.SIGTERM):         # Ctrl-C and `docker stop`

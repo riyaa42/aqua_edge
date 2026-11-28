@@ -108,7 +108,7 @@ class GatewayAnalytics:
         self.tree = topology
         self.flats = set(topology.flats)
         self.tank = topology.tank
-        self.total_flats = max(len(self.flats), 1)
+        self.total_flats = len(self.flats)      # 0: the tree is a lone tank
         self.incidents = {}        # (target, category) -> dict
         self.resolved_history = [] # list of resolved incident dicts (bounded by MAX_HISTORY)
         self.last_sum = {}         # node -> latest SUM dict
@@ -413,7 +413,9 @@ class GatewayAnalytics:
         for inc in self.correlate_incidents(now):
             cat = inc["category"]
             base = BASE_WEIGHTS.get(cat, 15.0)
-            pop_pts = 20.0 * (inc["affected_flats"] / self.total_flats)
+            # a lone tank has no flats in its tree, and a problem there is the whole building's
+            share = inc["affected_flats"] / self.total_flats if self.total_flats else 1.0
+            pop_pts = 20.0 * share
             dur_min = max(0.0, (now - inc["t_onset"]) / 60.0)
             ev = inc["evidence"]
             mag_pts = 0.0
@@ -461,7 +463,7 @@ class GatewayAnalytics:
         mean_delay = round(self.delay_sum / self.delay_count, 2) if self.delay_count else 0.0
         max_delay = round(self.delay_max, 2)
         nodes = {}
-        for n in sorted(self.flats | {self.tank}):
+        for n in sorted(self.tree.devices):
             nodes[n] = {
                 "status": "silent" if n in gw.silent else "ok",
                 "last_seen": None if gw.last_seen is None else gw.last_seen.get(n),

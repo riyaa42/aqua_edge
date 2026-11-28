@@ -3,7 +3,8 @@
 A parent is upstream of its children: water passes the parent first. "valve": true means a valve
 sits on the pipe just before that entry, so it controls the supply of the entry and of everything
 under it. The root is the tank. "junction" entries are points in the pipes with no monitoring
-device; "flat" entries are leaves. Schema and rules: README.md, "Building tree".
+device; "flat" entries are leaves. A building with a single monitored node is just that entry: a
+tank, or a flat. Schema and rules: README.md, "Building tree".
 
     python3 -m gateway.topology      # self-check
 """
@@ -12,13 +13,13 @@ import os
 
 _GW_DIR = os.path.dirname(os.path.abspath(__file__))
 
-from hal.packet import NAMES
+from hal.packet import NAMES, check_custom_name
 
 SCHEMA_VERSION = 1
 BUILDING_B = os.path.join(_GW_DIR, "building_B.json")
-KEYS = {"tank": {"id", "type", "valve", "children"},
+KEYS = {"tank": {"id", "type", "valve", "children", "radio_id"},
         "junction": {"id", "type", "valve", "children", "label"},
-        "flat": {"id", "type", "valve", "children"}}
+        "flat": {"id", "type", "valve", "children", "radio_id"}}
 RADIO_NAMES = set(NAMES) - {"GATEWAY"}
 
 
@@ -33,11 +34,12 @@ class Topology:
         self.nodes = {}             # id -> the entry as written
         self.parent = {}            # id -> parent id (None for the tank)
         self.labels = {}            # junction label -> junction id
+        self.radio_ids = {}         # custom node -> its radio number (hal.packet.add_names)
         self._add(data["root"], None)
-        self.tank = data["root"]["id"]
+        root = data["root"]
+        self.tank = root["id"] if root["type"] == "tank" else None     # None: a lone flat
         self.flats = {i for i, n in self.nodes.items() if n["type"] == "flat"}
-        if not self.flats:
-            raise ValueError("topology has no flats")
+        self.devices = self.flats | ({self.tank} if self.tank else set())   # the monitoring nodes
 
     def _add(self, node, parent):
         if not isinstance(node, dict) or not isinstance(node.get("id"), str) or not node["id"]:
@@ -45,8 +47,9 @@ class Topology:
         name, kind = node["id"], node.get("type")
         if kind not in KEYS:
             raise ValueError(f"{name}: type must be tank, junction or flat, not {kind!r}")
-        if (kind == "tank") != (parent is None):
-            raise ValueError(f"{name}: the root, and only the root, is the tank")
+        lone_flat = kind == "flat" and parent is None and not node.get("children")
+        if (kind == "tank") != (parent is None) and not lone_flat:
+            raise ValueError(f"{name}: the root, and only the root, is the tank (or the root is a lone flat)")
         unknown = set(node) - KEYS[kind]
         if unknown:
             raise ValueError(f"{name}: unknown keys {sorted(unknown)}")
@@ -67,8 +70,13 @@ class Topology:
                 raise ValueError(f"{name}: label must be unique text")
             self.labels[label] = name
         else:
-            if name not in RADIO_NAMES:
-                raise ValueError(f"{name}: not a radio name (add it to NAMES in hal/packet.py)")
+            if "radio_id" in node:              # a custom name: this is its number on air
+                check_custom_name(name, node["radio_id"])
+                if node["radio_id"] in self.radio_ids.values():
+                    raise ValueError(f"{name}: radio_id {node['radio_id']} used twice")
+                self.radio_ids[name] = node["radio_id"]
+            elif name not in RADIO_NAMES:
+                raise ValueError(f'{name}: not a built-in radio name, so it needs a "radio_id"')
             if kind == "flat" and children:     # its meter would count its children's water twice
                 raise ValueError(f"{name}: a flat cannot have children")
         self.nodes[name], self.parent[name] = node, parent
@@ -84,7 +92,7 @@ class Topology:
         return self.nodes[junction].get("label", junction)
 
     def path_up(self, name):
-        """The entry itself, then everything upstream of it, ending with the tank."""
+        """The entry itself, then everything upstream of it, ending with the root."""
         while name is not None:
             yield name
             name = self.parent[name]
@@ -111,7 +119,7 @@ class Topology:
     def only(self, flats):
         """A copy with just these flats (for tests that run part of a building)."""
         keep = set(flats)
-        if keep - self.flats:
+        if keep - self.flats or (self.tank is None and not keep):
             raise ValueError(f"not in the topology: {sorted(keep - self.flats)}")
 
         def prune(node):
@@ -120,7 +128,7 @@ class Topology:
             kids = [c for c in map(prune, node.get("children", [])) if c]
             return {**node, "children": kids} if kids or node["type"] == "tank" else None
 
-        return Topology({**self.data, "root": prune(self.data["root"])})
+        return Topology(self.data if self.tank is None else {**self.data, "root": prune(self.data["root"])})
 
 
 if __name__ == "__main__":
@@ -176,11 +184,37 @@ if __name__ == "__main__":
     rejected(lambda d, r, j: j["children"][-1].update(label="4"), "label must be unique")
     rejected(lambda d, r, j: flat(j).pop("valve"), '"valve" must be')
     rejected(lambda d, r, j: flat(j).update(valve="yes"), '"valve" must be')
-    rejected(lambda d, r, j: flat(j).update(id="B-501"), "not a radio name")
+    rejected(lambda d, r, j: flat(j).update(id="B-501"), 'needs a "radio_id"')
+    rejected(lambda d, r, j: flat(j).update(radio_id=200), "built in")
+    rejected(lambda d, r, j: flat(j).update(id="X-1", radio_id=127), "from 128 to 255")
+    rejected(lambda d, r, j: flat(j).update(id="X-1", radio_id=256), "from 128 to 255")
+    rejected(lambda d, r, j: flat(j).update(id="X-1", radio_id="200"), "whole number")
+    rejected(lambda d, r, j: flat(j).update(id="X-1", radio_id=True), "whole number")
+    for name in ("X/1", "X+1", "X#", "../x", "gateway", "x" * 33):
+        rejected(lambda d, r, j: flat(j).update(id=name, radio_id=200), "a node name is")
+    rejected(lambda d, r, j: [e.update(id=f"X-{i}", radio_id=200) for i, e in enumerate(j["children"][:2])],
+             "radio_id 200 used twice")
+    rejected(lambda d, r, j: j.update(radio_id=200), "unknown keys")
     rejected(lambda d, r, j: j.update(id="B-TANK"), "used twice")
     rejected(lambda d, r, j: j.update(id="GATEWAY"), "cannot use a radio name")
     rejected(lambda d, r, j: flat(j).update(children=[{"id": "B-402", "type": "flat", "valve": True}]), "cannot have children")
     rejected(lambda d, r, j: j.update(children=[]), "needs children")
-    rejected(lambda d, r, j: r.update(children=[]), "no flats")
     rejected(lambda d, r, j: r.update(children={}), "must be a list")
+    # One monitored node: a tank or a flat, with a built-in name or a custom one
+    def lone(**root):
+        return Topology({"schema_version": 1, "building": "demo", "root": {"valve": True, **root}})
+
+    tank = lone(id="DEMO-TANK", type="tank", radio_id=128)
+    assert (tank.tank, tank.flats, tank.devices, tank.radio_ids) == ("DEMO-TANK", set(), {"DEMO-TANK"}, {"DEMO-TANK": 128})
+    one = lone(id="B-101", type="flat")
+    assert (one.tank, one.flats, one.devices, one.radio_ids) == (None, {"B-101"}, {"B-101"}, {})
+    assert one.section_of("B-101") is None and one.flats_below("B-101") == {"B-101"} and one.valve_for("B-101") == "B-101"
+    assert one.only(["B-101"]).devices == {"B-101"} and tank.only([]).devices == {"DEMO-TANK"}
+    for bad in (dict(id="J", type="junction"),
+                dict(id="B-101", type="flat", children=[{"id": "B-102", "type": "flat", "valve": True}])):
+        try:
+            lone(**bad)
+        except ValueError:
+            continue
+        raise AssertionError(f"accepted as a root: {bad}")
     print("topology self-check passed")

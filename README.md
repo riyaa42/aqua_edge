@@ -31,7 +31,7 @@ A group runs all its checks even if one fails, then lists the failures.
 | `uv run test-all` | Every group below except `test-parity` |
 | `uv run test-hal` | Packet, radio-settings and Pi hardware-layer self-checks |
 | `uv run test-edge` | Node self-check |
-| `uv run test-gateway` | Building tree and gateway self-checks, gateway analytics and server tests |
+| `uv run test-gateway` | Building tree and gateway self-checks, gateway analytics, server and small-building tests |
 | `uv run test-comms` | MQTT communication self-check and tests |
 | `uv run test-quality` | Water-quality model self-check |
 | `uv run test-consumption` | Abnormal-consumption integration tests |

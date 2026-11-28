@@ -49,7 +49,7 @@ from detection.consumption.detectors import StatisticalZeroFlowDetector
 from hal.link import MessageLink
 from hal.lora433 import (BEACON_S, FLUSH_ROUTINE_AFTER_S, FLUSH_STEP_S, HEARD_S,  # noqa: F401
                      AirtimeBudget, airtime_s, retry_wait)
-from hal.packet import NAMES, pack, unpack, violation_mask
+from hal.packet import CUSTOM_IDS, is_node, node_number, pack, unpack, violation_mask
 from detection.quality.quality_model import QualityModel, QualityMonitor, TemporalModel
 
 DAY, HOUR = 86400, 3600
@@ -256,7 +256,9 @@ class Node:
             self.remote, self.remote_ended = saved.get("remote", {}), saved.get("ended", {})
             self.missed, self.commands_done = saved.get("missed", []), saved.get("done", [])
         slot = getattr(hal, "slot", None)
-        self.index = slot[0] if slot else NAMES.index(node_id) if node_id in NAMES else 0
+        # without a slot, the radio number sets this node's turn when stored messages go out. Custom
+        # numbers start again from 0, so their turns are not half a minute late
+        self.index = slot[0] if slot else node_number(node_id) % CUSTOM_IDS[0] if is_node(node_id) else 0
         self.beacon_key = hal.key("GATEWAY")
         # these two keys are all this node can read: packets to or from other nodes are rejected
         self.link = MessageLink(hal, {node_id: self.key, "GATEWAY": self.beacon_key}.get)

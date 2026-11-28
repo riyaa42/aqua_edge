@@ -27,11 +27,13 @@ services:
       MQTT_HOST: mqtt
       MQTT_USER: gateway
       MQTT_PASSWORD: ${MQTT_GATEWAY_PASSWORD:?set it in .env}
+      AQUA_TOPOLOGY_PATH: /run/config/tree.json
     devices:
       - "${GATEWAY_SERIAL:-/dev/ttyUSB0}:/dev/ttyUSB0"       # the ESP8266
     volumes:
       - gateway-data:/data                                    # state: keep it across restarts
       - ${GATEWAY_KEYS:?set it in .env}:/run/keys/gateway_keys.json:ro
+      - ${GATEWAY_TREE:-./gateway/building_B.json}:/run/config/tree.json:ro
     depends_on: [mqtt]                                        # start order only: the radio never waits
     restart: unless-stopped
     read_only: true

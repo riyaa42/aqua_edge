@@ -9,7 +9,7 @@ import json
 import math
 from collections import namedtuple
 
-from hal.packet import ALERTS, FIELDS, FLAGS, NAMES
+from hal.packet import ALERTS, FIELDS, FLAGS, is_node
 
 VERSION = 1
 ROOT = f"aqua/v{VERSION}"
@@ -124,7 +124,7 @@ def message_payload(message):
 def payload_message(channel, node, payload):
     """The reverse: a topic and its payload -> the message dict hal.packet.pack() takes."""
     kind = CHANNEL_KIND[channel]
-    if node not in NAMES:
+    if not is_node(node):
         raise ValueError(f"unknown node {node!r}")
     _check_names(channel, payload)
     return {"k": kind, "n": node, **{k: payload[k] for k in ("s", "t", *FIELDS) if k in payload}}

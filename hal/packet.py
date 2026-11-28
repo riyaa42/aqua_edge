@@ -36,6 +36,7 @@ import functools
 import hashlib
 import hmac
 import json
+import re
 import struct
 
 from cryptography.exceptions import InvalidTag
@@ -51,8 +52,15 @@ HEADER = struct.Struct(">BBII")
 KINDS = ["", "ALERT", "FLAG", "SUM", "ACK",                # up: ALERT FLAG SUM GOT; down: ACK
          "BEACON", "CMD", "GOT"]                                    # down: BEACON CMD (append only)
 GATEWAY_CLOCK = ("ACK", "BEACON")           # kinds whose time field is the gateway's clock, "gt"
-# ponytail: node table for building B; at installation it comes from the same file as the keys
+# A packet names its node by one number. Building B's names are built in: a name's number is its
+# position in NAMES (append only). Any other name needs a number from CUSTOM_IDS, set in the building
+# tree as "radio_id" (gateway/topology.py) and registered with add_names() on both ends.
 NAMES = ["GATEWAY", "B-TANK"] + [f"B-{floor}{flat:02d}" for floor in "G1234" for flat in range(1, 5)]
+CUSTOM_IDS = range(128, 256)            # below 128 is left for more built-in names
+# a custom name is also an MQTT topic level and part of a file name
+CUSTOM_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,31}")
+_numbers = {name: number for number, name in enumerate(NAMES)}
+_names = dict(enumerate(NAMES))
 ALERTS = ["LEAK_NIGHT_FLOW", "LEAK_CONTINUOUS_FLOW", "LEAK_PRESSURE_DROP", "ABNORMAL_CONSUMPTION", "ABNORMAL_SUPPLY",
           "QUALITY_RUNOFF", "QUALITY_CHEMICAL", "QUALITY_LIMIT_VIOLATION", "QUALITY_CLEARED",
           "QUALITY_TEMPORAL_ANOMALY", "QUALITY_TEMPORAL_CLEARED",
@@ -72,6 +80,44 @@ CODES = {"a": ALERTS, "f": FLAGS}
 HEADER_KEYS = {"k", "n", "s", "t", "gt"}
 
 
+def check_custom_name(name, number):
+    """Raises ValueError unless (name, number) can be a custom node."""
+    if name in NAMES:
+        raise ValueError(f"{name} is built in: it has its number already")
+    if not CUSTOM_NAME.fullmatch(name) or name.upper() == "GATEWAY":
+        raise ValueError(f"{name!r}: a node name is 1 to 32 letters, digits, '_', '.' or '-', starting with a "
+                         "letter or digit, and is not GATEWAY")
+    if type(number) is not int or number not in CUSTOM_IDS:
+        raise ValueError(f"{name}: radio_id must be a whole number from {CUSTOM_IDS[0]} to {CUSTOM_IDS[-1]}")
+
+
+def add_names(custom):
+    """Register custom nodes, {name: number}, before packing, reading packets or loading keys.
+    Every device must use the same numbers. Adding the same ones again is fine; giving a name or a
+    number a second meaning raises ValueError, and then nothing is added."""
+    numbers, names = dict(_numbers), dict(_names)
+    for name, number in custom.items():
+        if name not in NAMES:
+            check_custom_name(name, number)
+        if numbers.get(name, number) != number or names.get(number, name) != name:
+            raise ValueError(f"{name} = {number} clashes with {name} = {numbers.get(name)} "
+                             f"or {names.get(number)} = {number}")
+        numbers[name], names[number] = number, name
+    _numbers.update(numbers)
+    _names.update(names)
+
+
+def node_number(name):
+    """The number a node's packets carry. ValueError if the name is not known here."""
+    if name not in _numbers:
+        raise ValueError(f"unknown node {name!r}: not built in, and not added with add_names()")
+    return _numbers[name]
+
+
+def is_node(name):
+    return name in _numbers
+
+
 def violation_mask(violations):
     return sum(1 << VIOLATIONS.index(v) for v in violations)
 
@@ -88,7 +134,7 @@ def load_keys(path):
     (*keys.json is in .gitignore)."""
     with open(path) as f:
         keys = {n: bytes.fromhex(h) for n, h in json.load(f).items()}
-    bad = sorted(n for n, k in keys.items() if n not in NAMES or len(k) != 16)
+    bad = sorted(n for n, k in keys.items() if not is_node(n) or len(k) != 16)
     if bad:
         raise ValueError(f"bad entries in {path}: {bad} (unknown node or key not 16 bytes)")
     return keys
@@ -110,7 +156,7 @@ def pack(m, key):
     if beacon != (m["n"] == "GATEWAY"):
         raise ValueError("a BEACON is from GATEWAY, and GATEWAY sends nothing else")
     t = m["gt"] if m["k"] in GATEWAY_CLOCK else m["t"]
-    header = HEADER.pack(KINDS.index(m["k"]), NAMES.index(m["n"]), m["s"], round(t))
+    header = HEADER.pack(KINDS.index(m["k"]), node_number(m["n"]), m["s"], round(t))
     body = b""
     for name in FIELD_NAMES:
         if name in m:
@@ -130,7 +176,7 @@ def peek(raw):
     """Read the header without checking the tag: who, what, which number. Only for routing
     and logs; never act on it."""
     kind, node, counter, t = HEADER.unpack_from(raw)
-    return {"k": KINDS[kind], "n": NAMES[node], "s": counter, ("gt" if KINDS[kind] in GATEWAY_CLOCK else "t"): t}
+    return {"k": KINDS[kind], "n": _names[node], "s": counter, ("gt" if KINDS[kind] in GATEWAY_CLOCK else "t"): t}
 
 
 def _open(raw, kind, node, key):
@@ -166,7 +212,7 @@ def unpack(raw, key_for):
             pos += 1 + struct.calcsize(FIELDS[name])
             m[name] = CODES[name][v] if name in CODES else round(v, 4) if isinstance(v, float) else v
         return m
-    except (IndexError, struct.error):
+    except (IndexError, KeyError, struct.error):    # KeyError: a node number unknown here
         return None
 
 

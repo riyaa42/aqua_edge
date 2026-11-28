@@ -149,7 +149,13 @@ Real devices need their own random keys. `sim_key` is for simulations and tests 
 (umask 077; uv run python -c 'import json, sys; k = json.load(open(sys.argv[1])); print(json.dumps({n: k[n] for n in (sys.argv[2], "GATEWAY")}))' ~/gateway_keys.json B-203 > ~/B-203_keys.json)
 ```
 
-- Running the first command again **replaces every key**, and each node then needs its new file.
+For a [tree with custom names or fewer nodes](../gateway/README.md#one-node-and-custom-names), make the gateway's file from the tree instead of the first command, then use the second command with the node's name. Use a different file name if you want to keep building B's keys:
+
+```bash
+(umask 077; uv run python -c 'import json, secrets, sys; from gateway.topology import Topology; t = Topology.load(sys.argv[1]); print(json.dumps({n: secrets.token_hex(16) for n in ["GATEWAY", *sorted(t.devices)]}, indent=2))' lab.json > ~/gateway_keys.json)
+```
+
+- Running a command that makes the gateway's file again **replaces every key in it**, and each node then needs its new file.
 - Copy each node's file to that node only, over a connection you trust, and keep it readable by its user only (`chmod 600`).
 - `.gitignore` excludes files ending in `keys.json`, as a safety net only.
 - Anyone who gets a node's file can read that node's packets, including ones recorded earlier, and can pose as that node or as the gateway towards it. Replace that node's key at both ends. If the `GATEWAY` key leaks, replace it everywhere.
