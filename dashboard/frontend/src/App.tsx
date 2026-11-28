@@ -182,7 +182,7 @@ export function App() {
           <header className="flex flex-wrap items-center justify-between gap-3 border border-black bg-[var(--panel-alt)] px-4 py-3">
             <div className="space-y-0.5">
               <h1 className="text-lg font-bold tracking-tight">
-                JalRakshak {topology ? `(${topology.building})` : ""}
+                Aqua Edge {topology ? `(${topology.building})` : ""}
               </h1>
               <p className="text-xs">
                 {mode === "edge" ? "Edge Mode (Local Detection)" : "Cloud Mode (Central Detection)"}

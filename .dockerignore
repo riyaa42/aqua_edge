@@ -5,11 +5,16 @@
 !.python-version
 !comms
 !dashboard
+!dashboard/frontend
+!dashboard/frontend/package.json
+!dashboard/frontend/package-lock.json
 !detection
 !edge
 !gateway
 !hal
 **/__pycache__
+**/node_modules
+dashboard/frontend/dist
 **/data
 **/results
 **/run

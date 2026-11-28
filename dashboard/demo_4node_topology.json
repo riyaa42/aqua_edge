@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "building": "Demo-4Node",
+  "root": {
+    "id": "PI-ROOT",
+    "type": "tank",
+    "valve": true,
+    "radio_id": 128,
+    "children": [
+      { "id": "DOCKER-1", "type": "flat", "valve": true, "radio_id": 129 },
+      { "id": "DOCKER-2", "type": "flat", "valve": true, "radio_id": 130 },
+      { "id": "DOCKER-3", "type": "flat", "valve": true, "radio_id": 131 }
+    ]
+  }
+}
